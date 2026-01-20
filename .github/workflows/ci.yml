@@ -2,24 +2,34 @@ name: ci
 
 on:
   push:
-    branches: ["**"]
+    branches: 
+      - main
   pull_request:
+    branches: 
+      - main
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --all-targets
+        run: cargo build
+      - name: Build examples
+        run: cargo build --examples
       - name: Test
-        run: cargo test --all-targets
-      - name: Build (duckdb)
-        run: cargo build --all-targets --features duckdb
+        run: cargo test
+      - name: Build examples (duckdb)
+        run: cargo build --examples --features duckdb
       - name: Test (duckdb)
-        run: cargo test --all-targets --features duckdb
+        run: cargo test --features duckdb
