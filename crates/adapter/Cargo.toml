@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 corundum-core = { path = "../core" }
 corundum-planner = { path = "../planner" }
-duckdb = { version = "0.10", optional = true }
+duckdb = { version = "1.4.3", optional = true }
 
 [features]
 default = []
