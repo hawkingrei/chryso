@@ -29,6 +29,7 @@ pub fn serialize_expr(expr: &Expr) -> String {
         Expr::Identifier(name) => format!("ident:{name}"),
         Expr::Literal(Literal::String(value)) => format!("string:{value}"),
         Expr::Literal(Literal::Number(value)) => format!("number:{value}"),
+        Expr::Literal(Literal::Bool(value)) => format!("bool:{value}"),
         Expr::BinaryOp { left, op, right } => format!(
             "binop:{:?}({},{})",
             op,

@@ -1,20 +1,23 @@
 #[cfg(feature = "duckdb")]
 fn main() {
-    use corundum::adapter::duckdb::connect;
-    use corundum::adapter::{physical_to_sql, DuckDbAdapter, ExecutorAdapter};
+    use corundum::adapter::{DuckDbAdapter, ExecutorAdapter};
     use corundum::metadata::StatsCache;
     use corundum::optimizer::{CascadesOptimizer, OptimizerConfig};
     use corundum::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use corundum::planner::PlanBuilder;
 
-    let conn = connect().expect("connect");
-    conn.execute("create table users(id integer, name varchar)", [])
+    let adapter = std::sync::Arc::new(DuckDbAdapter::new());
+    let mut stats = StatsCache::new();
+    adapter
+        .execute_sql("create table users(id integer, name varchar)")
         .expect("create");
 
     let parser = SimpleParser::new(ParserConfig {
         dialect: Dialect::Postgres,
     });
-    let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
+    let mut config = OptimizerConfig::default();
+    config.stats_provider = Some(adapter.clone());
+    let optimizer = CascadesOptimizer::new(config);
 
     let dml = [
         "insert into users (id, name) values (1, 'alice'), (2, 'bob')",
@@ -24,28 +27,21 @@ fn main() {
     for sql in dml {
         let stmt = parser.parse(sql).expect("parse");
         let logical = PlanBuilder::build(stmt).expect("plan");
-        let physical = optimizer.optimize(&logical, &StatsCache::new());
-        let _ = physical_to_sql(&physical);
-        let adapter = DuckDbAdapter::new();
+        let physical = optimizer.optimize(&logical, &mut stats);
         let result = adapter.execute(&physical).expect("execute");
         println!("dml result: {:?}", result.rows);
     }
 
+    adapter.analyze_table("users", &mut stats).expect("analyze");
+
     let sql = "select id, name from users order by id";
     let stmt = parser.parse(sql).expect("parse");
     let logical = PlanBuilder::build(stmt).expect("plan");
-    let physical = optimizer.optimize(&logical, &StatsCache::new());
-    let query = physical_to_sql(&physical);
-    let mut stmt = conn.prepare(&query).expect("prepare");
-    let mut rows = stmt.query([]).expect("query");
-    while let Some(row) = rows.next().expect("row") {
-        let id: i64 = row.get(0).expect("id");
-        let name: String = row.get(1).expect("name");
-        println!("{id} {name}");
+    let physical = optimizer.optimize(&logical, &mut stats);
+    let result = adapter.execute(&physical).expect("execute");
+    for row in result.rows {
+        println!("{} {}", row[0], row[1]);
     }
-
-    let adapter = DuckDbAdapter::new();
-    let _ = adapter.execute(&physical);
 }
 
 #[cfg(not(feature = "duckdb"))]

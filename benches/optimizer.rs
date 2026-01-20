@@ -17,8 +17,8 @@ fn bench_optimize_select(b: &mut Bencher) {
     let statement = parser.parse(sql).expect("parse");
     let logical = PlanBuilder::build(statement).expect("plan");
     let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-    let stats = StatsCache::new();
+    let mut stats = StatsCache::new();
     b.iter(|| {
-        let _ = optimizer.optimize(&logical, &stats);
+        let _ = optimizer.optimize(&logical, &mut stats);
     });
 }

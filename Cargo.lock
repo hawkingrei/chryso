@@ -423,6 +423,7 @@ name = "corundum-adapter"
 version = "0.1.0"
 dependencies = [
  "corundum-core",
+ "corundum-metadata",
  "corundum-planner",
  "duckdb",
 ]

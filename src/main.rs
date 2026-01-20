@@ -13,8 +13,8 @@ fn main() {
     let logical = PlanBuilder::build(statement).expect("plan build failed");
 
     let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-    let stats = StatsCache::new();
-    let physical = optimizer.optimize(&logical, &stats);
+    let mut stats = StatsCache::new();
+    let physical = optimizer.optimize(&logical, &mut stats);
 
     println!("Logical Plan:\n{}", logical.explain(0));
     println!("Physical Plan:\n{}", physical.explain(0));

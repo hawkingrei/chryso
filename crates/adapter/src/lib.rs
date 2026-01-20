@@ -1,6 +1,10 @@
 use corundum_core::error::{CorundumError, CorundumResult};
 #[cfg(feature = "duckdb")]
+use corundum_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
+#[cfg(feature = "duckdb")]
 use ::duckdb::params_from_iter;
+#[cfg(feature = "duckdb")]
+use ::duckdb::types::Value as DuckValue;
 use corundum_planner::PhysicalPlan;
 use std::cell::RefCell;
 
@@ -153,12 +157,253 @@ impl ExecutorAdapter for MockAdapter {
     }
 }
 
-pub struct DuckDbAdapter;
+pub struct DuckDbAdapter {
+    #[cfg(feature = "duckdb")]
+    conn: RefCell<::duckdb::Connection>,
+}
 
 impl DuckDbAdapter {
     pub fn new() -> Self {
-        Self
+        #[cfg(feature = "duckdb")]
+        {
+            let conn = crate::duckdb::connect().expect("duckdb connect failed");
+            Self {
+                conn: RefCell::new(conn),
+            }
+        }
+        #[cfg(not(feature = "duckdb"))]
+        {
+            Self {}
+        }
     }
+
+    pub fn try_new() -> CorundumResult<Self> {
+        #[cfg(feature = "duckdb")]
+        {
+            let conn = crate::duckdb::connect()?;
+            Ok(Self {
+                conn: RefCell::new(conn),
+            })
+        }
+        #[cfg(not(feature = "duckdb"))]
+        {
+            Err(CorundumError::new(
+                "duckdb feature is disabled; enable with --features duckdb",
+            ))
+        }
+    }
+
+    #[cfg(feature = "duckdb")]
+    pub fn execute_sql(&self, sql: &str) -> CorundumResult<()> {
+        let conn = self.conn.borrow();
+        conn.execute(sql, [])
+            .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
+        Ok(())
+    }
+
+    #[cfg(feature = "duckdb")]
+    pub fn analyze_table(&self, table: &str, cache: &mut StatsCache) -> CorundumResult<()> {
+        self.execute_sql(&format!("analyze {table}"))?;
+        let conn = self.conn.borrow();
+        let row_count = query_i64(&conn, &format!("select count(*) from {table}"))?;
+        cache.insert_table_stats(
+            table,
+            TableStats {
+                row_count: row_count as f64,
+            },
+        );
+        let columns = fetch_columns(&conn, table)?;
+        for column in columns {
+            let sql = format!(
+                "select count(distinct {column}), coalesce(sum(case when {column} is null then 1 else 0 end), 0) from {table}"
+            );
+            let (distinct_count, nulls) = query_i64_pair(&conn, &sql)?;
+            let null_fraction = if row_count == 0 {
+                0.0
+            } else {
+                nulls as f64 / row_count as f64
+            };
+            cache.insert_column_stats(
+                table,
+                &column,
+                ColumnStats {
+                    distinct_count: distinct_count.max(1) as f64,
+                    null_fraction,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "duckdb")]
+    fn execute_with_duckdb(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
+        let conn = self.conn.borrow();
+        if let PhysicalPlan::Dml { sql } = plan {
+            let affected = conn
+                .execute(sql, [])
+                .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
+            return Ok(QueryResult {
+                columns: vec!["rows_affected".to_string()],
+                rows: vec![vec![affected.to_string()]],
+            });
+        }
+        let sql = crate::physical_to_sql(plan);
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+        let mut rows_iter = stmt
+            .query([])
+            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+        let columns = rows_iter
+            .as_ref()
+            .map(|stmt| stmt.column_names())
+            .unwrap_or_default();
+        let mut rows = Vec::new();
+        while let Some(row) = rows_iter
+            .next()
+            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            let mut values = Vec::new();
+            for idx in 0..columns.len() {
+                let value: DuckValue = row
+                    .get(idx)
+                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                values.push(format_duck_value(&value));
+            }
+            rows.push(values);
+        }
+        Ok(QueryResult { columns, rows })
+    }
+
+    #[cfg(feature = "duckdb")]
+    fn execute_with_duckdb_params(
+        &self,
+        plan: &PhysicalPlan,
+        params: &[ParamValue],
+    ) -> CorundumResult<QueryResult> {
+        if let PhysicalPlan::Dml { .. } = plan {
+            return Err(CorundumError::new(
+                "parameter binding not supported for DML in demo",
+            ));
+        }
+        let sql = crate::physical_to_sql(plan);
+        let conn = self.conn.borrow();
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+        let duck_params = crate::duckdb::params_to_values(params);
+        let mut rows_iter = stmt
+            .query(params_from_iter(duck_params.iter()))
+            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+        let columns = rows_iter
+            .as_ref()
+            .map(|stmt| stmt.column_names())
+            .unwrap_or_default();
+        let mut rows = Vec::new();
+        while let Some(row) = rows_iter
+            .next()
+            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            let mut values = Vec::new();
+            for idx in 0..columns.len() {
+                let value: DuckValue = row
+                    .get(idx)
+                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                values.push(format_duck_value(&value));
+            }
+            rows.push(values);
+        }
+        Ok(QueryResult { columns, rows })
+    }
+}
+
+#[cfg(feature = "duckdb")]
+impl StatsProvider for DuckDbAdapter {
+    fn load_stats(
+        &self,
+        tables: &[String],
+        _columns: &[(String, String)],
+        cache: &mut StatsCache,
+    ) -> CorundumResult<()> {
+        for table in tables {
+            self.analyze_table(table, cache)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "duckdb")]
+fn format_duck_value(value: &DuckValue) -> String {
+    match value {
+        DuckValue::Null => "null".to_string(),
+        DuckValue::Boolean(v) => v.to_string(),
+        DuckValue::TinyInt(v) => v.to_string(),
+        DuckValue::SmallInt(v) => v.to_string(),
+        DuckValue::Int(v) => v.to_string(),
+        DuckValue::BigInt(v) => v.to_string(),
+        DuckValue::HugeInt(v) => v.to_string(),
+        DuckValue::UTinyInt(v) => v.to_string(),
+        DuckValue::USmallInt(v) => v.to_string(),
+        DuckValue::UInt(v) => v.to_string(),
+        DuckValue::UBigInt(v) => v.to_string(),
+        DuckValue::Float(v) => v.to_string(),
+        DuckValue::Double(v) => v.to_string(),
+        DuckValue::Decimal(v) => v.to_string(),
+        DuckValue::Timestamp(_, v) => v.to_string(),
+        DuckValue::Text(v) => v.clone(),
+        DuckValue::Blob(v) => format!("{v:?}"),
+        DuckValue::Date32(v) => v.to_string(),
+        DuckValue::Time64(_, v) => v.to_string(),
+        DuckValue::Interval { months, days, nanos } => {
+            format!("interval({months},{days},{nanos})")
+        }
+        DuckValue::List(items) => {
+            let rendered = items.iter().map(format_duck_value).collect::<Vec<_>>();
+            format!("[{}]", rendered.join(", "))
+        }
+        DuckValue::Enum(v) => v.clone(),
+        DuckValue::Struct(values) => format!("{values:?}"),
+        DuckValue::Array(values) => {
+            let rendered = values.iter().map(format_duck_value).collect::<Vec<_>>();
+            format!("[{}]", rendered.join(", "))
+        }
+        DuckValue::Map(values) => format!("{values:?}"),
+        DuckValue::Union(value) => format_duck_value(value),
+    }
+}
+
+#[cfg(feature = "duckdb")]
+fn fetch_columns(conn: &::duckdb::Connection, table: &str) -> CorundumResult<Vec<String>> {
+    let mut stmt = conn
+        .prepare(&format!("pragma table_info('{table}')"))
+        .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+    let mut columns = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+        let name: String = row
+            .get(1)
+            .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+        columns.push(name);
+    }
+    Ok(columns)
+}
+
+#[cfg(feature = "duckdb")]
+fn query_i64(conn: &::duckdb::Connection, sql: &str) -> CorundumResult<i64> {
+    conn.query_row(sql, [], |row| row.get(0))
+        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))
+}
+
+#[cfg(feature = "duckdb")]
+fn query_i64_pair(conn: &::duckdb::Connection, sql: &str) -> CorundumResult<(i64, i64)> {
+    conn.query_row(sql, [], |row| {
+        let a: i64 = row.get(0)?;
+        let b: i64 = row.get(1)?;
+        Ok((a, b))
+    })
+    .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))
 }
 
 impl ExecutorAdapter for DuckDbAdapter {
@@ -166,7 +411,7 @@ impl ExecutorAdapter for DuckDbAdapter {
         self.validate_plan(plan)?;
         #[cfg(feature = "duckdb")]
         {
-            execute_with_duckdb(plan)
+            self.execute_with_duckdb(plan)
         }
         #[cfg(not(feature = "duckdb"))]
         {
@@ -185,7 +430,7 @@ impl ExecutorAdapter for DuckDbAdapter {
         self.validate_plan(plan)?;
         #[cfg(feature = "duckdb")]
         {
-            execute_with_duckdb_params(plan, params)
+            self.execute_with_duckdb_params(plan, params)
         }
         #[cfg(not(feature = "duckdb"))]
         {
@@ -195,86 +440,6 @@ impl ExecutorAdapter for DuckDbAdapter {
             ))
         }
     }
-}
-
-#[cfg(feature = "duckdb")]
-fn execute_with_duckdb(plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
-    let conn = crate::duckdb::connect()?;
-    if let PhysicalPlan::Dml { sql } = plan {
-        let affected = conn
-            .execute(sql, [])
-            .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
-        return Ok(QueryResult {
-            columns: vec!["rows_affected".to_string()],
-            rows: vec![vec![affected.to_string()]],
-        });
-    }
-    let sql = crate::physical_to_sql(plan);
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
-    let columns = stmt
-        .column_names()
-        .iter()
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>();
-    let mut rows = Vec::new();
-    let mut rows_iter = stmt
-        .query([])
-        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
-    while let Some(row) = rows_iter
-        .next()
-        .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
-        let mut values = Vec::new();
-        for idx in 0..columns.len() {
-            let value: String = row
-                .get(idx)
-                .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
-            values.push(value);
-        }
-        rows.push(values);
-    }
-    Ok(QueryResult { columns, rows })
-}
-
-#[cfg(feature = "duckdb")]
-fn execute_with_duckdb_params(
-    plan: &PhysicalPlan,
-    params: &[ParamValue],
-) -> CorundumResult<QueryResult> {
-    if let PhysicalPlan::Dml { .. } = plan {
-        return Err(CorundumError::new(
-            "parameter binding not supported for DML in demo",
-        ));
-    }
-    let sql = crate::physical_to_sql(plan);
-    let conn = crate::duckdb::connect()?;
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
-    let duck_params = crate::duckdb::params_to_values(params);
-    let columns = stmt
-        .column_names()
-        .iter()
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>();
-    let mut rows = Vec::new();
-    let mut rows_iter = stmt
-        .query(params_from_iter(duck_params.iter()))
-        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
-    while let Some(row) = rows_iter
-        .next()
-        .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
-        let mut values = Vec::new();
-        for idx in 0..columns.len() {
-            let value: String = row
-                .get(idx)
-                .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
-            values.push(value);
-        }
-        rows.push(values);
-    }
-    Ok(QueryResult { columns, rows })
 }
 
 pub fn physical_to_sql(plan: &PhysicalPlan) -> String {

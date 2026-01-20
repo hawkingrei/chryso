@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 corundum-core = { path = "../core" }
 corundum-planner = { path = "../planner" }
+corundum-metadata = { path = "../metadata" }
 duckdb = { version = "1.4.3", optional = true }
 
 [features]

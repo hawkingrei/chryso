@@ -12,6 +12,7 @@ impl TypeInferencer for SimpleTypeInferencer {
         match expr {
             Expr::Literal(Literal::Number(_)) => DataType::Float,
             Expr::Literal(Literal::String(_)) => DataType::String,
+            Expr::Literal(Literal::Bool(_)) => DataType::Bool,
             Expr::Identifier(_) => DataType::Unknown,
             Expr::UnaryOp { op, .. } => match op {
                 UnaryOperator::Not => DataType::Bool,

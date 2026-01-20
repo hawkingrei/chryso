@@ -9,6 +9,7 @@
 
 ## Steps
 TODO: Add Bazel build support for workspace targets.
+TODO: Use DuckDB `SUMMARIZE <table>` output to backfill StatsCache (histogram/top-N if available).
 1. done - Confirm scope and MVP success criteria
 2. done - Define module boundaries and public API surface
 3. in-progress - Establish error model and diagnostic spans
