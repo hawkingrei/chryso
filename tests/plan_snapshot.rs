@@ -42,8 +42,8 @@ fn snapshot_plan_explain() {
         let stmt = parser.parse(&case.sql).expect("parse");
         let logical = PlanBuilder::build(stmt).expect("plan");
         let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-        let stats = StatsCache::new();
-        let physical = optimizer.optimize(&logical, &stats);
+        let mut stats = StatsCache::new();
+        let physical = optimizer.optimize(&logical, &mut stats);
         let output = PlanTestOutput {
             logical_explain: logical.explain(0).lines().map(|line| line.to_string()).collect(),
             physical_explain: physical.explain(0).lines().map(|line| line.to_string()).collect(),

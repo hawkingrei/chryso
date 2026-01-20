@@ -38,7 +38,9 @@ impl Default for RuleSet {
         RuleSet::new()
             .with_rule(MergeFilters)
             .with_rule(PruneProjection)
+            .with_rule(MergeProjections)
             .with_rule(FilterPushdown)
+            .with_rule(FilterJoinPushdown)
             .with_rule(NormalizePredicates)
             .with_rule(JoinCommute)
             .with_rule(AggregatePredicatePushdown)
@@ -127,6 +129,52 @@ impl Rule for PruneProjection {
     }
 }
 
+pub struct MergeProjections;
+
+impl Rule for MergeProjections {
+    fn name(&self) -> &str {
+        "merge_projections"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Projection { exprs, input } = plan else {
+            return Vec::new();
+        };
+        let LogicalPlan::Projection {
+            exprs: inner_exprs,
+            input: inner_input,
+        } = input.as_ref()
+        else {
+            return Vec::new();
+        };
+        if projection_subset(exprs, inner_exprs) {
+            return vec![LogicalPlan::Projection {
+                exprs: exprs.clone(),
+                input: inner_input.clone(),
+            }];
+        }
+        Vec::new()
+    }
+}
+
+fn projection_subset(outer: &[Expr], inner: &[Expr]) -> bool {
+    let inner_names = inner
+        .iter()
+        .filter_map(|expr| match expr {
+            Expr::Identifier(name) => Some(name),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    if inner_names.is_empty() {
+        return false;
+    }
+    outer.iter().all(|expr| match expr {
+        Expr::Identifier(name) => inner_names.contains(name),
+        Expr::Wildcard => true,
+        _ => false,
+    })
+}
+
 pub struct FilterPushdown;
 
 impl Rule for FilterPushdown {
@@ -152,6 +200,122 @@ impl Rule for FilterPushdown {
             }),
         };
         vec![pushed]
+    }
+}
+
+pub struct FilterJoinPushdown;
+
+impl Rule for FilterJoinPushdown {
+    fn name(&self) -> &str {
+        "filter_join_pushdown"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Filter { predicate, input } = plan else {
+            return Vec::new();
+        };
+        let LogicalPlan::Join {
+            join_type,
+            left,
+            right,
+            on,
+        } = input.as_ref()
+        else {
+            return Vec::new();
+        };
+        if !matches!(join_type, corundum_core::ast::JoinType::Inner) {
+            return Vec::new();
+        }
+
+        let left_tables = collect_tables(left.as_ref());
+        let right_tables = collect_tables(right.as_ref());
+        let mut left_preds = Vec::new();
+        let mut right_preds = Vec::new();
+        let mut remaining = Vec::new();
+
+        for conjunct in split_conjuncts(predicate) {
+            let idents = collect_identifiers(&conjunct);
+            if idents.is_empty() {
+                remaining.push(conjunct);
+                continue;
+            }
+            let mut side = None;
+            let mut ambiguous = false;
+            for ident in &idents {
+                let Some(prefix) = table_prefix(ident) else {
+                    ambiguous = true;
+                    break;
+                };
+                let in_left = left_tables.contains(prefix);
+                let in_right = right_tables.contains(prefix);
+                if in_left && !in_right {
+                    side = match side {
+                        None => Some(Side::Left),
+                        Some(Side::Left) => Some(Side::Left),
+                        Some(Side::Right) => {
+                            ambiguous = true;
+                            break;
+                        }
+                    };
+                } else if in_right && !in_left {
+                    side = match side {
+                        None => Some(Side::Right),
+                        Some(Side::Right) => Some(Side::Right),
+                        Some(Side::Left) => {
+                            ambiguous = true;
+                            break;
+                        }
+                    };
+                } else {
+                    ambiguous = true;
+                    break;
+                }
+            }
+            if ambiguous {
+                remaining.push(conjunct);
+                continue;
+            }
+            match side {
+                Some(Side::Left) => left_preds.push(conjunct),
+                Some(Side::Right) => right_preds.push(conjunct),
+                None => remaining.push(conjunct),
+            }
+        }
+
+        if left_preds.is_empty() && right_preds.is_empty() {
+            return Vec::new();
+        }
+
+        let new_left = if let Some(expr) = combine_conjuncts(left_preds) {
+            LogicalPlan::Filter {
+                predicate: expr,
+                input: left.clone(),
+            }
+        } else {
+            *left.clone()
+        };
+        let new_right = if let Some(expr) = combine_conjuncts(right_preds) {
+            LogicalPlan::Filter {
+                predicate: expr,
+                input: right.clone(),
+            }
+        } else {
+            *right.clone()
+        };
+        let joined = LogicalPlan::Join {
+            join_type: *join_type,
+            left: Box::new(new_left),
+            right: Box::new(new_right),
+            on: on.clone(),
+        };
+        if let Some(expr) = combine_conjuncts(remaining) {
+            vec![LogicalPlan::Filter {
+                predicate: expr,
+                input: Box::new(joined),
+            }]
+        } else {
+            vec![joined]
+        }
     }
 }
 
@@ -285,8 +449,8 @@ impl Rule for TopNRule {
 #[cfg(test)]
 mod tests {
     use super::{
-        FilterPushdown, LimitPushdown, MergeFilters, NormalizePredicates, PruneProjection, Rule,
-        TopNRule,
+        FilterJoinPushdown, FilterPushdown, LimitPushdown, MergeFilters, MergeProjections,
+        NormalizePredicates, PruneProjection, Rule, TopNRule,
     };
     use corundum_core::ast::{BinaryOperator, Expr};
     use corundum_planner::LogicalPlan;
@@ -405,6 +569,81 @@ mod tests {
         let results = rule.apply(&plan);
         assert_eq!(results.len(), 1);
     }
+
+    #[test]
+    fn merge_projections_keeps_outer() {
+        let plan = LogicalPlan::Projection {
+            exprs: vec![Expr::Identifier("id".to_string())],
+            input: Box::new(LogicalPlan::Projection {
+                exprs: vec![Expr::Identifier("id".to_string()), Expr::Identifier("name".to_string())],
+                input: Box::new(LogicalPlan::Scan {
+                    table: "t".to_string(),
+                }),
+            }),
+        };
+        let rule = MergeProjections;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Projection { exprs, .. } = &results[0] else {
+            panic!("expected projection");
+        };
+        assert_eq!(exprs.len(), 1);
+    }
+
+    #[test]
+    fn filter_join_pushdown_left() {
+        let plan = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("t1.id".to_string())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(1.0))),
+            },
+            input: Box::new(LogicalPlan::Join {
+                join_type: corundum_core::ast::JoinType::Inner,
+                left: Box::new(LogicalPlan::Scan {
+                    table: "t1".to_string(),
+                }),
+                right: Box::new(LogicalPlan::Scan {
+                    table: "t2".to_string(),
+                }),
+                on: Expr::Identifier("t1.id = t2.id".to_string()),
+            }),
+        };
+        let rule = FilterJoinPushdown;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Join { left, .. } = &results[0] else {
+            panic!("expected join");
+        };
+        assert!(matches!(left.as_ref(), LogicalPlan::Filter { .. }));
+    }
+
+    #[test]
+    fn filter_join_pushdown_keeps_cross_predicate() {
+        let plan = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("t1.id".to_string())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Identifier("t2.id".to_string())),
+            },
+            input: Box::new(LogicalPlan::Join {
+                join_type: corundum_core::ast::JoinType::Inner,
+                left: Box::new(LogicalPlan::Scan {
+                    table: "t1".to_string(),
+                }),
+                right: Box::new(LogicalPlan::Scan {
+                    table: "t2".to_string(),
+                }),
+                on: Expr::Identifier("t1.id = t2.id".to_string()),
+            }),
+        };
+        let rule = FilterJoinPushdown;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Filter { .. } = &results[0] else {
+            panic!("expected filter");
+        };
+    }
 }
 
 pub struct AggregatePredicatePushdown;
@@ -452,6 +691,63 @@ fn collect_identifiers(expr: &Expr) -> std::collections::HashSet<String> {
     let mut idents = std::collections::HashSet::new();
     collect_identifiers_inner(expr, &mut idents);
     idents
+}
+
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+}
+
+fn split_conjuncts(expr: &Expr) -> Vec<Expr> {
+    match expr {
+        Expr::BinaryOp { left, op, right } if matches!(op, BinaryOperator::And) => {
+            let mut out = split_conjuncts(left);
+            out.extend(split_conjuncts(right));
+            out
+        }
+        _ => vec![expr.clone()],
+    }
+}
+
+fn combine_conjuncts(exprs: Vec<Expr>) -> Option<Expr> {
+    let mut iter = exprs.into_iter();
+    let first = iter.next()?;
+    Some(iter.fold(first, |left, right| Expr::BinaryOp {
+        left: Box::new(left),
+        op: BinaryOperator::And,
+        right: Box::new(right),
+    }))
+}
+
+fn table_prefix(ident: &str) -> Option<&str> {
+    ident.split_once('.').map(|(prefix, _)| prefix)
+}
+
+fn collect_tables(plan: &LogicalPlan) -> std::collections::HashSet<String> {
+    let mut tables = std::collections::HashSet::new();
+    collect_tables_inner(plan, &mut tables);
+    tables
+}
+
+fn collect_tables_inner(plan: &LogicalPlan, tables: &mut std::collections::HashSet<String>) {
+    match plan {
+        LogicalPlan::Scan { table } | LogicalPlan::IndexScan { table, .. } => {
+            tables.insert(table.clone());
+        }
+        LogicalPlan::Dml { .. } => {}
+        LogicalPlan::Filter { input, .. }
+        | LogicalPlan::Projection { input, .. }
+        | LogicalPlan::Aggregate { input, .. }
+        | LogicalPlan::Distinct { input }
+        | LogicalPlan::TopN { input, .. }
+        | LogicalPlan::Sort { input, .. }
+        | LogicalPlan::Limit { input, .. } => collect_tables_inner(input, tables),
+        LogicalPlan::Join { left, right, .. } => {
+            collect_tables_inner(left, tables);
+            collect_tables_inner(right, tables);
+        }
+    }
 }
 
 fn collect_identifiers_inner(expr: &Expr, idents: &mut std::collections::HashSet<String>) {

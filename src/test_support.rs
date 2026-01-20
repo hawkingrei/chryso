@@ -20,8 +20,8 @@ pub fn execute_with_adapter<A: ExecutorAdapter>(
     let statement = parser.parse(sql)?;
     let logical = PlanBuilder::build(statement)?;
     let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-    let stats = StatsCache::new();
-    let physical = optimizer.optimize(&logical, &stats);
+    let mut stats = StatsCache::new();
+    let physical = optimizer.optimize(&logical, &mut stats);
     let result = adapter.execute(&physical)?;
     Ok(TestRun {
         logical_explain: logical.explain(0),
@@ -40,8 +40,8 @@ pub fn explain(sql: &str, dialect: Dialect) -> CorundumResult<(String, String)> 
     let statement = parser.parse(sql)?;
     let logical = PlanBuilder::build(statement)?;
     let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-    let stats = StatsCache::new();
-    let physical = optimizer.optimize(&logical, &stats);
+    let mut stats = StatsCache::new();
+    let physical = optimizer.optimize(&logical, &mut stats);
     Ok((logical.explain(0), physical.explain(0)))
 }
 

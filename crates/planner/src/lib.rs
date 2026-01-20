@@ -87,6 +87,7 @@ pub struct PlanBuilder;
 
 impl PlanBuilder {
     pub fn build(statement: Statement) -> CorundumResult<LogicalPlan> {
+        let statement = corundum_core::ast::normalize_statement(&statement);
         match statement {
             Statement::Select(select) => build_select(select),
             Statement::Explain(_) => Err(corundum_core::CorundumError::new(
@@ -504,7 +505,7 @@ mod tests {
         let physical = corundum_optimizer::CascadesOptimizer::new(
             corundum_optimizer::OptimizerConfig::default(),
         )
-        .optimize(&logical, &corundum_metadata::StatsCache::new());
+        .optimize(&logical, &mut corundum_metadata::StatsCache::new());
         let costed = physical.explain_costed(0, &UnitCostModel);
         assert!(costed.contains("cost="));
     }

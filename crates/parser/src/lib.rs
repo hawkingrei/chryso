@@ -41,7 +41,8 @@ impl SqlParser for SimpleParser {
     fn parse(&self, sql: &str) -> CorundumResult<Statement> {
         let tokens = tokenize(sql, self.config.dialect)?;
         let mut parser = Parser::new(tokens, self.config.dialect);
-        parser.parse_statement()
+        let stmt = parser.parse_statement()?;
+        Ok(corundum_core::ast::normalize_statement(&stmt))
     }
 }
 
@@ -102,6 +103,8 @@ enum Keyword {
     Asc,
     Desc,
     Distinct,
+    True,
+    False,
 }
 
 struct Parser {
@@ -544,6 +547,8 @@ impl Parser {
                     Ok(Expr::Identifier(name))
                 }
             }
+            Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
+            Some(Token::Keyword(Keyword::False)) => Ok(Expr::Literal(Literal::Bool(false))),
             Some(Token::Number(value)) => Ok(Expr::Literal(Literal::Number(
                 value
                     .parse()
@@ -788,6 +793,8 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Partition => "partition",
         Keyword::Exists => "exists",
         Keyword::In => "in",
+        Keyword::True => "true",
+        Keyword::False => "false",
     }
 }
 
@@ -991,6 +998,8 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "desc" => Some(Keyword::Desc),
         "distinct" => Some(Keyword::Distinct),
         "in" => Some(Keyword::In),
+        "true" => Some(Keyword::True),
+        "false" => Some(Keyword::False),
         _ => None,
     }
 }
@@ -1202,6 +1211,22 @@ mod tests {
             Some(Expr::InSubquery { .. }) => {}
             _ => panic!("expected in subquery"),
         }
+    }
+
+    #[test]
+    fn parse_boolean_literal() {
+        let sql = "select * from users where active = true and deleted = false";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::And));
     }
 
     #[test]

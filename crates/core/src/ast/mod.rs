@@ -124,6 +124,7 @@ pub enum Expr {
 pub enum Literal {
     String(String),
     Number(f64),
+    Bool(bool),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -160,6 +161,9 @@ impl Expr {
             Expr::Identifier(name) => name.clone(),
             Expr::Literal(Literal::String(value)) => format!("'{}'", value),
             Expr::Literal(Literal::Number(value)) => value.to_string(),
+            Expr::Literal(Literal::Bool(value)) => {
+                if *value { "true".to_string() } else { "false".to_string() }
+            }
             Expr::BinaryOp { left, op, right } => {
                 let op_str = match op {
                     BinaryOperator::Eq => "=",
@@ -220,7 +224,7 @@ impl Expr {
     }
 
     pub fn normalize(&self) -> Expr {
-        match self {
+        let normalized = match self {
             Expr::BinaryOp { left, op, right } => {
                 let left_norm = left.normalize();
                 let right_norm = right.normalize();
@@ -251,14 +255,261 @@ impl Expr {
                 function: Box::new(function.normalize()),
                 spec: spec.clone(),
             },
-            Expr::Exists(select) => Expr::Exists(Box::new((**select).clone())),
+            Expr::Exists(select) => Expr::Exists(Box::new(normalize_select_inner(select))),
             Expr::InSubquery { expr, subquery } => Expr::InSubquery {
                 expr: Box::new(expr.normalize()),
-                subquery: Box::new((**subquery).clone()),
+                subquery: Box::new(normalize_select_inner(subquery)),
             },
-            Expr::Subquery(select) => Expr::Subquery(Box::new((**select).clone())),
+            Expr::Subquery(select) => Expr::Subquery(Box::new(normalize_select_inner(select))),
             other => other.clone(),
-        }
+        };
+        rewrite_strong_expr(normalized)
+    }
+}
+
+fn rewrite_strong_expr(expr: Expr) -> Expr {
+    match expr {
+        Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr,
+        } => match *expr {
+            Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                expr,
+            } => *expr,
+            Expr::BinaryOp { left, op, right } => match op {
+                BinaryOperator::Eq => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::NotEq,
+                    right,
+                },
+                BinaryOperator::NotEq => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                },
+                BinaryOperator::Lt => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::GtEq,
+                    right,
+                },
+                BinaryOperator::LtEq => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Gt,
+                    right,
+                },
+                BinaryOperator::Gt => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::LtEq,
+                    right,
+                },
+                BinaryOperator::GtEq => Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Lt,
+                    right,
+                },
+                BinaryOperator::And => Expr::BinaryOp {
+                    left: Box::new(Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        expr: left,
+                    }),
+                    op: BinaryOperator::Or,
+                    right: Box::new(Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        expr: right,
+                    }),
+                },
+                BinaryOperator::Or => Expr::BinaryOp {
+                    left: Box::new(Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        expr: left,
+                    }),
+                    op: BinaryOperator::And,
+                    right: Box::new(Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        expr: right,
+                    }),
+                },
+                _ => Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(Expr::BinaryOp { left, op, right }),
+                },
+            },
+            other => Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                expr: Box::new(other),
+            },
+        },
+        Expr::UnaryOp {
+            op: UnaryOperator::Neg,
+            expr,
+        } => match *expr {
+            Expr::Literal(Literal::Number(value)) => {
+                Expr::Literal(Literal::Number(-value))
+            }
+            other => Expr::UnaryOp {
+                op: UnaryOperator::Neg,
+                expr: Box::new(other),
+            },
+        },
+        Expr::BinaryOp { left, op, right } => match (*left, op, *right) {
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
+                Expr::Literal(Literal::Bool(a && b))
+            }
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Or, Expr::Literal(Literal::Bool(b))) => {
+                Expr::Literal(Literal::Bool(a || b))
+            }
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, other) => {
+                if a { other } else { Expr::Literal(Literal::Bool(false)) }
+            }
+            (other, BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
+                if b { other } else { Expr::Literal(Literal::Bool(false)) }
+            }
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Or, other) => {
+                if a { Expr::Literal(Literal::Bool(true)) } else { other }
+            }
+            (other, BinaryOperator::Or, Expr::Literal(Literal::Bool(b))) => {
+                if b { Expr::Literal(Literal::Bool(true)) } else { other }
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Eq, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a == b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::NotEq, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a != b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Lt, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a < b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::LtEq, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a <= b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Gt, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a > b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::GtEq, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Bool(a >= b))
+            }
+            (Expr::Literal(Literal::String(a)), BinaryOperator::Eq, Expr::Literal(Literal::String(b))) => {
+                Expr::Literal(Literal::Bool(a == b))
+            }
+            (Expr::Literal(Literal::String(a)), BinaryOperator::NotEq, Expr::Literal(Literal::String(b))) => {
+                Expr::Literal(Literal::Bool(a != b))
+            }
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Eq, Expr::Literal(Literal::Bool(b))) => {
+                Expr::Literal(Literal::Bool(a == b))
+            }
+            (Expr::Literal(Literal::Bool(a)), BinaryOperator::NotEq, Expr::Literal(Literal::Bool(b))) => {
+                Expr::Literal(Literal::Bool(a != b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Add, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Number(a + b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Sub, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Number(a - b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Mul, Expr::Literal(Literal::Number(b))) => {
+                Expr::Literal(Literal::Number(a * b))
+            }
+            (Expr::Literal(Literal::Number(a)), BinaryOperator::Div, Expr::Literal(Literal::Number(b))) => {
+                if b == 0.0 {
+                    Expr::BinaryOp {
+                        left: Box::new(Expr::Literal(Literal::Number(a))),
+                        op: BinaryOperator::Div,
+                        right: Box::new(Expr::Literal(Literal::Number(b))),
+                    }
+                } else {
+                    Expr::Literal(Literal::Number(a / b))
+                }
+            }
+            (left, op, right) => Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            },
+        },
+        other => other,
+    }
+}
+
+pub fn normalize_statement(statement: &Statement) -> Statement {
+    match statement {
+        Statement::Select(select) => Statement::Select(normalize_select(select)),
+        Statement::Explain(inner) => Statement::Explain(Box::new(normalize_statement(inner))),
+        Statement::CreateTable(stmt) => Statement::CreateTable(stmt.clone()),
+        Statement::Analyze(stmt) => Statement::Analyze(stmt.clone()),
+        Statement::Insert(stmt) => Statement::Insert(InsertStatement {
+            table: stmt.table.clone(),
+            columns: stmt.columns.clone(),
+            values: stmt
+                .values
+                .iter()
+                .map(|row| row.iter().map(|expr| expr.normalize()).collect())
+                .collect(),
+        }),
+        Statement::Update(stmt) => Statement::Update(UpdateStatement {
+            table: stmt.table.clone(),
+            assignments: stmt
+                .assignments
+                .iter()
+                .map(|assign| Assignment {
+                    column: assign.column.clone(),
+                    value: assign.value.normalize(),
+                })
+                .collect(),
+            selection: stmt.selection.as_ref().map(|expr| expr.normalize()),
+        }),
+        Statement::Delete(stmt) => Statement::Delete(DeleteStatement {
+            table: stmt.table.clone(),
+            selection: stmt.selection.as_ref().map(|expr| expr.normalize()),
+        }),
+    }
+}
+
+fn normalize_select(select: &SelectStatement) -> SelectStatement {
+    SelectStatement {
+        distinct: select.distinct,
+        projection: select
+            .projection
+            .iter()
+            .map(|item| SelectItem {
+                expr: item.expr.normalize(),
+                alias: item.alias.clone(),
+            })
+            .collect(),
+        from: normalize_table_ref(&select.from),
+        selection: select.selection.as_ref().map(|expr| expr.normalize()),
+        group_by: select.group_by.iter().map(|expr| expr.normalize()).collect(),
+        having: select.having.as_ref().map(|expr| expr.normalize()),
+        order_by: select
+            .order_by
+            .iter()
+            .map(|order| OrderByExpr {
+                expr: order.expr.normalize(),
+                asc: order.asc,
+            })
+            .collect(),
+        limit: select.limit,
+        offset: select.offset,
+    }
+}
+
+fn normalize_select_inner(select: &SelectStatement) -> SelectStatement {
+    normalize_select(select)
+}
+
+fn normalize_table_ref(table: &TableRef) -> TableRef {
+    TableRef {
+        name: table.name.clone(),
+        alias: table.alias.clone(),
+        joins: table
+            .joins
+            .iter()
+            .map(|join| Join {
+                join_type: join.join_type,
+                right: normalize_table_ref(&join.right),
+                on: join.on.normalize(),
+            })
+            .collect(),
     }
 }
 
@@ -285,7 +536,7 @@ fn select_to_sql(select: &SelectStatement) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinaryOperator, Expr};
+    use super::{BinaryOperator, Expr, Literal, UnaryOperator};
 
     #[test]
     fn normalize_commutative_predicate() {
@@ -300,5 +551,60 @@ mod tests {
         };
         assert!(matches!(left.as_ref(), Expr::Identifier(name) if name == "a"));
         assert!(matches!(right.as_ref(), Expr::Identifier(name) if name == "b"));
+    }
+
+    #[test]
+    fn normalize_not_comparison() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("a".to_string())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Identifier("b".to_string())),
+            }),
+        };
+        let normalized = expr.normalize();
+        let Expr::BinaryOp { op, .. } = normalized else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::NotEq));
+    }
+
+    #[test]
+    fn normalize_double_not() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                expr: Box::new(Expr::Identifier("flag".to_string())),
+            }),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Identifier(_)));
+    }
+
+    #[test]
+    fn normalize_constant_fold() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Literal(Literal::Number(2.0))),
+            op: BinaryOperator::Mul,
+            right: Box::new(Expr::Literal(Literal::Number(4.0))),
+        };
+        let normalized = expr.normalize();
+        match normalized {
+            Expr::Literal(Literal::Number(value)) => assert_eq!(value, 8.0),
+            other => panic!("expected literal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normalize_boolean_identities() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("flag".to_string())),
+            op: BinaryOperator::And,
+            right: Box::new(Expr::Literal(Literal::Bool(true))),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Identifier(_)));
     }
 }
