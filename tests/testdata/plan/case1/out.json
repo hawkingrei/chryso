@@ -1,0 +1,39 @@
+{
+  "cases": {
+    "agg_limit": {
+      "logical_explain": [
+        "LogicalLimit limit=Some(10) offset=None",
+        "  LogicalSort order_by=id asc",
+        "    LogicalProject exprs=id, sum(amount)",
+        "      LogicalAggregate group=id aggr=id, sum(amount)",
+        "        LogicalFilter predicate=region = 'us'",
+        "          LogicalScan table=sales"
+      ],
+      "physical_explain": [
+        "TopN order_by=id asc limit=10",
+        "  Project exprs=id, sum(amount)",
+        "    Aggregate group=id aggr=id, sum(amount)",
+        "      Filter predicate=region = 'us'",
+        "        TableScan table=sales"
+      ]
+    },
+    "distinct_offset": {
+      "logical_explain": [
+        "LogicalLimit limit=None offset=Some(2)",
+        "  LogicalSort order_by=id desc",
+        "    LogicalDistinct",
+        "      LogicalProject exprs=id",
+        "        LogicalFilter predicate=id > 10",
+        "          LogicalScan table=users"
+      ],
+      "physical_explain": [
+        "Limit limit=None offset=Some(2)",
+        "  Sort order_by=id desc",
+        "    Distinct",
+        "      Project exprs=id",
+        "        Filter predicate=id > 10",
+        "          TableScan table=users"
+      ]
+    }
+  }
+}

@@ -1,0 +1,35 @@
+[package]
+name = "corundum"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+corundum-adapter = { path = "crates/adapter", default-features = false }
+corundum-core = { path = "crates/core" }
+corundum-metadata = { path = "crates/metadata" }
+corundum-optimizer = { path = "crates/optimizer" }
+corundum-parser = { path = "crates/parser" }
+corundum-planner = { path = "crates/planner" }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]
+members = [
+    "crates/adapter",
+    "crates/core",
+    "crates/metadata",
+    "crates/optimizer",
+    "crates/parser",
+    "crates/planner",
+    "ffi",
+]
+
+[features]
+default = []
+duckdb = ["corundum-adapter/duckdb"]
+test-utils = []
+
+[patch.crates-io]
+arrow-arith = { path = "patches/arrow-arith-51.0.0" }

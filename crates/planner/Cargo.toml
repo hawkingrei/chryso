@@ -1,0 +1,12 @@
+[package]
+name = "corundum-planner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+corundum-core = { path = "../core" }
+corundum-metadata = { path = "../metadata" }
+
+[dev-dependencies]
+corundum-optimizer = { path = "../optimizer" }
+corundum-parser = { path = "../parser" }

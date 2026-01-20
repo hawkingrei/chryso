@@ -1,0 +1,13 @@
+[package]
+name = "corundum-adapter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+corundum-core = { path = "../core" }
+corundum-planner = { path = "../planner" }
+duckdb = { version = "0.10", optional = true }
+
+[features]
+default = []
+duckdb = ["dep:duckdb", "duckdb/bundled"]

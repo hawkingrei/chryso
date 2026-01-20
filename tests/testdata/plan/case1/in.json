@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "agg_limit",
+      "sql": "select id, sum(amount) from sales where region = 'us' group by id order by id limit 10",
+      "dialect": "postgres"
+    },
+    {
+      "name": "distinct_offset",
+      "sql": "select distinct id from users where id > 10 order by id desc offset 2",
+      "dialect": "postgres"
+    }
+  ]
+}
