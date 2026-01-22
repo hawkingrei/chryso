@@ -1,3 +1,4 @@
+use crate::utils::{collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix};
 use corundum_core::ast::{BinaryOperator, Expr, Literal};
 use corundum_metadata::StatsCache;
 use corundum_planner::LogicalPlan;
@@ -273,126 +274,14 @@ fn take_connecting_predicates(
 
 fn predicate_tables(expr: &Expr) -> Option<HashSet<String>> {
     let mut tables = HashSet::new();
-    let mut idents = HashSet::new();
-    collect_identifiers(expr, &mut idents);
+    let idents = collect_identifiers(expr);
     for ident in idents {
         let prefix = table_prefix(&ident)?;
         tables.insert(prefix.to_string());
     }
     Some(tables)
 }
-
-fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
-    match expr {
-        Expr::Identifier(name) => {
-            out.insert(name.clone());
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            collect_identifiers(left, out);
-            collect_identifiers(right, out);
-        }
-        Expr::IsNull { expr, .. } => {
-            collect_identifiers(expr, out);
-        }
-        Expr::UnaryOp { expr, .. } => {
-            collect_identifiers(expr, out);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_identifiers(arg, out);
-            }
-        }
-        Expr::WindowFunction { function, spec } => {
-            collect_identifiers(function, out);
-            for expr in &spec.partition_by {
-                collect_identifiers(expr, out);
-            }
-            for expr in &spec.order_by {
-                collect_identifiers(&expr.expr, out);
-            }
-        }
-        Expr::Subquery(select) | Expr::Exists(select) => {
-            for item in &select.projection {
-                collect_identifiers(&item.expr, out);
-            }
-        }
-        Expr::InSubquery { expr, subquery } => {
-            collect_identifiers(expr, out);
-            for item in &subquery.projection {
-                collect_identifiers(&item.expr, out);
-            }
-        }
-        Expr::Case {
-            operand,
-            when_then,
-            else_expr,
-        } => {
-            if let Some(expr) = operand {
-                collect_identifiers(expr, out);
-            }
-            for (when_expr, then_expr) in when_then {
-                collect_identifiers(when_expr, out);
-                collect_identifiers(then_expr, out);
-            }
-            if let Some(expr) = else_expr {
-                collect_identifiers(expr, out);
-            }
-        }
-        Expr::Literal(_) | Expr::Wildcard => {}
-    }
-}
-
-fn collect_tables(plan: &LogicalPlan) -> HashSet<String> {
-    let mut tables = HashSet::new();
-    collect_tables_inner(plan, &mut tables);
-    tables
-}
-
-fn collect_tables_inner(plan: &LogicalPlan, tables: &mut HashSet<String>) {
-    match plan {
-        LogicalPlan::Scan { table } | LogicalPlan::IndexScan { table, .. } => {
-            tables.insert(table.clone());
-        }
-        LogicalPlan::Dml { .. } => {}
-        LogicalPlan::Derived { input, .. } => collect_tables_inner(input, tables),
-        LogicalPlan::Filter { input, .. }
-        | LogicalPlan::Projection { input, .. }
-        | LogicalPlan::Aggregate { input, .. }
-        | LogicalPlan::Distinct { input }
-        | LogicalPlan::TopN { input, .. }
-        | LogicalPlan::Sort { input, .. }
-        | LogicalPlan::Limit { input, .. } => collect_tables_inner(input, tables),
-        LogicalPlan::Join { left, right, .. } => {
-            collect_tables_inner(left, tables);
-            collect_tables_inner(right, tables);
-        }
-    }
-}
-
-fn split_conjuncts(expr: &Expr) -> Vec<Expr> {
-    match expr {
-        Expr::BinaryOp { left, op, right } if matches!(op, BinaryOperator::And) => {
-            let mut out = split_conjuncts(left);
-            out.extend(split_conjuncts(right));
-            out
-        }
-        _ => vec![expr.clone()],
-    }
-}
-
-fn combine_conjuncts(exprs: Vec<Expr>) -> Option<Expr> {
-    let mut iter = exprs.into_iter();
-    let first = iter.next()?;
-    Some(iter.fold(first, |left, right| Expr::BinaryOp {
-        left: Box::new(left),
-        op: BinaryOperator::And,
-        right: Box::new(right),
-    }))
-}
-
-fn table_prefix(ident: &str) -> Option<&str> {
-    ident.split_once('.').map(|(prefix, _)| prefix)
-}
+// shared helpers are in utils.rs
 
 fn tables_intersect(left: &HashSet<String>, right: &HashSet<String>) -> bool {
     left.iter().any(|item| right.contains(item))

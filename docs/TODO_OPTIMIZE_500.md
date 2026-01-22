@@ -3,6 +3,83 @@
 ## Notes
 - Keep dual parser tracks (yacc + handcrafted); benchmark and keep handcrafted path faster.
 - Defer planner support for WITH/SET ops until parser coverage stabilizes.
+- Orca-inspired testing: focus on deterministic plan selection and cost regression before adding parallel optimization.
+
+## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
+
+501. Optimizer: add a cost model config struct with tunable coefficients (scan, filter, join, sort, agg).
+502. Optimizer: load cost config from `toml` or `json` with defaults when missing.
+503. Optimizer: add a `CostProfile` snapshot format for offline tuning inputs.
+504. Optimizer: add deterministic plan selection tests with fixed stats (no randomness).
+505. Optimizer: add cost regression tests that compare relative ordering of candidate plans.
+506. Optimizer: add plan pattern assertions (e.g., hash join vs nested loop) for key TPCH queries.
+507. Optimizer: add a trace output format that includes alternative plans + costs for debugging.
+508. Optimizer: expose a CLI command to dump memo groups and best plan per group.
+509. Optimizer: add a "cost tuning" harness that runs TPCH queries and logs plan costs.
+510. Optimizer: add a local calibration script to adjust coefficients and re-run regression suite.
+511. Optimizer: add config knobs to disable/enable specific rules for tuning experiments.
+512. Optimizer: add rule impact reporting (plan diff + cost delta).
+513. Optimizer: add a seedable evaluation mode to ensure repeatability.
+514. Optimizer: add a "plan baseline" file format for CI verification.
+515. Optimizer: add a stats snapshot loader to simulate catalogs for tests.
+516. Optimizer: add multi-scenario tests (different stats distributions for same query).
+517. Optimizer: add guardrails for overflow/NaN cost values.
+518. Optimizer: document cost model assumptions and coefficient semantics in `docs/`.
+519. Optimizer: add optional "explain cost breakdown" by operator.
+520. Optimizer: add a cost sensitivity report (delta per coefficient).
+521. Optimizer: add a minimal "optimizer playground" binary for rapid iteration.
+522. Optimizer: add a CSV/JSON export of candidate plans + costs.
+523. Optimizer: add a CLI option to lock rule ordering for reproducibility.
+524. Optimizer: add a `--no-reorder` mode for rule isolation tests.
+525. Optimizer: add benchmarks that run optimizer only (no execution).
+526. Optimizer: add a stable plan fingerprint for regression comparisons.
+527. Optimizer: add a "plan equivalence" checker to avoid false regressions.
+528. Optimizer: add support for per-query cost overrides.
+529. Optimizer: add a validation step for cost config ranges.
+530. Optimizer: add doc examples for tuning workflow (TPCH-specific).
+531. Optimizer: add CI job to run optimizer regression suite.
+532. Optimizer: add fixture-based golden plans for key TPCH queries.
+533. Optimizer: add a "cost sanity" test to compare trivial queries.
+534. Optimizer: add an API to inject synthetic stats for unit tests.
+535. Optimizer: add a "memo explosion" guard with threshold logging.
+536. Optimizer: add a "plan search budget" config (max groups, max rewrites).
+537. Optimizer: add rule application metrics (count, time).
+538. Optimizer: add a "cost cache" for repeated cost evaluation.
+539. Optimizer: add a "plan cache" for equivalent logical plans.
+540. Optimizer: add a shared stats snapshot for TPCH scale factors.
+541. Optimizer: add a "trace diff" tool between two optimizer runs.
+542. Optimizer: add optional per-operator cost unit tests.
+543. Optimizer: add rule-level feature flags for performance experiments.
+544. Optimizer: add a DSL for expressing expected plan shapes in tests.
+545. Optimizer: add a strict mode that fails on nondeterministic plans.
+546. Optimizer: add a "plan lint" pass to detect suspicious patterns.
+547. Optimizer: add a "cost model version" field for reproducibility.
+548. Optimizer: add heuristics fallback when stats missing.
+549. Optimizer: add a "stats stale" marker and handling in optimizer trace.
+550. Optimizer: add documentation for cost calibration and regression workflows.
+551. Optimizer: add a per-query cost breakdown in EXPLAIN.
+552. Optimizer: add a `--trace-cost` CLI mode.
+553. Optimizer: add baseline comparisons for join order changes.
+554. Optimizer: add "plan stability" test cases for repeated runs.
+555. Optimizer: add an evaluation mode to choose between cost models (unit vs stats).
+556. Optimizer: add a "planner-only" mode for test harness.
+557. Optimizer: add a "rule ordering lockfile".
+558. Optimizer: add test for equivalence class propagation across joins.
+559. Optimizer: add test for inferred predicate pushdown into join inputs.
+560. Optimizer: add test for inferred predicate impact on join reorder scoring.
+561. Optimizer: add test for plan selection under different coefficients.
+562. Optimizer: add cost model integration test for TPCH Q3/Q5/Q10.
+563. Optimizer: add metrics to report time spent per rule.
+564. Optimizer: add optimizer tracing for memo group counts over time.
+565. Optimizer: add "plan selection debug" output for CI failures.
+566. Optimizer: add a summary report for tuning sessions.
+567. Optimizer: add sample TPCH stats snapshots under `tests/testdata`.
+568. Optimizer: add documentation for how to generate stats snapshots.
+569. Optimizer: add optional JSON schema for cost config.
+570. Optimizer: add an opt-in concurrency plan for later (documented, disabled).
+571. Optimizer: add a TODO list for parallel optimizer search design (memo group parallelism).
+572. Optimizer: add a TODO list for safe deterministic concurrency constraints.
+573. Optimizer: add tests that enforce deterministic output under concurrency flags (disabled by default).
 
 ## Parser (1-200)
 

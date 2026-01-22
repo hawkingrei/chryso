@@ -18,6 +18,7 @@ impl YaccParser {
 
 impl SqlParser for YaccParser {
     fn parse(&self, sql: &str) -> CorundumResult<corundum_core::ast::Statement> {
+        // TODO: Generate the AST directly from yacc instead of validating then re-parsing.
         if validate_with_yacc(sql).is_ok() {
             let parser = SimpleParser::new(self.config.clone());
             return parser.parse(sql);

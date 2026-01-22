@@ -361,6 +361,7 @@ impl Parser {
     }
 
     fn parse_type_name(&mut self) -> CorundumResult<String> {
+        // TODO: Replace this heuristic with a grammar-backed type parser.
         let mut output = String::new();
         let mut depth = 0usize;
         loop {

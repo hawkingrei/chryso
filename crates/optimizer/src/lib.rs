@@ -16,6 +16,7 @@ pub mod properties;
 pub mod rules;
 pub mod subquery;
 pub mod expr_rewrite;
+pub mod utils;
 
 #[derive(Debug)]
 pub struct OptimizerTrace {
