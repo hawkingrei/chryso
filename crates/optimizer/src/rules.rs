@@ -613,7 +613,7 @@ impl Rule for FilterOrDedup {
         if !matches!(op, BinaryOperator::Or) {
             return Vec::new();
         }
-        if left.to_sql() == right.to_sql() {
+        if left.structural_eq(right) {
             return vec![LogicalPlan::Filter {
                 predicate: (*left.clone()),
                 input: input.clone(),
@@ -875,6 +875,23 @@ mod tests {
         let results = rule.apply(&plan);
         assert_eq!(results.len(), 1);
         assert!(matches!(results[0], LogicalPlan::Scan { .. }));
+    }
+
+    #[test]
+    fn remove_true_filter_ignores_binary_predicate() {
+        let plan = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::Identifier("x".to_string())),
+            },
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let rule = RemoveTrueFilter;
+        let results = rule.apply(&plan);
+        assert!(results.is_empty());
     }
 
     #[test]
@@ -1238,6 +1255,7 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
 
     let mut uf = UnionFind::new();
     let mut literal_bindings = std::collections::HashMap::<String, Literal>::new();
+    let mut literal_conflicts = std::collections::HashSet::<String>::new();
 
     for conjunct in &conjuncts {
         let Expr::BinaryOp { left, op, right } = conjunct else {
@@ -1253,14 +1271,27 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
             (Expr::Identifier(ident), Expr::Literal(literal))
             | (Expr::Literal(literal), Expr::Identifier(ident)) => {
                 uf.add(ident);
-                literal_bindings.insert(ident.clone(), literal.clone());
+                if let Some(existing) = literal_bindings.get(ident) {
+                    if !literal_eq(existing, literal) {
+                        literal_conflicts.insert(ident.clone());
+                    }
+                } else {
+                    literal_bindings.insert(ident.clone(), literal.clone());
+                }
             }
             _ => {}
         }
     }
 
     let mut class_literals = std::collections::HashMap::<String, Option<Literal>>::new();
+    for ident in &literal_conflicts {
+        let root = uf.find(ident);
+        class_literals.insert(root, None);
+    }
     for (ident, literal) in &literal_bindings {
+        if literal_conflicts.contains(ident) {
+            continue;
+        }
         let root = uf.find(ident);
         match class_literals.get(&root) {
             None => {

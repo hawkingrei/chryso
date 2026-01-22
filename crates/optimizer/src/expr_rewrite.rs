@@ -170,7 +170,7 @@ fn rewrite_binary(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
     if let Some(expr) = fold_comparison(&left, op, &right) {
         return expr;
     }
-    if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.to_sql() == right.to_sql() {
+    if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.structural_eq(&right) {
         return left;
     }
     match (op, &left, &right) {

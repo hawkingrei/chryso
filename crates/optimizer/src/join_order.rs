@@ -135,19 +135,35 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
         let mut best_rows = f64::INFINITY;
         let mut best_connected = false;
         let mut best_score = f64::INFINITY;
+        let mut best_key = String::new();
         for (idx, item) in items.iter().enumerate() {
             let (connected, score) =
                 connection_score(&current.tables, &item.tables, &remaining_preds);
             let candidate_rows = item.estimated_rows;
-            if connected && (!best_connected || score < best_score || candidate_rows < best_rows) {
+            if connected
+                && (!best_connected
+                    || score < best_score
+                    || candidate_rows < best_rows
+                    || (score == best_score
+                        && candidate_rows == best_rows
+                        && (best_key.is_empty() || item.sort_key < best_key)))
+            {
                 best_connected = true;
                 best_rows = candidate_rows;
                 best_score = score;
                 best_index = Some(idx);
+                best_key = item.sort_key.clone();
             } else if !best_connected && candidate_rows < best_rows {
                 best_rows = candidate_rows;
                 best_score = score;
                 best_index = Some(idx);
+                best_key = item.sort_key.clone();
+            } else if !best_connected
+                && candidate_rows == best_rows
+                && (best_key.is_empty() || item.sort_key < best_key)
+            {
+                best_index = Some(idx);
+                best_key = item.sort_key.clone();
             }
         }
         let idx = best_index.unwrap_or(0);
@@ -187,16 +203,19 @@ struct JoinItem {
     plan: LogicalPlan,
     tables: HashSet<String>,
     estimated_rows: f64,
+    sort_key: String,
 }
 
 impl JoinItem {
     fn new(plan: LogicalPlan, stats: &StatsCache) -> Self {
         let tables = collect_tables(&plan);
         let estimated_rows = estimate_rows(&plan, stats);
+        let sort_key = tables.iter().min().cloned().unwrap_or_default();
         Self {
             plan,
             tables,
             estimated_rows,
+            sort_key,
         }
     }
 }
@@ -276,10 +295,15 @@ fn predicate_tables(expr: &Expr) -> Option<HashSet<String>> {
     let mut tables = HashSet::new();
     let idents = collect_identifiers(expr);
     for ident in idents {
-        let prefix = table_prefix(&ident)?;
-        tables.insert(prefix.to_string());
+        if let Some(prefix) = table_prefix(&ident) {
+            tables.insert(prefix.to_string());
+        }
     }
-    Some(tables)
+    if tables.is_empty() {
+        None
+    } else {
+        Some(tables)
+    }
 }
 // shared helpers are in utils.rs
 

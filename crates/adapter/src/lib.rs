@@ -351,17 +351,58 @@ impl DuckDbAdapter {
 
     #[cfg(feature = "duckdb")]
     fn is_query_sql(sql: &str) -> bool {
-        let trimmed = sql.trim_start();
-        let mut lower = String::with_capacity(trimmed.len());
-        for ch in trimmed.chars() {
-            lower.push(ch.to_ascii_lowercase());
-            if lower.len() >= 7 {
-                break;
-            }
+        let Some(keyword) = first_keyword(sql) else {
+            return false;
+        };
+        matches!(keyword.as_str(), "select" | "with" | "explain")
+    }
+}
+
+#[cfg(feature = "duckdb")]
+fn first_keyword(sql: &str) -> Option<String> {
+    let mut chars = sql.chars().peekable();
+    loop {
+        while matches!(chars.peek(), Some(ch) if ch.is_whitespace()) {
+            chars.next();
         }
-        lower.starts_with("select")
-            || lower.starts_with("with")
-            || lower.starts_with("explain")
+        match (chars.peek(), chars.clone().nth(1)) {
+            (Some('-'), Some('-')) => {
+                chars.next();
+                chars.next();
+                while let Some(ch) = chars.next() {
+                    if ch == '\n' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            (Some('/'), Some('*')) => {
+                chars.next();
+                chars.next();
+                while let Some(ch) = chars.next() {
+                    if ch == '*' && matches!(chars.peek(), Some('/')) {
+                        chars.next();
+                        break;
+                    }
+                }
+                continue;
+            }
+            _ => break,
+        }
+    }
+    let mut keyword = String::new();
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            keyword.push(ch.to_ascii_lowercase());
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if keyword.is_empty() {
+        None
+    } else {
+        Some(keyword)
     }
 }
 
