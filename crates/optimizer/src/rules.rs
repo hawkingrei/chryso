@@ -1284,6 +1284,9 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
     }
 
     let mut class_literals = std::collections::HashMap::<String, Option<Literal>>::new();
+    if !literal_conflicts.is_empty() {
+        // TODO: surface conflicting literal bindings in optimizer trace.
+    }
     for ident in &literal_conflicts {
         let root = uf.find(ident);
         class_literals.insert(root, None);

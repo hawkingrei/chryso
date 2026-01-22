@@ -343,11 +343,14 @@ impl Expr {
     }
 
     pub fn structural_eq(&self, other: &Expr) -> bool {
+        const FLOAT_EPSILON: f64 = 1e-9;
         match (self, other) {
             (Expr::Identifier(left), Expr::Identifier(right)) => left == right,
             (Expr::Literal(left), Expr::Literal(right)) => match (left, right) {
                 (Literal::String(left), Literal::String(right)) => left == right,
-                (Literal::Number(left), Literal::Number(right)) => left == right,
+                (Literal::Number(left), Literal::Number(right)) => {
+                    (left - right).abs() <= FLOAT_EPSILON
+                }
                 (Literal::Bool(left), Literal::Bool(right)) => left == right,
                 _ => false,
             },

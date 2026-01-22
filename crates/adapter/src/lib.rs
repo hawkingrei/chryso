@@ -359,6 +359,7 @@ impl DuckDbAdapter {
 }
 
 #[cfg(feature = "duckdb")]
+#[cfg(feature = "duckdb")]
 fn first_keyword(sql: &str) -> Option<String> {
     let mut chars = sql.chars().peekable();
     loop {

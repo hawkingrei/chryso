@@ -135,35 +135,37 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
         let mut best_rows = f64::INFINITY;
         let mut best_connected = false;
         let mut best_score = f64::INFINITY;
-        let mut best_key = String::new();
+        let mut best_key: Option<String> = None;
         for (idx, item) in items.iter().enumerate() {
             let (connected, score) =
                 connection_score(&current.tables, &item.tables, &remaining_preds);
             let candidate_rows = item.estimated_rows;
+            let better_key = match &best_key {
+                None => true,
+                Some(key) => item.sort_key < *key,
+            };
             if connected
                 && (!best_connected
                     || score < best_score
                     || candidate_rows < best_rows
-                    || (score == best_score
-                        && candidate_rows == best_rows
-                        && (best_key.is_empty() || item.sort_key < best_key)))
+                    || (score == best_score && candidate_rows == best_rows && better_key))
             {
                 best_connected = true;
                 best_rows = candidate_rows;
                 best_score = score;
                 best_index = Some(idx);
-                best_key = item.sort_key.clone();
+                best_key = Some(item.sort_key.clone());
             } else if !best_connected && candidate_rows < best_rows {
                 best_rows = candidate_rows;
                 best_score = score;
                 best_index = Some(idx);
-                best_key = item.sort_key.clone();
+                best_key = Some(item.sort_key.clone());
             } else if !best_connected
                 && candidate_rows == best_rows
-                && (best_key.is_empty() || item.sort_key < best_key)
+                && better_key
             {
                 best_index = Some(idx);
-                best_key = item.sort_key.clone();
+                best_key = Some(item.sort_key.clone());
             }
         }
         let idx = best_index.unwrap_or(0);
@@ -184,9 +186,9 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
         tables.extend(item.tables);
         current = JoinItem {
             plan: joined_plan,
+            sort_key: sort_key_from_tables(&tables),
             tables,
             estimated_rows,
-            sort_key: current.sort_key,
         };
     }
 
@@ -211,7 +213,7 @@ impl JoinItem {
     fn new(plan: LogicalPlan, stats: &StatsCache) -> Self {
         let tables = collect_tables(&plan);
         let estimated_rows = estimate_rows(&plan, stats);
-        let sort_key = tables.iter().min().cloned().unwrap_or_default();
+        let sort_key = sort_key_from_tables(&tables);
         Self {
             plan,
             tables,
@@ -219,6 +221,12 @@ impl JoinItem {
             sort_key,
         }
     }
+}
+
+fn sort_key_from_tables(tables: &HashSet<String>) -> String {
+    let mut names = tables.iter().cloned().collect::<Vec<_>>();
+    names.sort();
+    names.join(",")
 }
 
 fn connection_score(
