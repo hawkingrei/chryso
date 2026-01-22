@@ -34,6 +34,7 @@ impl Default for PhysicalRuleSet {
             .with_rule(ScanRule)
             .with_rule(IndexScanRule)
             .with_rule(DmlRule)
+            .with_rule(DerivedRule)
             .with_rule(FilterRule)
             .with_rule(ProjectionRule)
             .with_rule(JoinRule)
@@ -98,6 +99,28 @@ impl PhysicalRule for DmlRule {
             return Vec::new();
         };
         vec![PhysicalPlan::Dml { sql: sql.clone() }]
+    }
+}
+
+pub struct DerivedRule;
+
+impl PhysicalRule for DerivedRule {
+    fn name(&self) -> &str {
+        "derived_rule"
+    }
+
+    fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
+        let LogicalPlan::Derived { alias, column_aliases, .. } = logical else {
+            return Vec::new();
+        };
+        let Some(input) = inputs.first() else {
+            return Vec::new();
+        };
+        vec![PhysicalPlan::Derived {
+            input: Box::new(input.clone()),
+            alias: alias.clone(),
+            column_aliases: column_aliases.clone(),
+        }]
     }
 }
 

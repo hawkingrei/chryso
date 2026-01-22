@@ -25,6 +25,15 @@ fn prune_plan_with_required(plan: &LogicalPlan, required: Option<&HashSet<String
             predicate,
         } => prune_index_scan(table, index, predicate, required),
         LogicalPlan::Dml { sql } => LogicalPlan::Dml { sql: sql.clone() },
+        LogicalPlan::Derived {
+            input,
+            alias,
+            column_aliases,
+        } => LogicalPlan::Derived {
+            input: Box::new(prune_plan_with_required(input.as_ref(), required)),
+            alias: alias.clone(),
+            column_aliases: column_aliases.clone(),
+        },
         LogicalPlan::Filter { predicate, input } => {
             let next_required = if let Some(required) = required {
                 let mut combined = required.clone();
@@ -302,6 +311,9 @@ fn collect_identifiers_inner(expr: &Expr, idents: &mut HashSet<String>) {
             collect_identifiers_inner(left, idents);
             collect_identifiers_inner(right, idents);
         }
+        Expr::IsNull { expr, .. } => {
+            collect_identifiers_inner(expr, idents);
+        }
         Expr::UnaryOp { expr, .. } => {
             collect_identifiers_inner(expr, idents);
         }
@@ -330,6 +342,22 @@ fn collect_identifiers_inner(expr: &Expr, idents: &mut HashSet<String>) {
                 collect_identifiers_inner(&item.expr, idents);
             }
         }
+        Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        } => {
+            if let Some(expr) = operand {
+                collect_identifiers_inner(expr, idents);
+            }
+            for (when_expr, then_expr) in when_then {
+                collect_identifiers_inner(when_expr, idents);
+                collect_identifiers_inner(then_expr, idents);
+            }
+            if let Some(expr) = else_expr {
+                collect_identifiers_inner(expr, idents);
+            }
+        }
         Expr::Literal(_) | Expr::Wildcard => {}
     }
 }
@@ -346,6 +374,7 @@ fn collect_tables_inner(plan: &LogicalPlan, tables: &mut HashSet<String>) {
             tables.insert(table.clone());
         }
         LogicalPlan::Dml { .. } => {}
+        LogicalPlan::Derived { input, .. } => collect_tables_inner(input, tables),
         LogicalPlan::Filter { input, .. }
         | LogicalPlan::Projection { input, .. }
         | LogicalPlan::Aggregate { input, .. }

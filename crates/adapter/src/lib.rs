@@ -52,6 +52,7 @@ impl AdapterCapabilities {
             PhysicalPlan::TableScan { .. } => true,
             PhysicalPlan::IndexScan { .. } => true,
             PhysicalPlan::Dml { .. } => true,
+            PhysicalPlan::Derived { input, .. } => self.supports_plan(input),
             PhysicalPlan::Filter { input, .. } => self.supports_plan(input),
             PhysicalPlan::Projection { input, .. } => self.supports_plan(input),
             PhysicalPlan::Join { left, right, .. } => {
@@ -239,6 +240,9 @@ impl DuckDbAdapter {
     fn execute_with_duckdb(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
         let conn = self.conn.borrow();
         if let PhysicalPlan::Dml { sql } = plan {
+            if Self::is_query_sql(sql) {
+                return Self::query_with_sql(&conn, sql);
+            }
             let affected = conn
                 .execute(sql, [])
                 .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
@@ -312,6 +316,52 @@ impl DuckDbAdapter {
             rows.push(values);
         }
         Ok(QueryResult { columns, rows })
+    }
+
+    #[cfg(feature = "duckdb")]
+    fn query_with_sql(
+        conn: &::duckdb::Connection,
+        sql: &str,
+    ) -> CorundumResult<QueryResult> {
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+        let mut rows_iter = stmt
+            .query([])
+            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+        let columns = rows_iter
+            .as_ref()
+            .map(|stmt| stmt.column_names())
+            .unwrap_or_default();
+        let mut rows = Vec::new();
+        while let Some(row) = rows_iter
+            .next()
+            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            let mut values = Vec::new();
+            for idx in 0..columns.len() {
+                let value: DuckValue = row
+                    .get(idx)
+                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                values.push(format_duck_value(&value));
+            }
+            rows.push(values);
+        }
+        Ok(QueryResult { columns, rows })
+    }
+
+    #[cfg(feature = "duckdb")]
+    fn is_query_sql(sql: &str) -> bool {
+        let trimmed = sql.trim_start();
+        let mut lower = String::with_capacity(trimmed.len());
+        for ch in trimmed.chars() {
+            lower.push(ch.to_ascii_lowercase());
+            if lower.len() >= 7 {
+                break;
+            }
+        }
+        lower.starts_with("select")
+            || lower.starts_with("with")
+            || lower.starts_with("explain")
     }
 }
 
@@ -451,6 +501,21 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
             predicate,
         } => format!("select * from {table} where {}", predicate.to_sql()),
         PhysicalPlan::Dml { sql } => sql.clone(),
+        PhysicalPlan::Derived {
+            input,
+            alias,
+            column_aliases,
+        } => {
+            let base = physical_to_sql(input);
+            if column_aliases.is_empty() {
+                format!("select * from ({base}) as {alias}")
+            } else {
+                format!(
+                    "select * from ({base}) as {alias} ({})",
+                    column_aliases.join(", ")
+                )
+            }
+        }
         PhysicalPlan::Filter { predicate, input } => {
             let base = physical_to_sql(input);
             format!("{base} where {}", predicate.to_sql())
@@ -476,6 +541,8 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
             let join = match join_type {
                 corundum_core::ast::JoinType::Inner => "join",
                 corundum_core::ast::JoinType::Left => "left join",
+                corundum_core::ast::JoinType::Right => "right join",
+                corundum_core::ast::JoinType::Full => "full join",
             };
             format!(
                 "select * from ({left_sql}) as l {join} ({right_sql}) as r on {}",
@@ -521,7 +588,15 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
                 .iter()
                 .map(|item| {
                     let dir = if item.asc { "asc" } else { "desc" };
-                    format!("{} {dir}", item.expr.to_sql())
+                    let mut rendered = format!("{} {dir}", item.expr.to_sql());
+                    if let Some(nulls_first) = item.nulls_first {
+                        if nulls_first {
+                            rendered.push_str(" nulls first");
+                        } else {
+                            rendered.push_str(" nulls last");
+                        }
+                    }
+                    rendered
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -533,7 +608,15 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
                 .iter()
                 .map(|item| {
                     let dir = if item.asc { "asc" } else { "desc" };
-                    format!("{} {dir}", item.expr.to_sql())
+                    let mut rendered = format!("{} {dir}", item.expr.to_sql());
+                    if let Some(nulls_first) = item.nulls_first {
+                        if nulls_first {
+                            rendered.push_str(" nulls first");
+                        } else {
+                            rendered.push_str(" nulls last");
+                        }
+                    }
+                    rendered
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -662,6 +745,7 @@ mod tests {
                 order_by: vec![corundum_core::ast::OrderByExpr {
                     expr: corundum_core::ast::Expr::Identifier("id".to_string()),
                     asc: false,
+                    nulls_first: None,
                 }],
                 input: Box::new(PhysicalPlan::TableScan {
                     table: "users".to_string(),

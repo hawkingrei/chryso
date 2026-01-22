@@ -1,8 +1,16 @@
 #[derive(Debug, Clone)]
 pub enum Statement {
+    With(WithStatement),
     Select(SelectStatement),
+    SetOp {
+        left: Box<Statement>,
+        op: SetOperator,
+        right: Box<Statement>,
+    },
     Explain(Box<Statement>),
     CreateTable(CreateTableStatement),
+    DropTable(DropTableStatement),
+    Truncate(TruncateStatement),
     Analyze(AnalyzeStatement),
     Insert(InsertStatement),
     Update(UpdateStatement),
@@ -12,6 +20,25 @@ pub enum Statement {
 #[derive(Debug, Clone)]
 pub struct CreateTableStatement {
     pub name: String,
+    pub if_not_exists: bool,
+    pub columns: Vec<ColumnDef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DropTableStatement {
+    pub name: String,
+    pub if_exists: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TruncateStatement {
+    pub table: String,
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +50,15 @@ pub struct AnalyzeStatement {
 pub struct InsertStatement {
     pub table: String,
     pub columns: Vec<String>,
-    pub values: Vec<Vec<Expr>>,
+    pub source: InsertSource,
+    pub returning: Vec<SelectItem>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InsertSource {
+    Values(Vec<Vec<Expr>>),
+    Query(Box<Statement>),
+    DefaultValues,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +66,7 @@ pub struct UpdateStatement {
     pub table: String,
     pub assignments: Vec<Assignment>,
     pub selection: Option<Expr>,
+    pub returning: Vec<SelectItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,13 +79,15 @@ pub struct Assignment {
 pub struct DeleteStatement {
     pub table: String,
     pub selection: Option<Expr>,
+    pub returning: Vec<SelectItem>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectStatement {
     pub distinct: bool,
+    pub distinct_on: Vec<Expr>,
     pub projection: Vec<SelectItem>,
-    pub from: TableRef,
+    pub from: Option<TableRef>,
     pub selection: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub having: Option<Expr>,
@@ -59,10 +97,41 @@ pub struct SelectStatement {
 }
 
 #[derive(Debug, Clone)]
-pub struct TableRef {
+pub struct WithStatement {
+    pub ctes: Vec<Cte>,
+    pub recursive: bool,
+    pub statement: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cte {
     pub name: String,
+    pub columns: Vec<String>,
+    pub query: Box<Statement>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SetOperator {
+    Union,
+    UnionAll,
+    Intersect,
+    IntersectAll,
+    Except,
+    ExceptAll,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableRef {
+    pub factor: TableFactor,
     pub alias: Option<String>,
+    pub column_aliases: Vec<String>,
     pub joins: Vec<Join>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TableFactor {
+    Table { name: String },
+    Derived { query: Box<Statement> },
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +145,8 @@ pub struct Join {
 pub enum JoinType {
     Inner,
     Left,
+    Right,
+    Full,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +159,7 @@ pub struct SelectItem {
 pub struct OrderByExpr {
     pub expr: Expr,
     pub asc: bool,
+    pub nulls_first: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +170,10 @@ pub enum Expr {
         left: Box<Expr>,
         op: BinaryOperator,
         right: Box<Expr>,
+    },
+    IsNull {
+        expr: Box<Expr>,
+        negated: bool,
     },
     UnaryOp {
         op: UnaryOperator,
@@ -116,6 +192,11 @@ pub enum Expr {
     InSubquery {
         expr: Box<Expr>,
         subquery: Box<SelectStatement>,
+    },
+    Case {
+        operand: Option<Box<Expr>>,
+        when_then: Vec<(Expr, Expr)>,
+        else_expr: Option<Box<Expr>>,
     },
     Wildcard,
 }
@@ -181,6 +262,13 @@ impl Expr {
                 };
                 format!("{} {} {}", left.to_sql(), op_str, right.to_sql())
             }
+            Expr::IsNull { expr, negated } => {
+                if *negated {
+                    format!("{} is not null", expr.to_sql())
+                } else {
+                    format!("{} is null", expr.to_sql())
+                }
+            }
             Expr::UnaryOp { op, expr } => match op {
                 UnaryOperator::Not => format!("not {}", expr.to_sql()),
                 UnaryOperator::Neg => format!("-{}", expr.to_sql()),
@@ -206,7 +294,15 @@ impl Expr {
                         .iter()
                         .map(|item| {
                             let dir = if item.asc { "asc" } else { "desc" };
-                            format!("{} {dir}", item.expr.to_sql())
+                            let mut rendered = format!("{} {dir}", item.expr.to_sql());
+                            if let Some(nulls_first) = item.nulls_first {
+                                if nulls_first {
+                                    rendered.push_str(" nulls first");
+                                } else {
+                                    rendered.push_str(" nulls last");
+                                }
+                            }
+                            rendered
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -219,6 +315,29 @@ impl Expr {
                 format!("{} in ({})", expr.to_sql(), select_to_sql(subquery))
             }
             Expr::Subquery(select) => format!("({})", select_to_sql(select)),
+            Expr::Case {
+                operand,
+                when_then,
+                else_expr,
+            } => {
+                let mut output = String::from("case");
+                if let Some(expr) = operand {
+                    output.push(' ');
+                    output.push_str(&expr.to_sql());
+                }
+                for (when_expr, then_expr) in when_then {
+                    output.push_str(" when ");
+                    output.push_str(&when_expr.to_sql());
+                    output.push_str(" then ");
+                    output.push_str(&then_expr.to_sql());
+                }
+                if let Some(expr) = else_expr {
+                    output.push_str(" else ");
+                    output.push_str(&expr.to_sql());
+                }
+                output.push_str(" end");
+                output
+            }
             Expr::Wildcard => "*".to_string(),
         }
     }
@@ -243,6 +362,10 @@ impl Expr {
                     right: Box::new(right_norm),
                 }
             }
+            Expr::IsNull { expr, negated } => Expr::IsNull {
+                expr: Box::new(expr.normalize()),
+                negated: *negated,
+            },
             Expr::UnaryOp { op, expr } => Expr::UnaryOp {
                 op: *op,
                 expr: Box::new(expr.normalize()),
@@ -250,6 +373,18 @@ impl Expr {
             Expr::FunctionCall { name, args } => Expr::FunctionCall {
                 name: name.clone(),
                 args: args.iter().map(|arg| arg.normalize()).collect(),
+            },
+            Expr::Case {
+                operand,
+                when_then,
+                else_expr,
+            } => Expr::Case {
+                operand: operand.as_ref().map(|expr| Box::new(expr.normalize())),
+                when_then: when_then
+                    .iter()
+                    .map(|(when_expr, then_expr)| (when_expr.normalize(), then_expr.normalize()))
+                    .collect(),
+                else_expr: else_expr.as_ref().map(|expr| Box::new(expr.normalize())),
             },
             Expr::WindowFunction { function, spec } => Expr::WindowFunction {
                 function: Box::new(function.normalize()),
@@ -273,10 +408,15 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
             op: UnaryOperator::Not,
             expr,
         } => match *expr {
+            Expr::Literal(Literal::Bool(value)) => Expr::Literal(Literal::Bool(!value)),
             Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 expr,
             } => *expr,
+            Expr::IsNull { expr, negated } => Expr::IsNull {
+                expr,
+                negated: !negated,
+            },
             Expr::BinaryOp { left, op, right } => match op {
                 BinaryOperator::Eq => Expr::BinaryOp {
                     left,
@@ -352,7 +492,27 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
                 expr: Box::new(other),
             },
         },
-        Expr::BinaryOp { left, op, right } => match (*left, op, *right) {
+        Expr::BinaryOp { left, op, right } => {
+            if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
+                let left_sql = left.to_sql();
+                let right_sql = right.to_sql();
+                if left_sql == right_sql {
+                    return *left;
+                }
+            }
+            let same_expr = left.to_sql() == right.to_sql();
+            if same_expr {
+                return match op {
+                    BinaryOperator::Eq | BinaryOperator::LtEq | BinaryOperator::GtEq => {
+                        Expr::Literal(Literal::Bool(true))
+                    }
+                    BinaryOperator::NotEq | BinaryOperator::Lt | BinaryOperator::Gt => {
+                        Expr::Literal(Literal::Bool(false))
+                    }
+                    _ => Expr::BinaryOp { left, op, right },
+                };
+            }
+            match (*left, op, *right) {
             (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
                 Expr::Literal(Literal::Bool(a && b))
             }
@@ -426,24 +586,60 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
                 op,
                 right: Box::new(right),
             },
-        },
+            }
+        }
         other => other,
     }
 }
 
 pub fn normalize_statement(statement: &Statement) -> Statement {
     match statement {
+        Statement::With(stmt) => Statement::With(WithStatement {
+            ctes: stmt
+                .ctes
+                .iter()
+                .map(|cte| Cte {
+                    name: cte.name.clone(),
+                    columns: cte.columns.clone(),
+                    query: Box::new(normalize_statement(&cte.query)),
+                })
+                .collect(),
+            recursive: stmt.recursive,
+            statement: Box::new(normalize_statement(&stmt.statement)),
+        }),
         Statement::Select(select) => Statement::Select(normalize_select(select)),
+        Statement::SetOp { left, op, right } => Statement::SetOp {
+            left: Box::new(normalize_statement(left)),
+            op: *op,
+            right: Box::new(normalize_statement(right)),
+        },
         Statement::Explain(inner) => Statement::Explain(Box::new(normalize_statement(inner))),
         Statement::CreateTable(stmt) => Statement::CreateTable(stmt.clone()),
+        Statement::DropTable(stmt) => Statement::DropTable(stmt.clone()),
+        Statement::Truncate(stmt) => Statement::Truncate(stmt.clone()),
         Statement::Analyze(stmt) => Statement::Analyze(stmt.clone()),
         Statement::Insert(stmt) => Statement::Insert(InsertStatement {
             table: stmt.table.clone(),
             columns: stmt.columns.clone(),
-            values: stmt
-                .values
+            source: match &stmt.source {
+                InsertSource::Values(values) => InsertSource::Values(
+                    values
+                        .iter()
+                        .map(|row| row.iter().map(|expr| expr.normalize()).collect())
+                        .collect(),
+                ),
+                InsertSource::Query(statement) => {
+                    InsertSource::Query(Box::new(normalize_statement(statement)))
+                }
+                InsertSource::DefaultValues => InsertSource::DefaultValues,
+            },
+            returning: stmt
+                .returning
                 .iter()
-                .map(|row| row.iter().map(|expr| expr.normalize()).collect())
+                .map(|item| SelectItem {
+                    expr: item.expr.normalize(),
+                    alias: item.alias.clone(),
+                })
                 .collect(),
         }),
         Statement::Update(stmt) => Statement::Update(UpdateStatement {
@@ -457,10 +653,26 @@ pub fn normalize_statement(statement: &Statement) -> Statement {
                 })
                 .collect(),
             selection: stmt.selection.as_ref().map(|expr| expr.normalize()),
+            returning: stmt
+                .returning
+                .iter()
+                .map(|item| SelectItem {
+                    expr: item.expr.normalize(),
+                    alias: item.alias.clone(),
+                })
+                .collect(),
         }),
         Statement::Delete(stmt) => Statement::Delete(DeleteStatement {
             table: stmt.table.clone(),
             selection: stmt.selection.as_ref().map(|expr| expr.normalize()),
+            returning: stmt
+                .returning
+                .iter()
+                .map(|item| SelectItem {
+                    expr: item.expr.normalize(),
+                    alias: item.alias.clone(),
+                })
+                .collect(),
         }),
     }
 }
@@ -468,6 +680,7 @@ pub fn normalize_statement(statement: &Statement) -> Statement {
 fn normalize_select(select: &SelectStatement) -> SelectStatement {
     SelectStatement {
         distinct: select.distinct,
+        distinct_on: select.distinct_on.iter().map(|expr| expr.normalize()).collect(),
         projection: select
             .projection
             .iter()
@@ -476,7 +689,7 @@ fn normalize_select(select: &SelectStatement) -> SelectStatement {
                 alias: item.alias.clone(),
             })
             .collect(),
-        from: normalize_table_ref(&select.from),
+        from: select.from.as_ref().map(normalize_table_ref),
         selection: select.selection.as_ref().map(|expr| expr.normalize()),
         group_by: select.group_by.iter().map(|expr| expr.normalize()).collect(),
         having: select.having.as_ref().map(|expr| expr.normalize()),
@@ -486,6 +699,7 @@ fn normalize_select(select: &SelectStatement) -> SelectStatement {
             .map(|order| OrderByExpr {
                 expr: order.expr.normalize(),
                 asc: order.asc,
+                nulls_first: order.nulls_first,
             })
             .collect(),
         limit: select.limit,
@@ -499,8 +713,14 @@ fn normalize_select_inner(select: &SelectStatement) -> SelectStatement {
 
 fn normalize_table_ref(table: &TableRef) -> TableRef {
     TableRef {
-        name: table.name.clone(),
+        factor: match &table.factor {
+            TableFactor::Table { name } => TableFactor::Table { name: name.clone() },
+            TableFactor::Derived { query } => {
+                TableFactor::Derived { query: Box::new(normalize_statement(query)) }
+            }
+        },
         alias: table.alias.clone(),
+        column_aliases: table.column_aliases.clone(),
         joins: table
             .joins
             .iter()
@@ -517,6 +737,17 @@ fn select_to_sql(select: &SelectStatement) -> String {
     let mut output = String::from("select ");
     if select.distinct {
         output.push_str("distinct ");
+        if !select.distinct_on.is_empty() {
+            let distinct_on = select
+                .distinct_on
+                .iter()
+                .map(|expr| expr.to_sql())
+                .collect::<Vec<_>>()
+                .join(", ");
+            output.push_str("on (");
+            output.push_str(&distinct_on);
+            output.push_str(") ");
+        }
     }
     let projection = select
         .projection
@@ -525,13 +756,253 @@ fn select_to_sql(select: &SelectStatement) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     output.push_str(&projection);
-    output.push_str(" from ");
-    output.push_str(&select.from.name);
+    if let Some(from) = &select.from {
+        output.push_str(" from ");
+        output.push_str(&table_ref_to_sql(from));
+    }
     if let Some(selection) = &select.selection {
         output.push_str(" where ");
         output.push_str(&selection.to_sql());
     }
+    if !select.group_by.is_empty() {
+        let group_by = select
+            .group_by
+            .iter()
+            .map(|expr| expr.to_sql())
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(" group by ");
+        output.push_str(&group_by);
+    }
+    if let Some(having) = &select.having {
+        output.push_str(" having ");
+        output.push_str(&having.to_sql());
+    }
+    if !select.order_by.is_empty() {
+        let order_by = select
+            .order_by
+            .iter()
+            .map(|item| {
+                let mut rendered = item.expr.to_sql();
+                rendered.push(' ');
+                rendered.push_str(if item.asc { "asc" } else { "desc" });
+                if let Some(nulls_first) = item.nulls_first {
+                    rendered.push_str(" nulls ");
+                    rendered.push_str(if nulls_first { "first" } else { "last" });
+                }
+                rendered
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(" order by ");
+        output.push_str(&order_by);
+    }
+    if let Some(limit) = select.limit {
+        output.push_str(" limit ");
+        output.push_str(&limit.to_string());
+    }
+    if let Some(offset) = select.offset {
+        output.push_str(" offset ");
+        output.push_str(&offset.to_string());
+    }
     output
+}
+
+fn table_ref_to_sql(table: &TableRef) -> String {
+    let mut output = match &table.factor {
+        TableFactor::Table { name } => name.clone(),
+        TableFactor::Derived { query } => format!("({})", statement_to_sql(query)),
+    };
+    if let Some(alias) = &table.alias {
+        output.push_str(" as ");
+        output.push_str(alias);
+        if !table.column_aliases.is_empty() {
+            output.push_str(" (");
+            output.push_str(&table.column_aliases.join(", "));
+            output.push(')');
+        }
+    }
+    for join in &table.joins {
+        let join_type = match join.join_type {
+            JoinType::Inner => "join",
+            JoinType::Left => "left join",
+            JoinType::Right => "right join",
+            JoinType::Full => "full join",
+        };
+        output.push(' ');
+        output.push_str(join_type);
+        output.push(' ');
+        output.push_str(&table_ref_to_sql(&join.right));
+        output.push_str(" on ");
+        output.push_str(&join.on.to_sql());
+    }
+    output
+}
+
+pub fn statement_to_sql(statement: &Statement) -> String {
+    match statement {
+        Statement::Select(select) => select_to_sql(select),
+        Statement::SetOp { left, op, right } => {
+            let left_sql = statement_to_sql(left);
+            let right_sql = statement_to_sql(right);
+            let op_str = match op {
+                SetOperator::Union => "union",
+                SetOperator::UnionAll => "union all",
+                SetOperator::Intersect => "intersect",
+                SetOperator::IntersectAll => "intersect all",
+                SetOperator::Except => "except",
+                SetOperator::ExceptAll => "except all",
+            };
+            format!("{left_sql} {op_str} {right_sql}")
+        }
+        Statement::With(with_stmt) => {
+            let ctes = with_stmt
+                .ctes
+                .iter()
+                .map(|cte| {
+                    let mut name = cte.name.clone();
+                    if !cte.columns.is_empty() {
+                        let cols = cte.columns.join(", ");
+                        name.push_str(" (");
+                        name.push_str(&cols);
+                        name.push(')');
+                    }
+                    format!("{name} as ({})", statement_to_sql(&cte.query))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let keyword = if with_stmt.recursive {
+                "with recursive"
+            } else {
+                "with"
+            };
+            format!("{keyword} {ctes} {}", statement_to_sql(&with_stmt.statement))
+        }
+        Statement::Explain(inner) => format!("explain {}", statement_to_sql(inner)),
+        Statement::CreateTable(stmt) => {
+            if stmt.if_not_exists {
+                if stmt.columns.is_empty() {
+                    format!("create table if not exists {}", stmt.name)
+                } else {
+                    let columns = stmt
+                        .columns
+                        .iter()
+                        .map(|col| format!("{} {}", col.name, col.data_type))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("create table if not exists {} ({})", stmt.name, columns)
+                }
+            } else {
+                if stmt.columns.is_empty() {
+                    format!("create table {}", stmt.name)
+                } else {
+                    let columns = stmt
+                        .columns
+                        .iter()
+                        .map(|col| format!("{} {}", col.name, col.data_type))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("create table {} ({})", stmt.name, columns)
+                }
+            }
+        }
+        Statement::DropTable(stmt) => {
+            if stmt.if_exists {
+                format!("drop table if exists {}", stmt.name)
+            } else {
+                format!("drop table {}", stmt.name)
+            }
+        }
+        Statement::Truncate(stmt) => format!("truncate table {}", stmt.table),
+        Statement::Analyze(stmt) => format!("analyze {}", stmt.table),
+        Statement::Insert(stmt) => {
+            let mut output = format!("insert into {}", stmt.table);
+            if !stmt.columns.is_empty() {
+                output.push_str(" (");
+                output.push_str(&stmt.columns.join(", "));
+                output.push(')');
+            }
+            match &stmt.source {
+                InsertSource::DefaultValues => {
+                    output.push_str(" default values");
+                }
+                InsertSource::Values(values) => {
+                    let rows = values
+                        .iter()
+                        .map(|row| {
+                            let values = row
+                                .iter()
+                                .map(|expr| expr.to_sql())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("({values})")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    output.push_str(" values ");
+                    output.push_str(&rows);
+                }
+                InsertSource::Query(statement) => {
+                    output.push(' ');
+                    output.push_str(&statement_to_sql(statement));
+                }
+            }
+            if !stmt.returning.is_empty() {
+                let returning = stmt
+                    .returning
+                    .iter()
+                    .map(|item| item.expr.to_sql())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                output.push_str(" returning ");
+                output.push_str(&returning);
+            }
+            output
+        }
+        Statement::Update(stmt) => {
+            let mut output = format!("update {} set ", stmt.table);
+            let assignments = stmt
+                .assignments
+                .iter()
+                .map(|assign| format!("{} = {}", assign.column, assign.value.to_sql()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            output.push_str(&assignments);
+            if let Some(selection) = &stmt.selection {
+                output.push_str(" where ");
+                output.push_str(&selection.to_sql());
+            }
+            if !stmt.returning.is_empty() {
+                let returning = stmt
+                    .returning
+                    .iter()
+                    .map(|item| item.expr.to_sql())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                output.push_str(" returning ");
+                output.push_str(&returning);
+            }
+            output
+        }
+        Statement::Delete(stmt) => {
+            let mut output = format!("delete from {}", stmt.table);
+            if let Some(selection) = &stmt.selection {
+                output.push_str(" where ");
+                output.push_str(&selection.to_sql());
+            }
+            if !stmt.returning.is_empty() {
+                let returning = stmt
+                    .returning
+                    .iter()
+                    .map(|item| item.expr.to_sql())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                output.push_str(" returning ");
+                output.push_str(&returning);
+            }
+            output
+        }
+    }
 }
 
 #[cfg(test)]
@@ -606,5 +1077,65 @@ mod tests {
         };
         let normalized = expr.normalize();
         assert!(matches!(normalized, Expr::Identifier(_)));
+    }
+
+    #[test]
+    fn normalize_duplicate_and_or() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::Or,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Identifier(name) if name == "a"));
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::And,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Identifier(name) if name == "a"));
+    }
+
+    #[test]
+    fn normalize_self_comparison() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Literal(Literal::Bool(true))));
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::NotEq,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Literal(Literal::Bool(false))));
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::Lt,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Literal(Literal::Bool(false))));
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::LtEq,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Literal(Literal::Bool(true))));
+    }
+
+    #[test]
+    fn normalize_not_literal() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::Literal(Literal::Bool(true))),
+        };
+        let normalized = expr.normalize();
+        assert!(matches!(normalized, Expr::Literal(Literal::Bool(false))));
     }
 }

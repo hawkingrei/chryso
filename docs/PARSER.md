@@ -11,6 +11,7 @@
 - SELECT supports distinct, joins, group by, having, order by, limit, and offset.
 - Quoted identifiers with `"` or `` ` ``.
 - EXPLAIN SELECT and CREATE TABLE placeholders are parsed.
+- Yacc-style grammar scaffold lives in `crates/parser_yacc/grammar` for a future LALR-based parser.
 
 ## Planned Steps
 1. Tokenizer with punctuation handling (comma, parens, operators).
@@ -23,3 +24,8 @@
 - Parser config selects dialect.
 - Tokenization is shared; dialect influences keyword set and identifier rules.
 - AST remains stable across dialects to isolate optimizer.
+
+## Yacc Track
+- `crates/parser_yacc` provides a `YaccParser` shim and yacc/lex files.
+- Current: yacc grammar validates SQL shape; AST is still produced by `SimpleParser`.
+- Plan: generate a dedicated parser per dialect grammar file, mapping to `corundum_core::ast`.

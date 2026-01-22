@@ -73,17 +73,21 @@ enum Keyword {
     Select,
     Explain,
     Create,
+    Drop,
+    Truncate,
+    If,
+    Exists,
     Table,
     Analyze,
     Insert,
     Into,
     Values,
+    Default,
     Update,
     Set,
     Delete,
     Over,
     Partition,
-    Exists,
     In,
     From,
     Where,
@@ -92,7 +96,11 @@ enum Keyword {
     Not,
     As,
     Join,
+    Cross,
+    Natural,
     Left,
+    Right,
+    Full,
     On,
     Group,
     By,
@@ -103,8 +111,30 @@ enum Keyword {
     Asc,
     Desc,
     Distinct,
+    Union,
+    All,
+    Intersect,
+    Except,
+    With,
+    Recursive,
+    Returning,
     True,
     False,
+    Is,
+    Null,
+    Between,
+    Like,
+    ILike,
+    Using,
+    Case,
+    When,
+    Then,
+    Else,
+    End,
+    Nulls,
+    First,
+    Last,
+    Escape,
 }
 
 struct Parser {
@@ -123,7 +153,9 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> CorundumResult<Statement> {
-        if self.consume_keyword(Keyword::Explain) {
+        if self.consume_keyword(Keyword::With) {
+            self.parse_with_statement()
+        } else if self.consume_keyword(Keyword::Explain) {
             let statement = self.parse_explain_statement()?;
             Ok(Statement::Explain(Box::new(statement)))
         } else if self.consume_keyword(Keyword::Analyze) {
@@ -141,33 +173,265 @@ impl Parser {
         } else if self.consume_keyword(Keyword::Create) {
             let statement = self.parse_create_statement()?;
             Ok(statement)
+        } else if self.consume_keyword(Keyword::Drop) {
+            let statement = self.parse_drop_statement()?;
+            Ok(statement)
+        } else if self.consume_keyword(Keyword::Truncate) {
+            let statement = self.parse_truncate_statement()?;
+            Ok(statement)
         } else if self.consume_keyword(Keyword::Select) {
             let select = self.parse_select()?;
-            Ok(Statement::Select(select))
+            self.parse_query_tail(select)
         } else {
-            Err(CorundumError::new("only SELECT is supported"))
+            Err(CorundumError::new("unexpected statement"))
         }
     }
 
     fn parse_explain_statement(&mut self) -> CorundumResult<Statement> {
-        if self.consume_keyword(Keyword::Select) {
+        if self.consume_keyword(Keyword::With) {
+            self.parse_with_statement()
+        } else if self.consume_keyword(Keyword::Select) {
             let select = self.parse_select()?;
-            Ok(Statement::Select(select))
+            self.parse_query_tail(select)
+        } else if self.consume_keyword(Keyword::Insert) {
+            self.parse_insert_statement()
+        } else if self.consume_keyword(Keyword::Update) {
+            self.parse_update_statement()
+        } else if self.consume_keyword(Keyword::Delete) {
+            self.parse_delete_statement()
+        } else if self.consume_keyword(Keyword::Create) {
+            self.parse_create_statement()
+        } else if self.consume_keyword(Keyword::Analyze) {
+            self.parse_analyze_statement()
         } else {
-            Err(CorundumError::new("EXPLAIN expects SELECT"))
+            Err(CorundumError::new("EXPLAIN expects a statement"))
         }
+    }
+
+    fn parse_with_statement(&mut self) -> CorundumResult<Statement> {
+        let mut ctes = Vec::new();
+        let mut seen_names = std::collections::HashSet::new();
+        let recursive = self.consume_keyword(Keyword::Recursive);
+        loop {
+            let name = self.expect_identifier()?;
+            if !seen_names.insert(name.clone()) {
+                return Err(CorundumError::new(format!(
+                    "duplicate CTE name {name}"
+                )));
+            }
+            let columns = if self.consume_token(&Token::LParen) {
+                if self.consume_token(&Token::RParen) {
+                    return Err(CorundumError::new("CTE column list cannot be empty"));
+                }
+                let cols = self.parse_identifier_list()?;
+                self.expect_token(Token::RParen)?;
+                let mut seen_cols = std::collections::HashSet::new();
+                for col in &cols {
+                    if !seen_cols.insert(col.clone()) {
+                        return Err(CorundumError::new(format!(
+                            "duplicate CTE column {col}"
+                        )));
+                    }
+                }
+                cols
+            } else {
+                Vec::new()
+            };
+            self.expect_keyword(Keyword::As)?;
+            self.expect_token(Token::LParen)?;
+            let stmt = if self.consume_keyword(Keyword::Select) {
+                let select = self.parse_select()?;
+                self.parse_query_tail(select)?
+            } else if self.consume_keyword(Keyword::Insert) {
+                self.parse_insert_statement()?
+            } else if self.consume_keyword(Keyword::Update) {
+                self.parse_update_statement()?
+            } else if self.consume_keyword(Keyword::Delete) {
+                self.parse_delete_statement()?
+            } else if self.consume_keyword(Keyword::With) {
+                self.parse_with_statement()?
+            } else {
+                return Err(CorundumError::new("WITH expects SELECT/INSERT/UPDATE/DELETE or WITH in CTE"));
+            };
+            self.expect_token(Token::RParen)?;
+            ctes.push(corundum_core::ast::Cte {
+                name,
+                columns,
+                query: Box::new(stmt),
+            });
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        let statement = if self.consume_keyword(Keyword::Select) {
+            let select = self.parse_select()?;
+            self.parse_query_tail(select)?
+        } else if self.consume_keyword(Keyword::Insert) {
+            self.parse_insert_statement()?
+        } else if self.consume_keyword(Keyword::Update) {
+            self.parse_update_statement()?
+        } else if self.consume_keyword(Keyword::Delete) {
+            self.parse_delete_statement()?
+        } else {
+            return Err(CorundumError::new("WITH expects SELECT/INSERT/UPDATE/DELETE after CTEs"));
+        };
+        Ok(Statement::With(corundum_core::ast::WithStatement {
+            ctes,
+            recursive,
+            statement: Box::new(statement),
+        }))
+    }
+
+    fn parse_query_tail(&mut self, left: SelectStatement) -> CorundumResult<Statement> {
+        let mut current = Statement::Select(left);
+        loop {
+            let op = if self.consume_keyword(Keyword::Union) {
+                if self.consume_keyword(Keyword::All) {
+                    corundum_core::ast::SetOperator::UnionAll
+                } else {
+                    corundum_core::ast::SetOperator::Union
+                }
+            } else if self.consume_keyword(Keyword::Intersect) {
+                if self.consume_keyword(Keyword::All) {
+                    corundum_core::ast::SetOperator::IntersectAll
+                } else {
+                    corundum_core::ast::SetOperator::Intersect
+                }
+            } else if self.consume_keyword(Keyword::Except) {
+                if self.consume_keyword(Keyword::All) {
+                    corundum_core::ast::SetOperator::ExceptAll
+                } else {
+                    corundum_core::ast::SetOperator::Except
+                }
+            } else {
+                break;
+            };
+            self.expect_keyword(Keyword::Select)?;
+            let right = self.parse_select()?;
+            current = Statement::SetOp {
+                left: Box::new(current),
+                op,
+                right: Box::new(Statement::Select(right)),
+            };
+        }
+        Ok(current)
     }
 
     fn parse_create_statement(&mut self) -> CorundumResult<Statement> {
         if self.consume_keyword(Keyword::Table) {
+            let if_not_exists = if self.consume_keyword(Keyword::If) {
+                self.expect_keyword(Keyword::Not)?;
+                self.expect_keyword(Keyword::Exists)?;
+                true
+            } else {
+                false
+            };
             let name = self.expect_identifier()?;
-            Ok(Statement::CreateTable(corundum_core::ast::CreateTableStatement { name }))
+            let columns = if self.consume_token(&Token::LParen) {
+                let columns = self.parse_column_definitions()?;
+                self.expect_token(Token::RParen)?;
+                columns
+            } else {
+                Vec::new()
+            };
+            Ok(Statement::CreateTable(corundum_core::ast::CreateTableStatement {
+                name,
+                if_not_exists,
+                columns,
+            }))
         } else {
             Err(CorundumError::new("only CREATE TABLE is supported"))
         }
     }
 
+    fn parse_column_definitions(&mut self) -> CorundumResult<Vec<corundum_core::ast::ColumnDef>> {
+        let mut columns = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            let data_type = self.parse_type_name()?;
+            if data_type.is_empty() {
+                return Err(CorundumError::new("column expects a data type"));
+            }
+            columns.push(corundum_core::ast::ColumnDef { name, data_type });
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(columns)
+    }
+
+    fn parse_type_name(&mut self) -> CorundumResult<String> {
+        let mut output = String::new();
+        let mut depth = 0usize;
+        loop {
+            let token = match self.peek().cloned() {
+                Some(token) => token,
+                None => break,
+            };
+            if depth == 0 {
+                if matches!(token, Token::Comma | Token::RParen) {
+                    break;
+                }
+            }
+            let part = match self.next() {
+                Some(Token::Ident(name)) => name,
+                Some(Token::Number(value)) => value,
+                Some(Token::LParen) => {
+                    depth += 1;
+                    "(".to_string()
+                }
+                Some(Token::RParen) => {
+                    if depth == 0 {
+                        return Err(CorundumError::new("unexpected ')' in type"));
+                    }
+                    depth -= 1;
+                    ")".to_string()
+                }
+                Some(Token::Keyword(keyword)) => keyword_label(keyword).to_string(),
+                other => {
+                    return Err(CorundumError::new(format!(
+                        "unexpected token in type: {}",
+                        other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
+                    )))
+                }
+            };
+            if output.is_empty() {
+                output.push_str(&part);
+            } else if part == ")" || part == "(" || output.ends_with('(') {
+                output.push_str(&part);
+            } else {
+                output.push(' ');
+                output.push_str(&part);
+            }
+        }
+        Ok(output)
+    }
+
+    fn parse_drop_statement(&mut self) -> CorundumResult<Statement> {
+        let _ = self.consume_keyword(Keyword::Table);
+        let if_exists = if self.consume_keyword(Keyword::If) {
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
+        let name = self.expect_identifier()?;
+        Ok(Statement::DropTable(corundum_core::ast::DropTableStatement {
+            name,
+            if_exists,
+        }))
+    }
+
+    fn parse_truncate_statement(&mut self) -> CorundumResult<Statement> {
+        let _ = self.consume_keyword(Keyword::Table);
+        let name = self.expect_identifier()?;
+        Ok(Statement::Truncate(corundum_core::ast::TruncateStatement {
+            table: name,
+        }))
+    }
+
     fn parse_analyze_statement(&mut self) -> CorundumResult<Statement> {
+        let _ = self.consume_keyword(Keyword::Table);
         let name = self.expect_identifier()?;
         Ok(Statement::Analyze(corundum_core::ast::AnalyzeStatement { table: name }))
     }
@@ -182,21 +446,42 @@ impl Parser {
         } else {
             Vec::new()
         };
-        self.expect_keyword(Keyword::Values)?;
-        let mut values = Vec::new();
-        loop {
-            self.expect_token(Token::LParen)?;
-            let row = self.parse_expr_list()?;
-            self.expect_token(Token::RParen)?;
-            values.push(row);
-            if !self.consume_token(&Token::Comma) {
-                break;
-            }
+        if self.consume_keyword(Keyword::Default) {
+            self.expect_keyword(Keyword::Values)?;
+            return Ok(Statement::Insert(corundum_core::ast::InsertStatement {
+                table,
+                columns,
+                source: corundum_core::ast::InsertSource::DefaultValues,
+                returning: self.parse_returning_clause()?,
+            }));
         }
+        let source = if self.consume_keyword(Keyword::Values) {
+            let mut values = Vec::new();
+            loop {
+                self.expect_token(Token::LParen)?;
+                let row = self.parse_expr_list()?;
+                self.expect_token(Token::RParen)?;
+                values.push(row);
+                if !self.consume_token(&Token::Comma) {
+                    break;
+                }
+            }
+            corundum_core::ast::InsertSource::Values(values)
+        } else if self.consume_keyword(Keyword::Select) {
+            let select = self.parse_select()?;
+            let statement = self.parse_query_tail(select)?;
+            corundum_core::ast::InsertSource::Query(Box::new(statement))
+        } else if self.consume_keyword(Keyword::With) {
+            let statement = self.parse_with_statement()?;
+            corundum_core::ast::InsertSource::Query(Box::new(statement))
+        } else {
+            return Err(CorundumError::new("INSERT expects VALUES or SELECT"));
+        };
         Ok(Statement::Insert(corundum_core::ast::InsertStatement {
             table,
             columns,
-            values,
+            source,
+            returning: self.parse_returning_clause()?,
         }))
     }
 
@@ -213,6 +498,7 @@ impl Parser {
             table,
             assignments,
             selection,
+            returning: self.parse_returning_clause()?,
         }))
     }
 
@@ -224,14 +510,29 @@ impl Parser {
         } else {
             None
         };
-        Ok(Statement::Delete(corundum_core::ast::DeleteStatement { table, selection }))
+        Ok(Statement::Delete(corundum_core::ast::DeleteStatement {
+            table,
+            selection,
+            returning: self.parse_returning_clause()?,
+        }))
     }
 
     fn parse_select(&mut self) -> CorundumResult<SelectStatement> {
         let distinct = self.consume_keyword(Keyword::Distinct);
+        let distinct_on = if distinct && self.consume_keyword(Keyword::On) {
+            self.expect_token(Token::LParen)?;
+            let exprs = self.parse_expr_list()?;
+            self.expect_token(Token::RParen)?;
+            exprs
+        } else {
+            Vec::new()
+        };
         let projection = self.parse_projection()?;
-        self.expect_keyword(Keyword::From)?;
-        let from = self.parse_table_ref()?;
+        let from = if self.consume_keyword(Keyword::From) {
+            Some(self.parse_table_ref()?)
+        } else {
+            None
+        };
         let selection = if self.consume_keyword(Keyword::Where) {
             Some(self.parse_expr()?)
         } else {
@@ -266,6 +567,7 @@ impl Parser {
         };
         Ok(SelectStatement {
             distinct,
+            distinct_on,
             projection,
             from,
             selection,
@@ -305,8 +607,40 @@ impl Parser {
         Ok(items)
     }
 
+    fn parse_returning_clause(&mut self) -> CorundumResult<Vec<SelectItem>> {
+        if self.consume_keyword(Keyword::Returning) {
+            let mut items = Vec::new();
+            loop {
+                let expr = if self.consume_token(&Token::Star) {
+                    Expr::Wildcard
+                } else {
+                    self.parse_expr()?
+                };
+                let alias = if self.consume_keyword(Keyword::As) {
+                    Some(self.expect_identifier()?)
+                } else if let Some(Token::Ident(name)) = self.peek().cloned() {
+                    if !self.is_clause_boundary() {
+                        self.next();
+                        Some(name)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                items.push(SelectItem { expr, alias });
+                if !self.consume_token(&Token::Comma) {
+                    break;
+                }
+            }
+            Ok(items)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     fn parse_table_ref(&mut self) -> CorundumResult<TableRef> {
-        let name = self.expect_identifier()?;
+        let factor = self.parse_table_factor()?;
         let alias = if self.consume_keyword(Keyword::As) {
             Some(self.expect_identifier()?)
         } else if let Some(Token::Ident(_)) = self.peek() {
@@ -318,23 +652,86 @@ impl Parser {
         } else {
             None
         };
+        let column_aliases = if self.consume_token(&Token::LParen) {
+            if alias.is_none() {
+                return Err(CorundumError::new("table alias list requires alias"));
+            }
+            let columns = self.parse_identifier_list()?;
+            self.expect_token(Token::RParen)?;
+            columns
+        } else {
+            Vec::new()
+        };
+        if matches!(factor, corundum_core::ast::TableFactor::Derived { .. }) && alias.is_none()
+        {
+            return Err(CorundumError::new("subquery in FROM requires alias"));
+        }
         let mut table = TableRef {
-            name,
+            factor,
             alias,
+            column_aliases,
             joins: Vec::new(),
         };
         loop {
+            let mut cross_join = false;
+            let mut natural_join = false;
             let join_type = if self.consume_keyword(Keyword::Join) {
                 JoinType::Inner
+            } else if self.consume_keyword(Keyword::Cross) {
+                self.expect_keyword(Keyword::Join)?;
+                cross_join = true;
+                JoinType::Inner
+            } else if self.consume_token(&Token::Comma) {
+                cross_join = true;
+                JoinType::Inner
+            } else if self.consume_keyword(Keyword::Natural) {
+                natural_join = true;
+                if self.consume_keyword(Keyword::Left) {
+                    self.expect_keyword(Keyword::Join)?;
+                    JoinType::Left
+                } else if self.consume_keyword(Keyword::Right) {
+                    self.expect_keyword(Keyword::Join)?;
+                    JoinType::Right
+                } else if self.consume_keyword(Keyword::Full) {
+                    self.expect_keyword(Keyword::Join)?;
+                    JoinType::Full
+                } else if self.consume_keyword(Keyword::Join) {
+                    JoinType::Inner
+                } else {
+                    return Err(CorundumError::new("NATURAL expects JOIN"));
+                }
             } else if self.consume_keyword(Keyword::Left) {
                 self.expect_keyword(Keyword::Join)?;
                 JoinType::Left
+            } else if self.consume_keyword(Keyword::Right) {
+                self.expect_keyword(Keyword::Join)?;
+                JoinType::Right
+            } else if self.consume_keyword(Keyword::Full) {
+                self.expect_keyword(Keyword::Join)?;
+                JoinType::Full
             } else {
                 break;
             };
             let right = self.parse_table_ref()?;
-            self.expect_keyword(Keyword::On)?;
-            let on = self.parse_expr()?;
+            let on = if cross_join || natural_join {
+                if self.peek_is_keyword(Keyword::On) || self.peek_is_keyword(Keyword::Using) {
+                    return Err(CorundumError::new(
+                        "NATURAL/CROSS JOIN cannot use ON or USING",
+                    ));
+                }
+                Expr::Literal(Literal::Bool(true))
+            } else if self.consume_keyword(Keyword::On) {
+                self.parse_expr()?
+            } else if self.consume_keyword(Keyword::Using) {
+                let left_name = table_ref_name(&table)?;
+                let right_name = table_ref_name(&right)?;
+                self.expect_token(Token::LParen)?;
+                let columns = self.parse_identifier_list()?;
+                self.expect_token(Token::RParen)?;
+                build_using_on(left_name.as_str(), right_name.as_str(), columns)
+            } else {
+                return Err(CorundumError::new("JOIN expects ON or USING"));
+            };
             table.joins.push(Join {
                 join_type,
                 right,
@@ -342,6 +739,27 @@ impl Parser {
             });
         }
         Ok(table)
+    }
+
+    fn parse_table_factor(&mut self) -> CorundumResult<corundum_core::ast::TableFactor> {
+        if self.consume_token(&Token::LParen) {
+            let statement = if self.consume_keyword(Keyword::With) {
+                self.parse_with_statement()?
+            } else if self.consume_keyword(Keyword::Select) {
+                let select = self.parse_select()?;
+                self.parse_query_tail(select)?
+            } else {
+                return Err(CorundumError::new(
+                    "subquery in FROM expects SELECT or WITH",
+                ));
+            };
+            self.expect_token(Token::RParen)?;
+            return Ok(corundum_core::ast::TableFactor::Derived {
+                query: Box::new(statement),
+            });
+        }
+        let name = self.expect_identifier()?;
+        Ok(corundum_core::ast::TableFactor::Table { name })
     }
 
     fn parse_order_by_list(&mut self) -> CorundumResult<Vec<OrderByExpr>> {
@@ -355,7 +773,22 @@ impl Parser {
             } else {
                 true
             };
-            items.push(OrderByExpr { expr, asc });
+            let nulls_first = if self.consume_keyword(Keyword::Nulls) {
+                if self.consume_keyword(Keyword::First) {
+                    Some(true)
+                } else if self.consume_keyword(Keyword::Last) {
+                    Some(false)
+                } else {
+                    return Err(CorundumError::new("NULLS expects FIRST or LAST"));
+                }
+            } else {
+                None
+            };
+            items.push(OrderByExpr {
+                expr,
+                asc,
+                nulls_first,
+            });
             if !self.consume_token(&Token::Comma) {
                 break;
             }
@@ -417,6 +850,71 @@ impl Parser {
     fn parse_comparison(&mut self) -> CorundumResult<Expr> {
         let mut expr = self.parse_additive()?;
         loop {
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Between) {
+                self.next();
+                self.next();
+                let low = self.parse_additive()?;
+                self.expect_keyword(Keyword::And)?;
+                let high = self.parse_additive()?;
+                return Ok(Expr::BinaryOp {
+                    left: Box::new(Expr::BinaryOp {
+                        left: Box::new(expr.clone()),
+                        op: BinaryOperator::Lt,
+                        right: Box::new(low),
+                    }),
+                    op: BinaryOperator::Or,
+                    right: Box::new(Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: BinaryOperator::Gt,
+                        right: Box::new(high),
+                    }),
+                });
+            }
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::In) {
+                self.next();
+                self.next();
+                let in_expr = self.parse_in_payload(expr)?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(in_expr),
+                });
+            }
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Like) {
+                self.next();
+                self.next();
+                let like_expr = self.parse_like_payload(expr, "like")?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(like_expr),
+                });
+            }
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::ILike) {
+                self.next();
+                self.next();
+                let like_expr = self.parse_like_payload(expr, "ilike")?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(like_expr),
+                });
+            }
+            if self.consume_keyword(Keyword::Between) {
+                let low = self.parse_additive()?;
+                self.expect_keyword(Keyword::And)?;
+                let high = self.parse_additive()?;
+                return Ok(Expr::BinaryOp {
+                    left: Box::new(Expr::BinaryOp {
+                        left: Box::new(expr.clone()),
+                        op: BinaryOperator::GtEq,
+                        right: Box::new(low),
+                    }),
+                    op: BinaryOperator::And,
+                    right: Box::new(Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: BinaryOperator::LtEq,
+                        right: Box::new(high),
+                    }),
+                });
+            }
             let op = if self.consume_token(&Token::Eq) {
                 Some(BinaryOperator::Eq)
             } else if self.consume_token(&Token::NotEq) {
@@ -430,11 +928,18 @@ impl Parser {
             } else if self.consume_token(&Token::Gt) {
                 Some(BinaryOperator::Gt)
             } else if self.consume_keyword(Keyword::In) {
-                let subquery = self.parse_subquery_select()?;
-                return Ok(Expr::InSubquery {
+                return Ok(self.parse_in_payload(expr)?);
+            } else if self.consume_keyword(Keyword::Is) {
+                let negated = self.consume_keyword(Keyword::Not);
+                self.expect_keyword(Keyword::Null)?;
+                return Ok(Expr::IsNull {
                     expr: Box::new(expr),
-                    subquery: Box::new(subquery),
+                    negated,
                 });
+            } else if self.consume_keyword(Keyword::Like) {
+                return Ok(self.parse_like_payload(expr, "like")?);
+            } else if self.consume_keyword(Keyword::ILike) {
+                return Ok(self.parse_like_payload(expr, "ilike")?);
             } else {
                 None
             };
@@ -449,6 +954,48 @@ impl Parser {
             };
         }
         Ok(expr)
+    }
+
+    fn parse_in_payload(&mut self, expr: Expr) -> CorundumResult<Expr> {
+        self.expect_token(Token::LParen)?;
+        if self.peek_is_keyword(Keyword::Select) {
+            let subquery = self.parse_subquery_select_after_lparen()?;
+            return Ok(Expr::InSubquery {
+                expr: Box::new(expr),
+                subquery: Box::new(subquery),
+            });
+        }
+        let list = self.parse_expr_list_in_parens()?;
+        Ok(rewrite_in_list(expr, list))
+    }
+
+    fn parse_like_payload(&mut self, expr: Expr, name: &str) -> CorundumResult<Expr> {
+        let pattern = self.parse_additive()?;
+        let mut args = vec![expr, pattern];
+        if self.consume_keyword(Keyword::Escape) {
+            let escape = self.parse_additive()?;
+            args.push(escape);
+        }
+        Ok(Expr::FunctionCall {
+            name: name.to_string(),
+            args,
+        })
+    }
+
+    fn parse_expr_list_in_parens(&mut self) -> CorundumResult<Vec<Expr>> {
+        let mut items = Vec::new();
+        if self.consume_token(&Token::RParen) {
+            return Err(CorundumError::new("IN list cannot be empty"));
+        }
+        loop {
+            items.push(self.parse_expr()?);
+            if self.consume_token(&Token::Comma) {
+                continue;
+            }
+            self.expect_token(Token::RParen)?;
+            break;
+        }
+        Ok(items)
     }
 
     fn parse_additive(&mut self) -> CorundumResult<Expr> {
@@ -541,8 +1088,12 @@ impl Parser {
                         Ok(function)
                     }
                 } else if self.consume_token(&Token::Dot) {
-                    let rhs = self.expect_identifier()?;
-                    Ok(Expr::Identifier(format!("{}.{}", name, rhs)))
+                    if self.consume_token(&Token::Star) {
+                        Ok(Expr::Identifier(format!("{name}.*")))
+                    } else {
+                        let rhs = self.expect_identifier()?;
+                        Ok(Expr::Identifier(format!("{}.{}", name, rhs)))
+                    }
                 } else {
                     Ok(Expr::Identifier(name))
                 }
@@ -555,6 +1106,7 @@ impl Parser {
                     .map_err(|_| CorundumError::new("invalid number"))?,
             ))),
             Some(Token::String(value)) => Ok(Expr::Literal(Literal::String(value))),
+            Some(Token::Keyword(Keyword::Case)) => self.parse_case_expr(),
             Some(Token::Star) => Ok(Expr::Wildcard),
             Some(Token::LParen) => {
                 if self.peek_is_keyword(Keyword::Select) {
@@ -568,6 +1120,41 @@ impl Parser {
             }
             _ => Err(CorundumError::new("unexpected token in expression")),
         }
+    }
+
+    fn parse_case_expr(&mut self) -> CorundumResult<Expr> {
+        if self.peek_is_keyword(Keyword::End) {
+            return Err(CorundumError::new("CASE expects at least one WHEN"));
+        }
+        let operand = if self.peek_is_keyword(Keyword::When) {
+            None
+        } else {
+            Some(Box::new(self.parse_expr()?))
+        };
+        let mut when_then = Vec::new();
+        loop {
+            if !self.consume_keyword(Keyword::When) {
+                break;
+            }
+            let when_expr = self.parse_expr()?;
+            self.expect_keyword(Keyword::Then)?;
+            let then_expr = self.parse_expr()?;
+            when_then.push((when_expr, then_expr));
+        }
+        if when_then.is_empty() {
+            return Err(CorundumError::new("CASE expects at least one WHEN"));
+        }
+        let else_expr = if self.consume_keyword(Keyword::Else) {
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+        self.expect_keyword(Keyword::End)?;
+        Ok(Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        })
     }
 
     fn expect_keyword(&mut self, keyword: Keyword) -> CorundumResult<()> {
@@ -700,7 +1287,11 @@ impl Parser {
                     | Keyword::Limit
                     | Keyword::Join
                     | Keyword::Left
-            ))
+                    | Keyword::Cross
+                    | Keyword::Natural
+                    | Keyword::Right
+                    | Keyword::Full
+            )) | Some(Token::Comma)
         )
     }
 
@@ -710,18 +1301,29 @@ impl Parser {
             Some(Token::Keyword(
                 Keyword::Join
                     | Keyword::Left
+                    | Keyword::Cross
+                    | Keyword::Natural
+                    | Keyword::Right
+                    | Keyword::Full
                     | Keyword::Where
                     | Keyword::Group
                     | Keyword::Having
                     | Keyword::Order
                     | Keyword::Offset
                     | Keyword::Limit
-            ))
+            )) | Some(Token::Comma)
         )
     }
 
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
+    }
+
+    fn peek_is_keyword_n(&self, offset: usize, keyword: Keyword) -> bool {
+        matches!(
+            self.tokens.get(self.pos + offset),
+            Some(Token::Keyword(kw)) if *kw == keyword
+        )
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -733,6 +1335,63 @@ impl Parser {
             Some(token)
         }
     }
+}
+
+fn rewrite_in_list(expr: Expr, list: Vec<Expr>) -> Expr {
+    let mut iter = list.into_iter();
+    let first = iter.next().expect("in list should be non-empty");
+    let mut combined = Expr::BinaryOp {
+        left: Box::new(expr.clone()),
+        op: BinaryOperator::Eq,
+        right: Box::new(first),
+    };
+    for item in iter {
+        combined = Expr::BinaryOp {
+            left: Box::new(combined),
+            op: BinaryOperator::Or,
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(expr.clone()),
+                op: BinaryOperator::Eq,
+                right: Box::new(item),
+            }),
+        };
+    }
+    combined
+}
+
+fn table_ref_name(table: &TableRef) -> CorundumResult<String> {
+    if let Some(alias) = &table.alias {
+        return Ok(alias.clone());
+    }
+    match &table.factor {
+        corundum_core::ast::TableFactor::Table { name } => Ok(name.clone()),
+        corundum_core::ast::TableFactor::Derived { .. } => {
+            Err(CorundumError::new("subquery in FROM requires alias"))
+        }
+    }
+}
+
+fn build_using_on(left_name: &str, right_name: &str, columns: Vec<String>) -> Expr {
+    let mut iter = columns.into_iter();
+    let first = iter.next().expect("using columns should be non-empty");
+    let mut expr = Expr::BinaryOp {
+        left: Box::new(Expr::Identifier(format!("{left_name}.{first}"))),
+        op: BinaryOperator::Eq,
+        right: Box::new(Expr::Identifier(format!("{right_name}.{first}"))),
+    };
+    for column in iter {
+        let next = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(format!("{left_name}.{column}"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier(format!("{right_name}.{column}"))),
+        };
+        expr = Expr::BinaryOp {
+            left: Box::new(expr),
+            op: BinaryOperator::And,
+            right: Box::new(next),
+        };
+    }
+    expr
 }
 
 fn token_label(token: &Token) -> String {
@@ -763,10 +1422,14 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Select => "select",
         Keyword::Explain => "explain",
         Keyword::Create => "create",
+        Keyword::Drop => "drop",
+        Keyword::Truncate => "truncate",
+        Keyword::If => "if",
         Keyword::Table => "table",
         Keyword::Insert => "insert",
         Keyword::Into => "into",
         Keyword::Values => "values",
+        Keyword::Default => "default",
         Keyword::Update => "update",
         Keyword::Set => "set",
         Keyword::Delete => "delete",
@@ -777,7 +1440,11 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Not => "not",
         Keyword::As => "as",
         Keyword::Join => "join",
+        Keyword::Cross => "cross",
+        Keyword::Natural => "natural",
         Keyword::Left => "left",
+        Keyword::Right => "right",
+        Keyword::Full => "full",
         Keyword::On => "on",
         Keyword::Group => "group",
         Keyword::By => "by",
@@ -788,6 +1455,13 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Asc => "asc",
         Keyword::Desc => "desc",
         Keyword::Distinct => "distinct",
+        Keyword::Union => "union",
+        Keyword::All => "all",
+        Keyword::Intersect => "intersect",
+        Keyword::Except => "except",
+        Keyword::With => "with",
+        Keyword::Recursive => "recursive",
+        Keyword::Returning => "returning",
         Keyword::Analyze => "analyze",
         Keyword::Over => "over",
         Keyword::Partition => "partition",
@@ -795,6 +1469,21 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::In => "in",
         Keyword::True => "true",
         Keyword::False => "false",
+        Keyword::Is => "is",
+        Keyword::Null => "null",
+        Keyword::Between => "between",
+        Keyword::Like => "like",
+        Keyword::ILike => "ilike",
+        Keyword::Using => "using",
+        Keyword::Case => "case",
+        Keyword::When => "when",
+        Keyword::Then => "then",
+        Keyword::Else => "else",
+        Keyword::End => "end",
+        Keyword::Nulls => "nulls",
+        Keyword::First => "first",
+        Keyword::Last => "last",
+        Keyword::Escape => "escape",
     }
 }
 
@@ -968,11 +1657,15 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "select" => Some(Keyword::Select),
         "explain" => Some(Keyword::Explain),
         "create" => Some(Keyword::Create),
+        "drop" => Some(Keyword::Drop),
+        "truncate" => Some(Keyword::Truncate),
+        "if" => Some(Keyword::If),
         "table" => Some(Keyword::Table),
         "analyze" => Some(Keyword::Analyze),
         "insert" => Some(Keyword::Insert),
         "into" => Some(Keyword::Into),
         "values" => Some(Keyword::Values),
+        "default" => Some(Keyword::Default),
         "update" => Some(Keyword::Update),
         "set" => Some(Keyword::Set),
         "delete" => Some(Keyword::Delete),
@@ -986,7 +1679,11 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "not" => Some(Keyword::Not),
         "as" => Some(Keyword::As),
         "join" => Some(Keyword::Join),
+        "cross" => Some(Keyword::Cross),
+        "natural" => Some(Keyword::Natural),
         "left" => Some(Keyword::Left),
+        "right" => Some(Keyword::Right),
+        "full" => Some(Keyword::Full),
         "on" => Some(Keyword::On),
         "group" => Some(Keyword::Group),
         "by" => Some(Keyword::By),
@@ -997,9 +1694,31 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "asc" => Some(Keyword::Asc),
         "desc" => Some(Keyword::Desc),
         "distinct" => Some(Keyword::Distinct),
+        "union" => Some(Keyword::Union),
+        "all" => Some(Keyword::All),
+        "intersect" => Some(Keyword::Intersect),
+        "except" => Some(Keyword::Except),
+        "with" => Some(Keyword::With),
+        "recursive" => Some(Keyword::Recursive),
+        "returning" => Some(Keyword::Returning),
         "in" => Some(Keyword::In),
         "true" => Some(Keyword::True),
         "false" => Some(Keyword::False),
+        "is" => Some(Keyword::Is),
+        "null" => Some(Keyword::Null),
+        "between" => Some(Keyword::Between),
+        "like" => Some(Keyword::Like),
+        "ilike" => Some(Keyword::ILike),
+        "using" => Some(Keyword::Using),
+        "case" => Some(Keyword::Case),
+        "when" => Some(Keyword::When),
+        "then" => Some(Keyword::Then),
+        "else" => Some(Keyword::Else),
+        "end" => Some(Keyword::End),
+        "nulls" => Some(Keyword::Nulls),
+        "first" => Some(Keyword::First),
+        "last" => Some(Keyword::Last),
+        "escape" => Some(Keyword::Escape),
         _ => None,
     }
 }
@@ -1007,7 +1726,14 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
 #[cfg(test)]
 mod tests {
     use super::{Dialect, ParserConfig, SimpleParser, SqlParser};
-    use corundum_core::ast::{BinaryOperator, Expr, JoinType, Statement};
+    use corundum_core::ast::{
+        BinaryOperator, Expr, InsertSource, JoinType, Literal, SelectStatement, Statement,
+        TableFactor, TableRef, UnaryOperator,
+    };
+
+    fn unwrap_from(select: &SelectStatement) -> &TableRef {
+        select.from.as_ref().expect("expected from")
+    }
 
     #[test]
     fn parse_select_with_and_or() {
@@ -1041,6 +1767,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_select_without_from() {
+        let sql = "select 1 + 2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.from.is_none());
+    }
+
+    #[test]
+    fn parse_select_without_from_with_where() {
+        let sql = "select 1 where 1 = 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.from.is_none());
+        assert!(select.selection.is_some());
+    }
+
+    #[test]
+    fn parse_select_without_from_with_group_order_limit() {
+        let sql = "select 1 group by 1 order by 1 limit 2 offset 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.from.is_none());
+        assert_eq!(select.group_by.len(), 1);
+        assert_eq!(select.order_by.len(), 1);
+        assert_eq!(select.limit, Some(2));
+        assert_eq!(select.offset, Some(1));
+    }
+
+    #[test]
     fn parse_select_with_distinct_offset() {
         let sql = "select distinct id from users order by id offset 5";
         let parser = SimpleParser::new(ParserConfig {
@@ -1051,7 +1821,648 @@ mod tests {
             panic!("expected select");
         };
         assert!(select.distinct);
+        assert!(select.distinct_on.is_empty());
         assert_eq!(select.offset, Some(5));
+    }
+
+    #[test]
+    fn parse_distinct_on() {
+        let sql = "select distinct on (region) region, id from users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.distinct);
+        assert_eq!(select.distinct_on.len(), 1);
+    }
+
+    #[test]
+    fn parse_union_all() {
+        let sql = "select id from t1 union all select id from t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::SetOp { op, .. } = stmt else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::UnionAll));
+    }
+
+    #[test]
+    fn parse_intersect_except() {
+        let sql = "select id from t1 intersect select id from t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::SetOp { op, .. } = stmt else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+
+        let sql = "select id from t1 except all select id from t2";
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::SetOp { op, .. } = stmt else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::ExceptAll));
+    }
+
+    #[test]
+    fn parse_with_cte() {
+        let sql = "with t as (select id from users) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert_eq!(with_stmt.ctes.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_recursive_cte_columns() {
+        let sql = "with recursive t(id) as (select id from users) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert!(with_stmt.recursive);
+        assert_eq!(with_stmt.ctes[0].columns, vec!["id".to_string()]);
+    }
+
+    #[test]
+    fn parse_with_duplicate_cte_columns() {
+        let sql = "with t(id, id) as (select id from users) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("duplicate CTE column"));
+    }
+
+    #[test]
+    fn parse_with_empty_cte_columns() {
+        let sql = "with t() as (select id from users) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("CTE column list cannot be empty"));
+    }
+
+    #[test]
+    fn parse_with_insert() {
+        let sql = "with t as (select id from users) insert into audit (id) values (1)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert!(matches!(*with_stmt.statement, Statement::Insert(_)));
+    }
+
+    #[test]
+    fn parse_with_delete() {
+        let sql = "with t as (select id from users) delete from users where id = 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert!(matches!(*with_stmt.statement, Statement::Delete(_)));
+    }
+
+    #[test]
+    fn parse_with_nested_cte() {
+        let sql = "with t as (with u as (select id from users) select id from u) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert_eq!(with_stmt.ctes.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_delete_returning_mixed() {
+        let sql = "with t as (select id from users) delete from users returning id, users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 2);
+        assert!(matches!(delete.returning[1].expr, Expr::Identifier(ref name) if name == "users.*"));
+    }
+
+    #[test]
+    fn parse_returning_expressions() {
+        let sql = "update users set name = 'bob' returning id + 1 as next_id, upper(name)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 2);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("next_id")));
+    }
+
+    #[test]
+    fn parse_with_insert_returning_mixed() {
+        let sql = "with t as (select id from users) insert into users (id) values (1) returning id, users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 2);
+    }
+
+    #[test]
+    fn parse_with_update_returning_mixed() {
+        let sql = "with t as (select id from users) update users set name = 'bob' returning id, users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Update(update) = with_stmt.statement.as_ref() else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 2);
+    }
+
+    #[test]
+    fn parse_returning_case_expr() {
+        let sql = "update users set active = true returning case when active then 1 else 0 end as flag";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("flag")));
+    }
+
+    #[test]
+    fn parse_returning_nested_function() {
+        let sql = "insert into users (name) values ('alice') returning upper(trim(name))";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_multiple_aliases() {
+        let sql = "insert into users (id, name) values (1, 'alice') returning id as id1, name as name1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 2);
+        assert!(matches!(insert.returning[0].alias.as_deref(), Some("id1")));
+        assert!(matches!(insert.returning[1].alias.as_deref(), Some("name1")));
+    }
+
+    #[test]
+    fn parse_returning_with_star_and_alias() {
+        let sql = "delete from users returning *, id as id1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Delete(delete) = stmt else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 2);
+        assert!(matches!(delete.returning[0].expr, Expr::Wildcard));
+        assert!(matches!(delete.returning[1].alias.as_deref(), Some("id1")));
+    }
+
+    #[test]
+    fn parse_with_recursive_multiple_ctes() {
+        let sql = "with recursive t(id) as (select id from users), u as (select id from t) select id from u";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert!(with_stmt.recursive);
+        assert_eq!(with_stmt.ctes.len(), 2);
+    }
+
+    #[test]
+    fn parse_returning_complex_expr() {
+        let sql = "update users set active = true returning case when active then upper(name) else lower(name) end as cname";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+    }
+
+    #[test]
+    fn parse_with_union_returning() {
+        let sql = "with t as (select id from t1 union select id from t2) update users set id = 1 returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Union));
+        let Statement::Update(update) = with_stmt.statement.as_ref() else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_intersect_returning() {
+        let sql = "with t as (select id from t1 intersect select id from t2) delete from users returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+        let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_except_returning() {
+        let sql = "with t as (select id from t1 except select id from t2) insert into users (id) values (1) returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Except));
+        let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_mixed_expressions() {
+        let sql = "update users set id = 1 returning id, id + 1 as next_id, users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 3);
+        assert!(matches!(update.returning[1].alias.as_deref(), Some("next_id")));
+        assert!(matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*"));
+    }
+
+    #[test]
+    fn parse_with_intersect_all_returning() {
+        let sql = "with t as (select id from t1 intersect all select id from t2) delete from users returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::IntersectAll));
+        let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_except_all_returning() {
+        let sql = "with t as (select id from t1 except all select id from t2) insert into users (id) values (1) returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::ExceptAll));
+        let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_deep_expr() {
+        let sql = "update users set id = 1 returning case when active then upper(trim(name)) else lower(trim(name)) end as cname";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+    }
+
+    #[test]
+    fn parse_with_cte_insert_returning() {
+        let sql = "with t as (insert into users (id) values (1) returning id) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Insert(insert) = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_cte_update_returning() {
+        let sql = "with t as (update users set id = 1 returning id) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Update(update) = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_cte_delete_returning() {
+        let sql = "with t as (delete from users returning id) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::Delete(delete) = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_table_column_expr() {
+        let sql = "update users set id = 1 returning users.id, id + 1, users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 3);
+        assert!(matches!(update.returning[0].expr, Expr::Identifier(ref name) if name == "users.id"));
+        assert!(matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*"));
+    }
+
+    #[test]
+    fn parse_with_cte_setop_insert_returning() {
+        let sql = "with t as (select id from t1 union select id from t2) insert into users (id) values (1) returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Union));
+        let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_cte_setop_update_returning() {
+        let sql = "with t as (select id from t1 intersect select id from t2) update users set id = 1 returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+        let Statement::Update(update) = with_stmt.statement.as_ref() else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_cte_setop_delete_returning() {
+        let sql = "with t as (select id from t1 except select id from t2) delete from users returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::Except));
+        let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_complex_chain() {
+        let sql = "update users set id = 1 returning upper(trim(lower(name))) as cname, case when id > 0 then id * 2 else id / 2 end";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 2);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+    }
+
+    #[test]
+    fn parse_with_duplicate_cte_names() {
+        let sql = "with t as (select id from t1), t as (select id from t2) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("duplicate CTE name"));
+    }
+
+    #[test]
+    fn parse_insert_returning() {
+        let sql = "insert into users (id) values (1) returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_update_returning() {
+        let sql = "update users set name = 'bob' returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_delete_returning() {
+        let sql = "delete from users returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Delete(delete) = stmt else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_with_union_cte() {
+        let sql = "with t as (select id from t1 union all select id from t2) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert_eq!(with_stmt.ctes.len(), 1);
+        let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
+            panic!("expected set op");
+        };
+        assert!(matches!(op, corundum_core::ast::SetOperator::UnionAll));
+    }
+
+    #[test]
+    fn parse_with_multiple_ctes() {
+        let sql = "with t as (select id from t1), u as (select id from t2) select id from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::With(with_stmt) = stmt else {
+            panic!("expected with");
+        };
+        assert_eq!(with_stmt.ctes.len(), 2);
+    }
+
+    #[test]
+    fn parse_order_by_nulls_last() {
+        let sql = "select id from users order by id desc nulls last";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 1);
+        assert_eq!(select.order_by[0].nulls_first, Some(false));
     }
 
     #[test]
@@ -1084,8 +2495,325 @@ mod tests {
         let Statement::Select(select) = stmt else {
             panic!("expected select");
         };
-        assert_eq!(select.from.joins.len(), 1);
-        assert!(matches!(select.from.joins[0].join_type, JoinType::Inner));
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Inner));
+    }
+
+    #[test]
+    fn parse_from_subquery() {
+        let sql = "select * from (select id from users) as u";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert!(matches!(
+            from.factor,
+            TableFactor::Derived { .. }
+        ));
+        assert_eq!(from.alias.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn parse_from_subquery_join() {
+        let sql = "select * from (select id from users) as u join items on u.id = items.user_id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert!(matches!(from.factor, TableFactor::Derived { .. }));
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].right.factor, TableFactor::Table { .. }));
+    }
+
+    #[test]
+    fn parse_from_subquery_join_using() {
+        let sql = "select * from (select id from users) as u join items using (id)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let on_sql = unwrap_from(&select).joins[0].on.to_sql();
+        assert!(on_sql.contains("u.id = items.id"));
+    }
+
+    #[test]
+    fn parse_from_subquery_column_aliases() {
+        let sql = "select * from (select id from users) as u(user_id)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.column_aliases, vec!["user_id"]);
+    }
+
+    #[test]
+    fn parse_table_alias_list_requires_alias() {
+        let sql = "select * from users (id)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("requires alias"));
+    }
+
+    #[test]
+    fn parse_from_subquery_requires_alias() {
+        let sql = "select * from (select id from users)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("requires alias"));
+    }
+
+    #[test]
+    fn parse_comma_join() {
+        let sql = "select * from t1, t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert!(matches!(
+            from.factor,
+            TableFactor::Table { ref name } if name == "t1"
+        ));
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Inner));
+        assert!(matches!(
+            from.joins[0].right.factor,
+            TableFactor::Table { ref name } if name == "t2"
+        ));
+        assert!(matches!(
+            from.joins[0].on,
+            Expr::Literal(Literal::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn parse_comma_join_precedence() {
+        let sql = "select * from t1, t2 join t3 on t2.id = t3.id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(
+            from.joins[0].right.factor,
+            TableFactor::Table { ref name } if name == "t2"
+        ));
+        assert_eq!(from.joins[0].right.joins.len(), 1);
+        assert!(matches!(
+            from.joins[0].right.joins[0].right.factor,
+            TableFactor::Table { ref name } if name == "t3"
+        ));
+    }
+
+    #[test]
+    fn parse_join_then_comma_join() {
+        let sql = "select * from t1 join t2 on t1.id = t2.id, t3";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 2);
+        assert!(matches!(
+            from.joins[1].on,
+            Expr::Literal(Literal::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn parse_join_without_condition_rejected() {
+        let sql = "select * from t1 join t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("JOIN expects ON or USING"));
+    }
+
+    #[test]
+    fn parse_cross_join() {
+        let sql = "select * from t1 cross join t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Inner));
+        assert!(matches!(
+            from.joins[0].on,
+            Expr::Literal(Literal::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn parse_natural_join() {
+        let sql = "select * from t1 natural join t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(
+            from.joins[0].on,
+            Expr::Literal(Literal::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn parse_natural_left_join() {
+        let sql = "select * from t1 natural left join t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Left));
+    }
+
+    #[test]
+    fn parse_natural_join_with_on_rejected() {
+        let sql = "select * from t1 natural join t2 on t1.id = t2.id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("NATURAL/CROSS JOIN cannot use ON or USING"));
+    }
+
+    #[test]
+    fn parse_cross_join_with_using_rejected() {
+        let sql = "select * from t1 cross join t2 using (id)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("NATURAL/CROSS JOIN cannot use ON or USING"));
+    }
+
+    #[test]
+    fn parse_join_using() {
+        let sql = "select * from t1 join t2 using (id, name)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let on_sql = unwrap_from(&select).joins[0].on.to_sql();
+        assert!(on_sql.contains("t1.id = t2.id"));
+        assert!(on_sql.contains("t1.name = t2.name"));
+    }
+
+    #[test]
+    fn parse_case_expr() {
+        let sql = "select case when a = 1 then 'one' else 'other' end from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let expr = &select.projection[0].expr;
+        let Expr::Case { when_then, .. } = expr else {
+            panic!("expected case");
+        };
+        assert_eq!(when_then.len(), 1);
+    }
+
+    #[test]
+    fn parse_case_with_operand() {
+        let sql = "select case status when 'ok' then 1 else 0 end from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let expr = &select.projection[0].expr;
+        let Expr::Case { operand, .. } = expr else {
+            panic!("expected case");
+        };
+        assert!(operand.is_some());
+    }
+
+    #[test]
+    fn parse_case_missing_when() {
+        let sql = "select case end from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("CASE expects"));
+    }
+
+    #[test]
+    fn parse_right_full_join() {
+        let sql = "select * from t1 right join t2 on t1.id = t2.id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(matches!(
+            unwrap_from(&select).joins[0].join_type,
+            JoinType::Right
+        ));
+        let sql = "select * from t1 full join t2 on t1.id = t2.id";
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(matches!(
+            unwrap_from(&select).joins[0].join_type,
+            JoinType::Full
+        ));
     }
 
     #[test]
@@ -1114,6 +2842,79 @@ mod tests {
             panic!("expected create table");
         };
         assert_eq!(create.name, "users");
+        assert!(!create.if_not_exists);
+        assert!(create.columns.is_empty());
+    }
+
+    #[test]
+    fn parse_create_table_if_not_exists() {
+        let sql = "create table if not exists users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::CreateTable(create) = stmt else {
+            panic!("expected create table");
+        };
+        assert!(create.if_not_exists);
+        assert!(create.columns.is_empty());
+    }
+
+    #[test]
+    fn parse_create_table_with_columns() {
+        let sql = "create table users (id integer, name varchar(20))";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::CreateTable(create) = stmt else {
+            panic!("expected create table");
+        };
+        assert_eq!(create.columns.len(), 2);
+        assert_eq!(create.columns[0].name, "id");
+        assert_eq!(create.columns[0].data_type, "integer");
+        assert_eq!(create.columns[1].name, "name");
+        assert_eq!(create.columns[1].data_type, "varchar(20)");
+    }
+
+    #[test]
+    fn parse_drop_table() {
+        let sql = "drop table users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::DropTable(drop) = stmt else {
+            panic!("expected drop table");
+        };
+        assert_eq!(drop.name, "users");
+        assert!(!drop.if_exists);
+    }
+
+    #[test]
+    fn parse_drop_table_if_exists() {
+        let sql = "drop table if exists users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::DropTable(drop) = stmt else {
+            panic!("expected drop table");
+        };
+        assert!(drop.if_exists);
+    }
+
+    #[test]
+    fn parse_truncate_table() {
+        let sql = "truncate table users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Truncate(truncate) = stmt else {
+            panic!("expected truncate");
+        };
+        assert_eq!(truncate.table, "users");
     }
 
     #[test]
@@ -1131,7 +2932,10 @@ mod tests {
             Expr::Identifier(name) => assert_eq!(name, "user"),
             _ => panic!("expected identifier"),
         }
-        assert_eq!(select.from.name, "users");
+        assert!(matches!(
+            unwrap_from(&select).factor,
+            TableFactor::Table { ref name } if name == "users"
+        ));
     }
 
     #[test]
@@ -1145,6 +2949,45 @@ mod tests {
             panic!("expected analyze");
         };
         assert_eq!(analyze.table, "users");
+    }
+
+    #[test]
+    fn parse_analyze_table() {
+        let sql = "analyze table users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Analyze(analyze) = stmt else {
+            panic!("expected analyze");
+        };
+        assert_eq!(analyze.table, "users");
+    }
+
+    #[test]
+    fn parse_explain_insert() {
+        let sql = "explain insert into users (id) values (1)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Explain(inner) = stmt else {
+            panic!("expected explain");
+        };
+        assert!(matches!(*inner, Statement::Insert(_)));
+    }
+
+    #[test]
+    fn parse_explain_delete() {
+        let sql = "explain delete from users where id = 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Explain(inner) = stmt else {
+            panic!("expected explain");
+        };
+        assert!(matches!(*inner, Statement::Delete(_)));
     }
 
     #[test]
@@ -1214,6 +3057,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_in_list() {
+        let sql = "select * from users where id in (1, 2, 3)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let expr = select.selection.expect("selection");
+        assert_eq!(
+            expr.to_sql(),
+            "id = 1 or id = 2 or id = 3"
+        );
+    }
+
+    #[test]
     fn parse_boolean_literal() {
         let sql = "select * from users where active = true and deleted = false";
         let parser = SimpleParser::new(ParserConfig {
@@ -1230,6 +3090,184 @@ mod tests {
     }
 
     #[test]
+    fn parse_is_null() {
+        let sql = "select * from users where deleted is null or deleted is not null";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::Or));
+    }
+
+    #[test]
+    fn parse_between() {
+        let sql = "select * from users where age between 18 and 30";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::And));
+    }
+
+    #[test]
+    fn parse_not_between() {
+        let sql = "select * from users where age not between 18 and 30";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::Or));
+    }
+
+    #[test]
+    fn parse_like() {
+        let sql = "select * from users where name like 'al%'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = select.selection.expect("selection") else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "like");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_not_like() {
+        let sql = "select * from users where name not like 'al%'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::UnaryOp { op, expr } = select.selection.expect("selection") else {
+            panic!("expected unary op");
+        };
+        assert!(matches!(op, UnaryOperator::Not));
+        let Expr::FunctionCall { name, args } = expr.as_ref() else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "like");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_like_escape() {
+        let sql = "select * from users where name like 'al\\_%' escape '\\\\'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = select.selection.expect("selection") else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "like");
+        assert_eq!(args.len(), 3);
+    }
+
+    #[test]
+    fn parse_not_like_escape() {
+        let sql = "select * from users where name not like 'al\\_%' escape '\\\\'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::UnaryOp { op, expr } = select.selection.expect("selection") else {
+            panic!("expected unary op");
+        };
+        assert!(matches!(op, UnaryOperator::Not));
+        let Expr::FunctionCall { name, args } = expr.as_ref() else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "like");
+        assert_eq!(args.len(), 3);
+    }
+
+    #[test]
+    fn parse_not_in_list() {
+        let sql = "select * from users where id not in (1, 2, 3)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::And));
+    }
+
+    #[test]
+    fn parse_ilike() {
+        let sql = "select * from users where name ilike 'al%'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = select.selection.expect("selection") else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "ilike");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_not_ilike() {
+        let sql = "select * from users where name not ilike 'al%'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::UnaryOp { op, expr } = select.selection.expect("selection") else {
+            panic!("expected unary op");
+        };
+        assert!(matches!(op, UnaryOperator::Not));
+        let Expr::FunctionCall { name, args } = expr.as_ref() else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "ilike");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
     fn parse_insert() {
         let sql = "insert into users (id, name) values (1, 'alice')";
         let parser = SimpleParser::new(ParserConfig {
@@ -1241,8 +3279,130 @@ mod tests {
         };
         assert_eq!(insert.table, "users");
         assert_eq!(insert.columns.len(), 2);
-        assert_eq!(insert.values.len(), 1);
-        assert_eq!(insert.values[0].len(), 2);
+        let InsertSource::Values(values) = insert.source else {
+            panic!("expected values source");
+        };
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].len(), 2);
+        assert!(insert.returning.is_empty());
+    }
+
+    #[test]
+    fn parse_insert_select() {
+        let sql = "insert into users (id) select id from staging";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        let InsertSource::Query(statement) = insert.source else {
+            panic!("expected query source");
+        };
+        let Statement::Select(_) = statement.as_ref() else {
+            panic!("expected select query");
+        };
+    }
+
+    #[test]
+    fn parse_insert_select_returning() {
+        let sql = "insert into users (id) select id from staging returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 1);
+        assert!(matches!(insert.source, InsertSource::Query(_)));
+    }
+
+    #[test]
+    fn parse_insert_default_values() {
+        let sql = "insert into users default values";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert!(matches!(insert.source, InsertSource::DefaultValues));
+        assert!(insert.returning.is_empty());
+    }
+
+    #[test]
+    fn parse_insert_default_values_returning() {
+        let sql = "insert into users default values returning id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert!(matches!(insert.source, InsertSource::DefaultValues));
+        assert_eq!(insert.returning.len(), 1);
+    }
+
+    #[test]
+    fn parse_returning_star() {
+        let sql = "delete from users returning *";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Delete(delete) = stmt else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+        assert!(matches!(delete.returning[0].expr, Expr::Wildcard));
+    }
+
+    #[test]
+    fn parse_returning_qualified_star() {
+        let sql = "delete from users returning users.*";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Delete(delete) = stmt else {
+            panic!("expected delete");
+        };
+        assert_eq!(delete.returning.len(), 1);
+        assert!(matches!(delete.returning[0].expr, Expr::Identifier(ref name) if name == "users.*"));
+    }
+
+    #[test]
+    fn parse_returning_alias() {
+        let sql = "update users set name = 'bob' returning id as user_id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Update(update) = stmt else {
+            panic!("expected update");
+        };
+        assert_eq!(update.returning.len(), 1);
+        assert!(matches!(update.returning[0].alias.as_deref(), Some("user_id")));
+    }
+
+    #[test]
+    fn parse_returning_mixed_list() {
+        let sql = "insert into users (id) values (1) returning id, users.*, name as username";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        assert_eq!(insert.returning.len(), 3);
+        assert!(matches!(insert.returning[0].expr, Expr::Identifier(ref name) if name == "id"));
+        assert!(matches!(insert.returning[1].expr, Expr::Identifier(ref name) if name == "users.*"));
+        assert!(matches!(insert.returning[2].alias.as_deref(), Some("username")));
     }
 
     #[test]
@@ -1283,6 +3443,9 @@ mod tests {
         let Statement::Insert(insert) = stmt else {
             panic!("expected insert");
         };
-        assert_eq!(insert.values.len(), 2);
+        let InsertSource::Values(values) = insert.source else {
+            panic!("expected values source");
+        };
+        assert_eq!(values.len(), 2);
     }
 }

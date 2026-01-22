@@ -1,0 +1,14 @@
+[package]
+name = "corundum-parser-yacc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+corundum-core = { path = "../core" }
+corundum-parser = { path = "../parser" }
+lrlex = "0.13"
+lrpar = "0.13"
+
+[build-dependencies]
+lrlex = "0.13"
+lrpar = "0.13"

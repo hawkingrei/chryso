@@ -235,6 +235,15 @@ fn apply_rules_recursive(
             offset,
             input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
         },
+        LogicalPlan::Derived {
+            input,
+            alias,
+            column_aliases,
+        } => LogicalPlan::Derived {
+            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            alias,
+            column_aliases,
+        },
         other => other,
     };
     let mut final_plan = rewritten.clone();
@@ -252,6 +261,7 @@ fn logical_to_physical(logical: &LogicalPlan) -> PhysicalPlan {
         LogicalPlan::Scan { .. } => Vec::new(),
         LogicalPlan::IndexScan { .. } => Vec::new(),
         LogicalPlan::Dml { .. } => Vec::new(),
+        LogicalPlan::Derived { input, .. } => vec![logical_to_physical(input)],
         LogicalPlan::Filter { input, .. } => vec![logical_to_physical(input)],
         LogicalPlan::Projection { input, .. } => vec![logical_to_physical(input)],
         LogicalPlan::Join { left, right, .. } => {

@@ -40,7 +40,7 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostModel, StatsCostModel, UnitCostModel};
+    use super::{CostModel, StatsCostModel, StatsCache, UnitCostModel};
     use corundum_metadata::ColumnStats;
     use corundum_planner::PhysicalPlan;
 
@@ -131,6 +131,7 @@ fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {
             .map(|stats| stats.row_count)
             .unwrap_or(1000.0),
         PhysicalPlan::Dml { .. } => 1.0,
+        PhysicalPlan::Derived { input, .. } => estimate_rows(input, stats),
         PhysicalPlan::Filter { predicate, input } => {
             let base = estimate_rows(input, stats);
             let table = single_table_name(input);
@@ -165,6 +166,24 @@ fn estimate_selectivity(
             let left_sel = estimate_selectivity(left, stats, table);
             let right_sel = estimate_selectivity(right, stats, table);
             (left_sel + right_sel - left_sel * right_sel).min(1.0)
+        }
+        Expr::IsNull { expr, negated } => {
+            let (table_name, column_name) = match expr.as_ref() {
+                Expr::Identifier(name) => match name.split_once('.') {
+                    Some((prefix, column)) => (Some(prefix), column),
+                    None => (table, name.as_str()),
+                },
+                _ => (table, ""),
+            };
+            if let (Some(table_name), column_name) = (table_name, column_name) {
+                if !column_name.is_empty() {
+                    if let Some(stats) = stats.column_stats(table_name, column_name) {
+                        let base = stats.null_fraction;
+                        return if *negated { 1.0 - base } else { base };
+                    }
+                }
+            }
+            if *negated { 0.9 } else { 0.1 }
         }
         Expr::BinaryOp { left, op, right } => {
             if let Some(selectivity) = estimate_eq_selectivity(left, right, stats, table) {
@@ -222,7 +241,8 @@ fn single_table_name(plan: &PhysicalPlan) -> Option<String> {
         | PhysicalPlan::Distinct { input }
         | PhysicalPlan::TopN { input, .. }
         | PhysicalPlan::Sort { input, .. }
-        | PhysicalPlan::Limit { input, .. } => single_table_name(input),
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => single_table_name(input),
         PhysicalPlan::Join { .. } | PhysicalPlan::Dml { .. } => None,
     }
 }

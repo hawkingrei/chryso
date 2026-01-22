@@ -21,6 +21,7 @@ fn collect_tables(plan: &LogicalPlan, tables: &mut HashSet<String>) {
             tables.insert(table.clone());
         }
         LogicalPlan::Dml { .. } => {}
+        LogicalPlan::Derived { input, .. } => collect_tables(input, tables),
         LogicalPlan::Filter { input, .. }
         | LogicalPlan::Projection { input, .. }
         | LogicalPlan::Aggregate { input, .. }
@@ -38,6 +39,7 @@ fn collect_tables(plan: &LogicalPlan, tables: &mut HashSet<String>) {
 fn collect_columns(plan: &LogicalPlan, tables: &HashSet<String>, columns: &mut HashSet<(String, String)>) {
     match plan {
         LogicalPlan::Scan { .. } | LogicalPlan::IndexScan { .. } | LogicalPlan::Dml { .. } => {}
+        LogicalPlan::Derived { input, .. } => collect_columns(input, tables, columns),
         LogicalPlan::Filter { predicate, input } => {
             collect_expr_columns(predicate, tables, columns);
             collect_columns(input, tables, columns);
@@ -102,6 +104,9 @@ fn collect_expr_columns(expr: &Expr, tables: &HashSet<String>, columns: &mut Has
             collect_expr_columns(left, tables, columns);
             collect_expr_columns(right, tables, columns);
         }
+        Expr::IsNull { expr, .. } => {
+            collect_expr_columns(expr, tables, columns);
+        }
         Expr::UnaryOp { expr, .. } => collect_expr_columns(expr, tables, columns),
         Expr::FunctionCall { args, .. } => {
             for arg in args {
@@ -122,6 +127,22 @@ fn collect_expr_columns(expr: &Expr, tables: &HashSet<String>, columns: &mut Has
             collect_expr_columns(expr, tables, columns);
             for item in &subquery.projection {
                 collect_expr_columns(&item.expr, tables, columns);
+            }
+        }
+        Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        } => {
+            if let Some(expr) = operand {
+                collect_expr_columns(expr, tables, columns);
+            }
+            for (when_expr, then_expr) in when_then {
+                collect_expr_columns(when_expr, tables, columns);
+                collect_expr_columns(then_expr, tables, columns);
+            }
+            if let Some(expr) = else_expr {
+                collect_expr_columns(expr, tables, columns);
             }
         }
         Expr::Literal(_) | Expr::Wildcard => {}

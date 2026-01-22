@@ -13,6 +13,7 @@ impl PhysicalPlan {
             PhysicalPlan::TableScan { .. } => 1,
             PhysicalPlan::IndexScan { .. } => 1,
             PhysicalPlan::Dml { .. } => 1,
+            PhysicalPlan::Derived { input, .. } => 1 + input.node_count(),
             PhysicalPlan::Filter { input, .. } => 1 + input.node_count(),
             PhysicalPlan::Projection { input, .. } => 1 + input.node_count(),
             PhysicalPlan::Join { left, right, .. } => 1 + left.node_count() + right.node_count(),
