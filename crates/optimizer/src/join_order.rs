@@ -186,6 +186,7 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
             plan: joined_plan,
             tables,
             estimated_rows,
+            sort_key: current.sort_key,
         };
     }
 

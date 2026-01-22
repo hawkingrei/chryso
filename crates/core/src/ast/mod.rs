@@ -208,7 +208,7 @@ pub enum Literal {
     Bool(bool),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryOperator {
     Eq,
     NotEq,
@@ -224,7 +224,7 @@ pub enum BinaryOperator {
     Div,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOperator {
     Not,
     Neg,
@@ -580,7 +580,7 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
                     return *left;
                 }
             }
-            let same_expr = left.structural_eq(right);
+            let same_expr = left.structural_eq(&right);
             if same_expr {
                 return match op {
                     BinaryOperator::Eq | BinaryOperator::LtEq | BinaryOperator::GtEq => {
