@@ -22,3 +22,4 @@
 - Gate reusable test helpers behind a feature for integration tests.
 - Workspace split into core/parser/planner/optimizer/metadata/adapter crates to keep dependencies acyclic.
 - Skimmed Calcite/Doris READMEs for module layout cues; keep optimizer/planner boundaries explicit.
+- When writing PR bodies or docs, use real line breaks instead of literal `\\n` because GitHub CLI does not render `\\n` as newlines.
