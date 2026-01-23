@@ -362,6 +362,7 @@ impl Parser {
 
     fn parse_type_name(&mut self) -> CorundumResult<String> {
         // TODO: Replace this heuristic with a grammar-backed type parser.
+        // TODO: Implement a dedicated type parser for complex type syntax.
         let mut output = String::new();
         let mut depth = 0usize;
         loop {
@@ -377,6 +378,8 @@ impl Parser {
             let part = match self.next() {
                 Some(Token::Ident(name)) => name,
                 Some(Token::Number(value)) => value,
+                Some(Token::Dot) => ".".to_string(),
+                Some(Token::Comma) => ",".to_string(),
                 Some(Token::LParen) => {
                     depth += 1;
                     "(".to_string()
@@ -398,7 +401,9 @@ impl Parser {
             };
             if output.is_empty() {
                 output.push_str(&part);
-            } else if part == ")" || part == "(" || output.ends_with('(') {
+            } else if part == ")" || part == "(" || part == "," || part == "." {
+                output.push_str(&part);
+            } else if output.ends_with('(') || output.ends_with('.') || output.ends_with(',') {
                 output.push_str(&part);
             } else {
                 output.push(' ');
@@ -2876,6 +2881,22 @@ mod tests {
         assert_eq!(create.columns[0].data_type, "integer");
         assert_eq!(create.columns[1].name, "name");
         assert_eq!(create.columns[1].data_type, "varchar(20)");
+    }
+
+    #[test]
+    fn parse_create_table_with_complex_types() {
+        let sql = "create table metrics (price decimal(10,2), stamp timestamp with time zone, dtype pg_catalog.int4)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::CreateTable(create) = stmt else {
+            panic!("expected create table");
+        };
+        assert_eq!(create.columns.len(), 3);
+        assert_eq!(create.columns[0].data_type, "decimal(10,2)");
+        assert_eq!(create.columns[1].data_type, "timestamp with time zone");
+        assert_eq!(create.columns[2].data_type, "pg_catalog.int4");
     }
 
     #[test]
