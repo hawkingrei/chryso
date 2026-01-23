@@ -1,5 +1,5 @@
-use corundum_core::ast::{BinaryOperator, Expr, Literal, OrderByExpr, UnaryOperator};
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{BinaryOperator, Expr, Literal, OrderByExpr, UnaryOperator};
+use chryso_planner::LogicalPlan;
 
 pub fn rewrite_plan(plan: &LogicalPlan) -> LogicalPlan {
     match plan {
@@ -136,7 +136,7 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
         },
         Expr::WindowFunction { function, spec } => Expr::WindowFunction {
             function: Box::new(rewrite_expr(function)),
-            spec: corundum_core::ast::WindowSpec {
+            spec: chryso_core::ast::WindowSpec {
                 partition_by: spec.partition_by.iter().map(rewrite_expr).collect(),
                 order_by: rewrite_order_by(&spec.order_by),
             },
@@ -289,8 +289,8 @@ fn rewrite_order_by(order_by: &[OrderByExpr]) -> Vec<OrderByExpr> {
 #[cfg(test)]
 mod tests {
     use super::{rewrite_expr, rewrite_plan};
-    use corundum_core::ast::{BinaryOperator, Expr, Literal};
-    use corundum_planner::LogicalPlan;
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn folds_numeric_arithmetic() {
@@ -366,9 +366,9 @@ mod tests {
     #[test]
     fn normalizes_not() {
         let expr = Expr::UnaryOp {
-            op: corundum_core::ast::UnaryOperator::Not,
+            op: chryso_core::ast::UnaryOperator::Not,
             expr: Box::new(Expr::UnaryOp {
-                op: corundum_core::ast::UnaryOperator::Not,
+                op: chryso_core::ast::UnaryOperator::Not,
                 expr: Box::new(Expr::Identifier("a".to_string())),
             }),
         };
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn applies_de_morgan() {
         let expr = Expr::UnaryOp {
-            op: corundum_core::ast::UnaryOperator::Not,
+            op: chryso_core::ast::UnaryOperator::Not,
             expr: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("a".to_string())),
                 op: BinaryOperator::And,
@@ -393,8 +393,8 @@ mod tests {
         match rewritten {
             Expr::BinaryOp { op: BinaryOperator::Or, left, right } => {
                 match (*left, *right) {
-                    (Expr::UnaryOp { op: corundum_core::ast::UnaryOperator::Not, .. },
-                     Expr::UnaryOp { op: corundum_core::ast::UnaryOperator::Not, .. }) => {}
+                    (Expr::UnaryOp { op: chryso_core::ast::UnaryOperator::Not, .. },
+                     Expr::UnaryOp { op: chryso_core::ast::UnaryOperator::Not, .. }) => {}
                     other => panic!("expected negated operands, got {other:?}"),
                 }
             }

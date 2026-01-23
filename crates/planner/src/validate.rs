@@ -1,9 +1,9 @@
-use corundum_core::error::{CorundumError, CorundumResult};
-use corundum_metadata::catalog::Catalog;
+use chryso_core::error::{ChrysoError, ChrysoResult};
+use chryso_metadata::catalog::Catalog;
 use crate::LogicalPlan;
 
 pub trait Validator {
-    fn validate(&self, plan: &LogicalPlan) -> CorundumResult<()>;
+    fn validate(&self, plan: &LogicalPlan) -> ChrysoResult<()>;
 }
 
 pub struct NameResolver<'a, C: Catalog> {
@@ -17,20 +17,20 @@ impl<'a, C: Catalog> NameResolver<'a, C> {
 }
 
 impl<'a, C: Catalog> Validator for NameResolver<'a, C> {
-    fn validate(&self, plan: &LogicalPlan) -> CorundumResult<()> {
+    fn validate(&self, plan: &LogicalPlan) -> ChrysoResult<()> {
         match plan {
             LogicalPlan::Scan { table } => {
                 if self.catalog.has_table(table) {
                     Ok(())
                 } else {
-                    Err(CorundumError::new(format!("unknown table {table}")))
+                    Err(ChrysoError::new(format!("unknown table {table}")))
                 }
             }
             LogicalPlan::IndexScan { table, .. } => {
                 if self.catalog.has_table(table) {
                     Ok(())
                 } else {
-                    Err(CorundumError::new(format!("unknown table {table}")))
+                    Err(ChrysoError::new(format!("unknown table {table}")))
                 }
             }
             LogicalPlan::Dml { .. } => Ok(()),
@@ -52,8 +52,8 @@ impl<'a, C: Catalog> Validator for NameResolver<'a, C> {
 
 pub fn validate_functions(
     plan: &LogicalPlan,
-    registry: &corundum_metadata::functions::FunctionRegistry,
-) -> CorundumResult<()> {
+    registry: &chryso_metadata::functions::FunctionRegistry,
+) -> ChrysoResult<()> {
     match plan {
         LogicalPlan::Scan { .. } | LogicalPlan::IndexScan { .. } => Ok(()),
         LogicalPlan::Filter { predicate, input } => {
@@ -94,20 +94,20 @@ pub fn validate_functions(
 }
 
 fn validate_expr_functions(
-    expr: &corundum_core::ast::Expr,
-    registry: &corundum_metadata::functions::FunctionRegistry,
-) -> CorundumResult<()> {
+    expr: &chryso_core::ast::Expr,
+    registry: &chryso_metadata::functions::FunctionRegistry,
+) -> ChrysoResult<()> {
     match expr {
-        corundum_core::ast::Expr::FunctionCall { name, args } => {
+        chryso_core::ast::Expr::FunctionCall { name, args } => {
             if !registry.is_known(name) {
-                return Err(CorundumError::new(format!("unknown function {name}")));
+                return Err(ChrysoError::new(format!("unknown function {name}")));
             }
             for arg in args {
                 validate_expr_functions(arg, registry)?;
             }
             Ok(())
         }
-        corundum_core::ast::Expr::WindowFunction { function, spec } => {
+        chryso_core::ast::Expr::WindowFunction { function, spec } => {
             validate_expr_functions(function, registry)?;
             for expr in &spec.partition_by {
                 validate_expr_functions(expr, registry)?;
@@ -117,26 +117,26 @@ fn validate_expr_functions(
             }
             Ok(())
         }
-        corundum_core::ast::Expr::BinaryOp { left, right, .. } => {
+        chryso_core::ast::Expr::BinaryOp { left, right, .. } => {
             validate_expr_functions(left, registry)?;
             validate_expr_functions(right, registry)
         }
-        corundum_core::ast::Expr::IsNull { expr, .. } => validate_expr_functions(expr, registry),
-        corundum_core::ast::Expr::UnaryOp { expr, .. } => validate_expr_functions(expr, registry),
-        corundum_core::ast::Expr::Subquery(select) | corundum_core::ast::Expr::Exists(select) => {
+        chryso_core::ast::Expr::IsNull { expr, .. } => validate_expr_functions(expr, registry),
+        chryso_core::ast::Expr::UnaryOp { expr, .. } => validate_expr_functions(expr, registry),
+        chryso_core::ast::Expr::Subquery(select) | chryso_core::ast::Expr::Exists(select) => {
             for item in &select.projection {
                 validate_expr_functions(&item.expr, registry)?;
             }
             Ok(())
         }
-        corundum_core::ast::Expr::InSubquery { expr, subquery } => {
+        chryso_core::ast::Expr::InSubquery { expr, subquery } => {
             validate_expr_functions(expr, registry)?;
             for item in &subquery.projection {
                 validate_expr_functions(&item.expr, registry)?;
             }
             Ok(())
         }
-        corundum_core::ast::Expr::Case {
+        chryso_core::ast::Expr::Case {
             operand,
             when_then,
             else_expr,
@@ -153,23 +153,23 @@ fn validate_expr_functions(
             }
             Ok(())
         }
-        corundum_core::ast::Expr::Identifier(_)
-        | corundum_core::ast::Expr::Literal(_)
-        | corundum_core::ast::Expr::Wildcard => Ok(()),
+        chryso_core::ast::Expr::Identifier(_)
+        | chryso_core::ast::Expr::Literal(_)
+        | chryso_core::ast::Expr::Wildcard => Ok(()),
     }
 }
 
 #[cfg(test)]
 mod function_tests {
     use super::validate_functions;
-    use corundum_metadata::functions::FunctionRegistry;
+    use chryso_metadata::functions::FunctionRegistry;
     use crate::LogicalPlan;
 
     #[test]
     fn rejects_unknown_function() {
         let registry = FunctionRegistry::with_builtins();
         let plan = LogicalPlan::Projection {
-            exprs: vec![corundum_core::ast::Expr::FunctionCall {
+            exprs: vec![chryso_core::ast::Expr::FunctionCall {
                 name: "udf".to_string(),
                 args: Vec::new(),
             }],
@@ -185,7 +185,7 @@ mod function_tests {
 #[cfg(test)]
 mod resolver_tests {
     use super::{NameResolver, Validator};
-    use corundum_metadata::catalog::{Catalog, MockCatalog, TableSchema};
+    use chryso_metadata::catalog::{Catalog, MockCatalog, TableSchema};
     use crate::LogicalPlan;
 
     #[test]

@@ -141,7 +141,7 @@ pub trait StatsProvider {
         tables: &[String],
         columns: &[(String, String)],
         cache: &mut StatsCache,
-    ) -> corundum_core::CorundumResult<()>;
+    ) -> chryso_core::ChrysoResult<()>;
 }
 
 pub mod analyze;

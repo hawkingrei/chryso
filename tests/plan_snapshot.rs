@@ -1,7 +1,7 @@
-use corundum::metadata::StatsCache;
-use corundum::optimizer::{CascadesOptimizer, OptimizerConfig};
-use corundum::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
-use corundum::planner::PlanBuilder;
+use chryso::metadata::StatsCache;
+use chryso::optimizer::{CascadesOptimizer, OptimizerConfig};
+use chryso::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
+use chryso::planner::PlanBuilder;
 
 #[derive(serde::Deserialize)]
 struct PlanTestSuite {
@@ -98,5 +98,5 @@ fn write_json<T: serde::Serialize>(path: &std::path::Path, value: &T) {
 }
 
 fn should_record() -> bool {
-    std::env::var("CORUNDUM_RECORD").map(|value| value == "1").unwrap_or(false)
+    std::env::var("CHRYSO_RECORD").map(|value| value == "1").unwrap_or(false)
 }

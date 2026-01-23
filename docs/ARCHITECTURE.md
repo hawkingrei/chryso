@@ -1,4 +1,4 @@
-# Corundum Architecture (Calcite-Style Optimizer + Parser)
+# Chryso Architecture (Calcite-Style Optimizer + Parser)
 
 ## Goals
 - Calcite-like planning pipeline: SQL -> AST -> Logical Plan -> Cascades Optimizer -> Physical Plan -> Executor Adapter.
@@ -78,7 +78,7 @@ FFI notes live in `docs/FFI.md`, with C ABI skeleton under `ffi/` and bindings p
 under `bindings/`.
 
 Diagnostics utilities live in `diagnostics` and error codes in `error::ErrorCode`. SQL formatting
-helpers live in `corundum-core::sql_format`, and plan diffing utilities live in `corundum-planner::plan_diff`.
+helpers live in `chryso-core::sql_format`, and plan diffing utilities live in `chryso-planner::plan_diff`.
 
 Join algorithms are modeled in `planner::JoinAlgorithm` (hash/nested loop) and index scans in
 `LogicalPlan::IndexScan`/`PhysicalPlan::IndexScan`. Property enforcement lives in

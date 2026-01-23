@@ -1,5 +1,5 @@
 /*
- * Minimal lex scaffold for corundum yacc grammar.
+ * Minimal lex scaffold for chryso yacc grammar.
  */
 
 %option noyywrap

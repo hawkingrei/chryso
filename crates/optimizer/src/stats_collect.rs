@@ -1,5 +1,5 @@
-use corundum_core::ast::{Expr, OrderByExpr};
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{Expr, OrderByExpr};
+use chryso_planner::LogicalPlan;
 use std::collections::HashSet;
 
 #[derive(Default)]

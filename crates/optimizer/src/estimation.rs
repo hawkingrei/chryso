@@ -1,5 +1,5 @@
-use corundum_metadata::{ColumnStats, StatsCache, TableStats};
-use corundum_planner::LogicalPlan;
+use chryso_metadata::{ColumnStats, StatsCache, TableStats};
+use chryso_planner::LogicalPlan;
 
 pub trait CardinalityEstimator {
     fn estimate(&self, plan: &LogicalPlan, stats: &StatsCache) -> f64;
@@ -45,8 +45,8 @@ pub fn default_column_stats() -> ColumnStats {
 #[cfg(test)]
 mod tests {
     use super::{CardinalityEstimator, NaiveEstimator};
-    use corundum_metadata::{StatsCache, TableStats};
-    use corundum_planner::LogicalPlan;
+    use chryso_metadata::{StatsCache, TableStats};
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn estimate_scan_uses_stats() {

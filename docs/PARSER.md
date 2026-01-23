@@ -28,4 +28,4 @@
 ## Yacc Track
 - `crates/parser_yacc` provides a `YaccParser` shim and yacc/lex files.
 - Current: yacc grammar validates SQL shape; AST is still produced by `SimpleParser`.
-- Plan: generate a dedicated parser per dialect grammar file, mapping to `corundum_core::ast`.
+- Plan: generate a dedicated parser per dialect grammar file, mapping to `chryso_core::ast`.

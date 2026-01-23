@@ -1,13 +1,13 @@
 [package]
-name = "corundum-adapter"
+name = "chryso-adapter"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-corundum-core = { path = "../core" }
-corundum-planner = { path = "../planner" }
-corundum-metadata = { path = "../metadata" }
-corundum-parser = { path = "../parser" }
+chryso-core = { path = "../core" }
+chryso-planner = { path = "../planner" }
+chryso-metadata = { path = "../metadata" }
+chryso-parser = { path = "../parser" }
 duckdb = { version = "1.4.3", optional = true }
 
 [features]

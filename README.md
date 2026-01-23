@@ -1,17 +1,17 @@
-# Corundum
+# Chryso
 
-Corundum is a Calcite-style SQL parser + optimizer engine in Rust. It focuses on a clean, modular architecture (AST -> logical plan -> Cascades optimizer -> physical plan -> adapter), with DuckDB as the first execution backend.
+Chryso is a Calcite-style SQL parser + optimizer engine in Rust. It focuses on a clean, modular pipeline (AST -> logical plan -> Cascades optimizer -> physical plan -> adapter) and keeps the core engine execution-agnostic.
 
-## Goals
-- SQL parser with multi-dialect support (PostgreSQL + MySQL first).
-- Cascades optimizer with logical/physical rules and cost-based search.
-- Statistics collection via ANALYZE and a lightweight catalog interface.
-- Adapter-based execution so the optimizer can target DuckDB, Velox, and others.
+## Features
+- Multi-dialect SQL parsing (Postgres + MySQL first)
+- Cascades optimizer with logical and physical rules
+- Cost and statistics hooks via ANALYZE and a lightweight catalog
+- Adapter-based execution (DuckDB first, Velox next)
 
 ## Status
-- Parser, planner, and a minimal Cascades optimizer skeleton are implemented.
-- DuckDB adapter can translate physical plans to SQL and execute simple queries/DML.
-- CI builds and tests with and without the DuckDB feature.
+- Parser, planner, and core Cascades skeleton are implemented
+- DuckDB adapter translates physical plans to SQL and executes simple queries/DML
+- CI builds and tests with and without the DuckDB feature
 
 ## Workspace Layout
 ```
@@ -22,16 +22,18 @@ crates/
   optimizer/  Cascades skeleton (memo, rules, cost)
   metadata/   Catalog, stats cache, analyze hooks
   adapter/    Execution adapters (DuckDB, mock)
+  parser_yacc/ Yacc scaffold (validation)
 src/
   lib.rs      Facade crate re-exports
-  main.rs     Demo pipeline
+  bin/
+    chryso-cli.rs
 ```
 
 ## Quick Start
 
-Build and run the mock adapter demo:
+Run the CLI (mock adapter by default):
 ```bash
-cargo run
+cargo run --bin chryso-cli
 ```
 
 Run the DuckDB demo:
@@ -40,12 +42,13 @@ cargo run --example duckdb_demo --features duckdb
 ```
 
 ## Tests
-Run all tests:
+
+All tests:
 ```bash
 cargo test
 ```
 
-Run tests with DuckDB enabled:
+With DuckDB:
 ```bash
 cargo test --features duckdb
 ```
@@ -56,34 +59,22 @@ Plan snapshot tests:
 
 Record snapshots:
 ```bash
-CORUNDUM_RECORD=1 cargo test --test plan_snapshot
-```
-
-## Demo (CLI examples)
-Run the built-in mock adapter pipeline (prints logical/physical plans and a mocked result set):
-```bash
-cargo run
-```
-
-Run the DuckDB adapter demo (executes DDL/DML and a select via DuckDB):
-```bash
-cargo run --example duckdb_demo --features duckdb
+CHRYSO_RECORD=1 cargo test --test plan_snapshot
 ```
 
 ## Docs
-- `docs/ARCHITECTURE.md` for the planning pipeline and module overview.
-- `docs/RULES.md` for rule conventions and existing rule set.
-- `docs/ADAPTERS.md` for adapter design.
-- `docs/ROADMAP.md` for the 100-step plan and TODOs (including Bazel).
+- `docs/ARCHITECTURE.md` for the planning pipeline and module overview
+- `docs/RULES.md` for rule conventions and current rule set
+- `docs/ADAPTERS.md` for adapter design
+- `docs/ROADMAP.md` for milestones and TODOs
 
 ## Roadmap (Highlights)
-See `docs/ROADMAP.md` for the full 100-step plan. Key milestones:
-- **Parser**: expand dialect coverage (Postgres/MySQL) and improve AST compatibility.
-- **Logical rewrites**: add expression-level rewrites (constant folding, predicate simplification).
-- **Cascades**: richer rule library, join order enumeration, and memo pruning.
-- **Costing**: integrate ANALYZE stats into cardinality + cost models.
-- **Physical planning**: add enforcers and required physical properties.
-- **Adapters**: stabilize DuckDB translation, then layer in Velox and others.
+- Parser: expand dialect coverage and AST compatibility
+- Logical rewrites: constant folding and predicate simplification
+- Cascades: richer rule library and join order enumeration
+- Costing: integrate ANALYZE stats into cost models
+- Physical planning: enforcers and required properties
+- Adapters: stabilize DuckDB, then add Velox
 
 ## License
 TBD.

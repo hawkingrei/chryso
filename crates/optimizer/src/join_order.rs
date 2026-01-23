@@ -1,7 +1,7 @@
 use crate::utils::{collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix};
-use corundum_core::ast::{BinaryOperator, Expr, Literal};
-use corundum_metadata::StatsCache;
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{BinaryOperator, Expr, Literal};
+use chryso_metadata::StatsCache;
+use chryso_planner::LogicalPlan;
 use std::collections::HashSet;
 
 pub fn enumerate_join_orders(plan: &LogicalPlan, stats: &StatsCache) -> Vec<LogicalPlan> {
@@ -16,7 +16,7 @@ fn reorder_joins(plan: &LogicalPlan, stats: &StatsCache) -> LogicalPlan {
             right,
             on,
         } => {
-            if matches!(join_type, corundum_core::ast::JoinType::Inner) {
+            if matches!(join_type, chryso_core::ast::JoinType::Inner) {
                 let mut inputs = Vec::new();
                 let mut predicates = Vec::new();
                 collect_inner_joins(plan, &mut inputs, &mut predicates);
@@ -112,7 +112,7 @@ fn collect_inner_joins(plan: &LogicalPlan, inputs: &mut Vec<LogicalPlan>, predic
             left,
             right,
             on,
-        } if matches!(join_type, corundum_core::ast::JoinType::Inner) => {
+        } if matches!(join_type, chryso_core::ast::JoinType::Inner) => {
             collect_inner_joins(left.as_ref(), inputs, predicates);
             collect_inner_joins(right.as_ref(), inputs, predicates);
             predicates.extend(split_conjuncts(on));
@@ -176,7 +176,7 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
         let on = combine_conjuncts(join_preds)
             .unwrap_or_else(|| Expr::Literal(Literal::Bool(true)));
         let joined_plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(current.plan),
             right: Box::new(item.plan),
             on,
@@ -272,7 +272,7 @@ fn estimate_predicate_selectivity(predicate: &Expr) -> f64 {
         }
         Expr::BinaryOp { op, .. } if matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq | BinaryOperator::Gt | BinaryOperator::GtEq) => 0.3,
         Expr::IsNull { .. } => 0.2,
-        Expr::UnaryOp { op, .. } if matches!(op, corundum_core::ast::UnaryOperator::Not) => 0.5,
+        Expr::UnaryOp { op, .. } if matches!(op, chryso_core::ast::UnaryOperator::Not) => 0.5,
         Expr::BinaryOp { op, .. } if matches!(op, BinaryOperator::And) => 0.2,
         Expr::BinaryOp { op, .. } if matches!(op, BinaryOperator::Or) => 0.8,
         _ => 0.5,
@@ -349,23 +349,23 @@ fn estimate_rows(plan: &LogicalPlan, stats: &StatsCache) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::enumerate_join_orders;
-    use corundum_metadata::{StatsCache, TableStats};
-    use corundum_planner::LogicalPlan;
+    use chryso_metadata::{StatsCache, TableStats};
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn prefers_smaller_left_input() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Scan {
                 table: "big".to_string(),
             }),
             right: Box::new(LogicalPlan::Scan {
                 table: "small".to_string(),
             }),
-            on: corundum_core::ast::Expr::BinaryOp {
-                left: Box::new(corundum_core::ast::Expr::Identifier("big.id".to_string())),
-                op: corundum_core::ast::BinaryOperator::Eq,
-                right: Box::new(corundum_core::ast::Expr::Identifier("small.id".to_string())),
+            on: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier("big.id".to_string())),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Identifier("small.id".to_string())),
             },
         };
         let mut stats = StatsCache::new();
@@ -393,28 +393,28 @@ mod tests {
     #[test]
     fn orders_three_way_join_by_stats() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "large".to_string(),
                 }),
                 right: Box::new(LogicalPlan::Scan {
                     table: "small".to_string(),
                 }),
-                on: corundum_core::ast::Expr::BinaryOp {
-                    left: Box::new(corundum_core::ast::Expr::Identifier("large.id".to_string())),
-                    op: corundum_core::ast::BinaryOperator::Eq,
-                    right: Box::new(corundum_core::ast::Expr::Identifier("small.id".to_string())),
+                on: chryso_core::ast::Expr::BinaryOp {
+                    left: Box::new(chryso_core::ast::Expr::Identifier("large.id".to_string())),
+                    op: chryso_core::ast::BinaryOperator::Eq,
+                    right: Box::new(chryso_core::ast::Expr::Identifier("small.id".to_string())),
                 },
             }),
             right: Box::new(LogicalPlan::Scan {
                 table: "medium".to_string(),
             }),
-            on: corundum_core::ast::Expr::BinaryOp {
-                left: Box::new(corundum_core::ast::Expr::Identifier("large.id".to_string())),
-                op: corundum_core::ast::BinaryOperator::Eq,
-                right: Box::new(corundum_core::ast::Expr::Identifier("medium.id".to_string())),
+            on: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier("large.id".to_string())),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Identifier("medium.id".to_string())),
             },
         };
         let mut stats = StatsCache::new();
@@ -443,29 +443,29 @@ mod tests {
     #[test]
     fn prefers_more_selective_join_predicate() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "t1".to_string(),
                 }),
                 right: Box::new(LogicalPlan::Scan {
                     table: "t2".to_string(),
                 }),
-                on: corundum_core::ast::Expr::BinaryOp {
-                    left: Box::new(corundum_core::ast::Expr::Identifier("t1.id".to_string())),
-                    op: corundum_core::ast::BinaryOperator::Eq,
-                    right: Box::new(corundum_core::ast::Expr::Identifier("t2.id".to_string())),
+                on: chryso_core::ast::Expr::BinaryOp {
+                    left: Box::new(chryso_core::ast::Expr::Identifier("t1.id".to_string())),
+                    op: chryso_core::ast::BinaryOperator::Eq,
+                    right: Box::new(chryso_core::ast::Expr::Identifier("t2.id".to_string())),
                 },
             }),
             right: Box::new(LogicalPlan::Scan {
                 table: "t3".to_string(),
             }),
-            on: corundum_core::ast::Expr::BinaryOp {
-                left: Box::new(corundum_core::ast::Expr::Identifier("t1.id".to_string())),
-                op: corundum_core::ast::BinaryOperator::Eq,
-                right: Box::new(corundum_core::ast::Expr::Literal(
-                    corundum_core::ast::Literal::Number(1.0),
+            on: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier("t1.id".to_string())),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Literal(
+                    chryso_core::ast::Literal::Number(1.0),
                 )),
             },
         };

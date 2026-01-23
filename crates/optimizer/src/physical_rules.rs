@@ -1,4 +1,4 @@
-use corundum_planner::{LogicalPlan, PhysicalPlan};
+use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 pub trait PhysicalRule {
     fn name(&self) -> &str;
@@ -186,14 +186,14 @@ impl PhysicalRule for JoinRule {
         vec![
             PhysicalPlan::Join {
                 join_type: *join_type,
-                algorithm: corundum_planner::JoinAlgorithm::Hash,
+                algorithm: chryso_planner::JoinAlgorithm::Hash,
                 left: Box::new(inputs[0].clone()),
                 right: Box::new(inputs[1].clone()),
                 on: on.clone(),
             },
             PhysicalPlan::Join {
             join_type: *join_type,
-            algorithm: corundum_planner::JoinAlgorithm::NestedLoop,
+            algorithm: chryso_planner::JoinAlgorithm::NestedLoop,
             left: Box::new(inputs[0].clone()),
             right: Box::new(inputs[1].clone()),
             on: on.clone(),
@@ -317,19 +317,19 @@ impl PhysicalRule for LimitRule {
 #[cfg(test)]
 mod tests {
     use super::{JoinRule, PhysicalRule};
-    use corundum_planner::{LogicalPlan, PhysicalPlan};
+    use chryso_planner::{LogicalPlan, PhysicalPlan};
 
     #[test]
     fn join_rule_produces_two_algorithms() {
         let logical = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Scan {
                 table: "t1".to_string(),
             }),
             right: Box::new(LogicalPlan::Scan {
                 table: "t2".to_string(),
             }),
-            on: corundum_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
+            on: chryso_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
         };
         let inputs = vec![
             PhysicalPlan::TableScan {

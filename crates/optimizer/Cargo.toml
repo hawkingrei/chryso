@@ -1,9 +1,9 @@
 [package]
-name = "corundum-optimizer"
+name = "chryso-optimizer"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-corundum-core = { path = "../core" }
-corundum-planner = { path = "../planner" }
-corundum-metadata = { path = "../metadata" }
+chryso-core = { path = "../core" }
+chryso-planner = { path = "../planner" }
+chryso-metadata = { path = "../metadata" }

@@ -1,15 +1,15 @@
 [package]
-name = "corundum"
+name = "chryso"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-corundum-adapter = { path = "crates/adapter", default-features = false }
-corundum-core = { path = "crates/core" }
-corundum-metadata = { path = "crates/metadata" }
-corundum-optimizer = { path = "crates/optimizer" }
-corundum-parser = { path = "crates/parser" }
-corundum-planner = { path = "crates/planner" }
+chryso-adapter = { path = "crates/adapter", default-features = false }
+chryso-core = { path = "crates/core" }
+chryso-metadata = { path = "crates/metadata" }
+chryso-optimizer = { path = "crates/optimizer" }
+chryso-parser = { path = "crates/parser" }
+chryso-planner = { path = "crates/planner" }
 ratatui = "0.29"
 crossterm = "0.28"
 
@@ -31,5 +31,5 @@ members = [
 
 [features]
 default = []
-duckdb = ["corundum-adapter/duckdb"]
+duckdb = ["chryso-adapter/duckdb"]
 test-utils = []

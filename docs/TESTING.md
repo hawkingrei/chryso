@@ -6,7 +6,7 @@
 - Tests must run without external engines by default.
 
 ## Test Helpers
-`corundum::test_support` provides:
+`chryso::test_support` provides:
 - `execute(sql, dialect)` returns logical/physical explains plus execution results.
 - `execute_with_adapter(sql, dialect, adapter)` allows integration with real engines.
 - `explain(sql, dialect)` returns logical/physical explain strings only.
@@ -18,7 +18,7 @@ These helpers are compiled for unit tests and can be enabled for integration tes
 - Unit tests:
   - `cargo test`
 - Parser-focused unit tests:
-  - `cargo test -p corundum-parser`
+  - `cargo test -p chryso-parser`
 - Integration tests using test helpers:
   - `cargo test --features test-utils`
 - Plan snapshot tests:
@@ -27,13 +27,13 @@ These helpers are compiled for unit tests and can be enabled for integration tes
 ## Snapshot Recording
 To update `tests/testdata/plan/case1/out.json`, run:
 ```
-CORUNDUM_RECORD=1 cargo test --test plan_snapshot
+CHRYSO_RECORD=1 cargo test --test plan_snapshot
 ```
 
 ## Example (Integration Test)
 ```rust
-use corundum::parser::Dialect;
-use corundum::test_support::execute;
+use chryso::parser::Dialect;
+use chryso::test_support::execute;
 
 #[test]
 fn pipeline_is_explainable() {
