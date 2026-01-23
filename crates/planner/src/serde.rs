@@ -1,4 +1,4 @@
-use corundum_core::ast::{BinaryOperator, Expr, Literal, Statement, TableFactor, TableRef};
+use chryso_core::ast::{BinaryOperator, Expr, Literal, Statement, TableFactor, TableRef};
 use crate::{LogicalPlan, PhysicalPlan};
 
 pub fn serialize_statement(statement: &Statement) -> String {
@@ -104,7 +104,7 @@ pub fn serialize_expr(expr: &Expr) -> String {
     }
 }
 
-fn select_to_marker(select: &corundum_core::ast::SelectStatement) -> String {
+fn select_to_marker(select: &chryso_core::ast::SelectStatement) -> String {
     let from = select
         .from
         .as_ref()

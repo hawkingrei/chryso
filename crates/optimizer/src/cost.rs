@@ -1,6 +1,6 @@
-pub use corundum_planner::cost::{Cost, CostModel};
-use corundum_metadata::StatsCache;
-use corundum_planner::PhysicalPlan;
+pub use chryso_planner::cost::{Cost, CostModel};
+use chryso_metadata::StatsCache;
+use chryso_planner::PhysicalPlan;
 
 pub struct UnitCostModel;
 
@@ -41,13 +41,13 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 #[cfg(test)]
 mod tests {
     use super::{CostModel, StatsCostModel, StatsCache, UnitCostModel};
-    use corundum_metadata::ColumnStats;
-    use corundum_planner::PhysicalPlan;
+    use chryso_metadata::ColumnStats;
+    use chryso_planner::PhysicalPlan;
 
     #[test]
     fn unit_cost_counts_nodes() {
         let plan = PhysicalPlan::Filter {
-            predicate: corundum_core::ast::Expr::Identifier("x".to_string()),
+            predicate: chryso_core::ast::Expr::Identifier("x".to_string()),
             input: Box::new(PhysicalPlan::TableScan {
                 table: "t".to_string(),
             }),
@@ -65,18 +65,18 @@ mod tests {
             table: "t2".to_string(),
         };
         let hash = PhysicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
-            algorithm: corundum_planner::JoinAlgorithm::Hash,
+            join_type: chryso_core::ast::JoinType::Inner,
+            algorithm: chryso_planner::JoinAlgorithm::Hash,
             left: Box::new(left.clone()),
             right: Box::new(right.clone()),
-            on: corundum_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
+            on: chryso_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
         };
         let nested = PhysicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
-            algorithm: corundum_planner::JoinAlgorithm::NestedLoop,
+            join_type: chryso_core::ast::JoinType::Inner,
+            algorithm: chryso_planner::JoinAlgorithm::NestedLoop,
             left: Box::new(left),
             right: Box::new(right),
-            on: corundum_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
+            on: chryso_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
         };
         let model = UnitCostModel;
         assert!(model.cost(&hash).0 < model.cost(&nested).0);
@@ -85,13 +85,13 @@ mod tests {
     #[test]
     fn stats_cost_uses_selectivity() {
         let plan = PhysicalPlan::Filter {
-            predicate: corundum_core::ast::Expr::BinaryOp {
-                left: Box::new(corundum_core::ast::Expr::Identifier(
+            predicate: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier(
                     "sales.region".to_string(),
                 )),
-                op: corundum_core::ast::BinaryOperator::Eq,
-                right: Box::new(corundum_core::ast::Expr::Literal(
-                    corundum_core::ast::Literal::String("us".to_string()),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Literal(
+                    chryso_core::ast::Literal::String("us".to_string()),
                 )),
             },
             input: Box::new(PhysicalPlan::TableScan {
@@ -99,7 +99,7 @@ mod tests {
             }),
         };
         let mut stats = StatsCache::new();
-        stats.insert_table_stats("sales", corundum_metadata::TableStats { row_count: 100.0 });
+        stats.insert_table_stats("sales", chryso_metadata::TableStats { row_count: 100.0 });
         stats.insert_column_stats(
             "sales",
             "region",
@@ -117,8 +117,8 @@ mod tests {
 fn join_penalty(plan: &PhysicalPlan) -> f64 {
     match plan {
         PhysicalPlan::Join { algorithm, .. } => match algorithm {
-            corundum_planner::JoinAlgorithm::Hash => 1.0,
-            corundum_planner::JoinAlgorithm::NestedLoop => 5.0,
+            chryso_planner::JoinAlgorithm::Hash => 1.0,
+            chryso_planner::JoinAlgorithm::NestedLoop => 5.0,
         },
         _ => 0.0,
     }
@@ -153,11 +153,11 @@ fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {
 }
 
 fn estimate_selectivity(
-    predicate: &corundum_core::ast::Expr,
+    predicate: &chryso_core::ast::Expr,
     stats: &StatsCache,
     table: Option<&str>,
 ) -> f64 {
-    use corundum_core::ast::{BinaryOperator, Expr};
+    use chryso_core::ast::{BinaryOperator, Expr};
     match predicate {
         Expr::BinaryOp { left, op, right } if matches!(op, BinaryOperator::And) => {
             estimate_selectivity(left, stats, table) * estimate_selectivity(right, stats, table)
@@ -205,16 +205,16 @@ fn estimate_selectivity(
 }
 
 fn estimate_eq_selectivity(
-    left: &corundum_core::ast::Expr,
-    right: &corundum_core::ast::Expr,
+    left: &chryso_core::ast::Expr,
+    right: &chryso_core::ast::Expr,
     stats: &StatsCache,
     table: Option<&str>,
 ) -> Option<f64> {
     let (ident, literal) = match (left, right) {
-        (corundum_core::ast::Expr::Identifier(name), corundum_core::ast::Expr::Literal(_)) => {
+        (chryso_core::ast::Expr::Identifier(name), chryso_core::ast::Expr::Literal(_)) => {
             (name, right)
         }
-        (corundum_core::ast::Expr::Literal(_), corundum_core::ast::Expr::Identifier(name)) => {
+        (chryso_core::ast::Expr::Literal(_), chryso_core::ast::Expr::Identifier(name)) => {
             (name, left)
         }
         _ => return None,

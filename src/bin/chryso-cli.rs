@@ -1,5 +1,5 @@
-use corundum::adapter::ExecutorAdapter;
-use corundum::{
+use chryso::adapter::ExecutorAdapter;
+use chryso::{
     metadata::StatsCache, parser::SimpleParser, CascadesOptimizer, Dialect, DuckDbAdapter,
     MockAdapter, OptimizerConfig, ParserConfig, PlanBuilder, SqlParser, Statement,
 };
@@ -42,7 +42,7 @@ fn main() {
     }
 }
 
-fn execute_non_interactive(sql: &str, runner: &mut PipelineRunner) -> corundum::CorundumResult<()> {
+fn execute_non_interactive(sql: &str, runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
     let (statements, tail) = split_sql_with_tail(sql);
     for stmt in statements {
         for line in runner.execute_line(&stmt)? {
@@ -57,15 +57,15 @@ fn execute_non_interactive(sql: &str, runner: &mut PipelineRunner) -> corundum::
     Ok(())
 }
 
-fn run_tui(runner: &mut PipelineRunner) -> corundum::CorundumResult<()> {
-    enable_raw_mode().map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+fn run_tui(runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
+    enable_raw_mode().map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
     let mut stdout = io::stdout();
     stdout
         .execute(EnterAlternateScreen)
-        .map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+        .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)
-        .map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+        .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
 
     let mut app = AppState::default();
     let mut last_tick = Instant::now();
@@ -73,12 +73,12 @@ fn run_tui(runner: &mut PipelineRunner) -> corundum::CorundumResult<()> {
     loop {
         terminal
             .draw(|frame| draw_ui(frame, &app))
-            .map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+            .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
 
         let timeout = Duration::from_millis(200);
-        if event::poll(timeout).map_err(|err| corundum::CorundumError::new(err.to_string()))? {
+        if event::poll(timeout).map_err(|err| chryso::ChrysoError::new(err.to_string()))? {
             if let Event::Key(key) = event::read()
-                .map_err(|err| corundum::CorundumError::new(err.to_string()))?
+                .map_err(|err| chryso::ChrysoError::new(err.to_string()))?
             {
                 if handle_key_event(key, &mut app, runner)? == Action::Exit {
                     break;
@@ -91,11 +91,11 @@ fn run_tui(runner: &mut PipelineRunner) -> corundum::CorundumResult<()> {
         }
     }
 
-    disable_raw_mode().map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+    disable_raw_mode().map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
     let mut stdout = io::stdout();
     stdout
         .execute(LeaveAlternateScreen)
-        .map_err(|err| corundum::CorundumError::new(err.to_string()))?;
+        .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
     Ok(())
 }
 
@@ -140,7 +140,7 @@ fn handle_key_event(
     key: KeyEvent,
     app: &mut AppState,
     runner: &mut PipelineRunner,
-) -> corundum::CorundumResult<Action> {
+) -> chryso::ChrysoResult<Action> {
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Action::Exit),
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => return Ok(Action::Exit),
@@ -293,7 +293,7 @@ fn execute_line_with_meta(
     line: &str,
     runner: &mut PipelineRunner,
     state: &mut CliState,
-) -> corundum::CorundumResult<Vec<String>> {
+) -> chryso::ChrysoResult<Vec<String>> {
     if line.starts_with('.') {
         return handle_meta_command(line, runner, state);
     }
@@ -304,7 +304,7 @@ fn handle_meta_command(
     command: &str,
     runner: &mut PipelineRunner,
     state: &mut CliState,
-) -> corundum::CorundumResult<Vec<String>> {
+) -> chryso::ChrysoResult<Vec<String>> {
     let mut parts = command.split_whitespace();
     let Some(name) = parts.next() else {
         return Ok(Vec::new());
@@ -336,16 +336,16 @@ fn handle_meta_command(
         }
         ".read" => {
             let Some(path) = parts.next() else {
-                return Err(corundum::CorundumError::new(".read expects a file path"));
+                return Err(chryso::ChrysoError::new(".read expects a file path"));
             };
             let content = std::fs::read_to_string(path)
-                .map_err(|err| corundum::CorundumError::new(format!("read failed: {err}")))?;
+                .map_err(|err| chryso::ChrysoError::new(format!("read failed: {err}")))?;
             execute_script(&content, runner, state)
         }
         ".explain" => {
             let rest = parts.collect::<Vec<_>>().join(" ");
             if rest.trim().is_empty() {
-                return Err(corundum::CorundumError::new(".explain expects SQL"));
+                return Err(chryso::ChrysoError::new(".explain expects SQL"));
             }
             runner.execute_line_with_state(&format!("explain {rest}"), state)
         }
@@ -360,7 +360,7 @@ fn handle_meta_command(
                     state.timing = false;
                     Ok(Vec::new())
                 }
-                _ => Err(corundum::CorundumError::new(".timing expects on or off")),
+                _ => Err(chryso::ChrysoError::new(".timing expects on or off")),
             }
         }
         ".headers" => {
@@ -374,7 +374,7 @@ fn handle_meta_command(
                     state.headers = false;
                     Ok(Vec::new())
                 }
-                _ => Err(corundum::CorundumError::new(".headers expects on or off")),
+                _ => Err(chryso::ChrysoError::new(".headers expects on or off")),
             }
         }
         ".mode" => {
@@ -392,12 +392,12 @@ fn handle_meta_command(
                     state.mode = OutputMode::Tsv;
                     Ok(Vec::new())
                 }
-                _ => Err(corundum::CorundumError::new(".mode expects table, csv, or tsv")),
+                _ => Err(chryso::ChrysoError::new(".mode expects table, csv, or tsv")),
             }
         }
         ".help" => Ok(help_lines()),
         ".exit" | "\\q" => Ok(vec!["exit".to_string()]),
-        _ => Err(corundum::CorundumError::new("unknown meta command")),
+        _ => Err(chryso::ChrysoError::new("unknown meta command")),
     }
 }
 
@@ -405,7 +405,7 @@ fn execute_script(
     script: &str,
     runner: &mut PipelineRunner,
     state: &mut CliState,
-) -> corundum::CorundumResult<Vec<String>> {
+) -> chryso::ChrysoResult<Vec<String>> {
     let (statements, tail) = split_sql_with_tail(script);
     let mut output = Vec::new();
     for stmt in statements {
@@ -421,7 +421,7 @@ fn print_table_schema(
     table: &str,
     runner: &mut PipelineRunner,
     state: &mut CliState,
-) -> corundum::CorundumResult<Vec<String>> {
+) -> chryso::ChrysoResult<Vec<String>> {
     let sql = format!(
         "select column_name, data_type from information_schema.columns where table_schema = 'main' and table_name = '{table}' order by ordinal_position"
     );
@@ -454,7 +454,7 @@ impl PipelineRunner {
         }
     }
 
-    fn execute_line(&mut self, sql: &str) -> corundum::CorundumResult<Vec<String>> {
+    fn execute_line(&mut self, sql: &str) -> chryso::ChrysoResult<Vec<String>> {
         let state = CliState::default();
         self.execute_line_with_state(sql, &state)
     }
@@ -463,7 +463,7 @@ impl PipelineRunner {
         &mut self,
         sql: &str,
         state: &CliState,
-    ) -> corundum::CorundumResult<Vec<String>> {
+    ) -> chryso::ChrysoResult<Vec<String>> {
         let start = Instant::now();
         let statement = self.parser.parse(sql)?;
         let mut output = match statement {
@@ -498,8 +498,8 @@ enum Adapter {
 impl Adapter {
     fn execute(
         &self,
-        plan: &corundum::PhysicalPlan,
-    ) -> corundum::CorundumResult<corundum::QueryResult> {
+        plan: &chryso::PhysicalPlan,
+    ) -> chryso::ChrysoResult<chryso::QueryResult> {
         match self {
             Adapter::Duck(adapter) => adapter.execute(plan),
             Adapter::Mock(adapter) => adapter.execute(plan),
@@ -507,7 +507,7 @@ impl Adapter {
     }
 }
 
-fn format_result(result: &corundum::QueryResult, state: &CliState) -> Vec<String> {
+fn format_result(result: &chryso::QueryResult, state: &CliState) -> Vec<String> {
     if result.columns.is_empty() {
         return vec!["ok".to_string()];
     }
@@ -664,7 +664,7 @@ mod tests {
             Self { executed: Vec::new() }
         }
 
-        fn execute_line(&mut self, sql: &str) -> corundum::CorundumResult<Vec<String>> {
+        fn execute_line(&mut self, sql: &str) -> chryso::ChrysoResult<Vec<String>> {
             self.executed.push(sql.to_string());
             Ok(vec![format!("ok: {sql}")])
         }

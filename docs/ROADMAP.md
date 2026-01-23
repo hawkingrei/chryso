@@ -1,4 +1,4 @@
-# Corundum Roadmap (100 Steps)
+# Chryso Roadmap (100 Steps)
 
 ## MVP Success Criteria
 - Parse PG/MySQL-style SELECT with joins, group by, having, order by, limit.

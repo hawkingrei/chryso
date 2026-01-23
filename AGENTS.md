@@ -1,4 +1,4 @@
-# Corundum Agents Notes
+# Chryso Agents Notes
 
 ## Project Idea
 - Build a Calcite-style parser + optimizer engine in Rust, with a stable core API.

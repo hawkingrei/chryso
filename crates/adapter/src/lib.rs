@@ -1,15 +1,15 @@
-use corundum_core::error::{CorundumError, CorundumResult};
+use chryso_core::error::{ChrysoError, ChrysoResult};
 #[cfg(feature = "duckdb")]
-use corundum_core::ast::Statement;
+use chryso_core::ast::Statement;
 #[cfg(feature = "duckdb")]
-use corundum_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
+use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 #[cfg(feature = "duckdb")]
 use ::duckdb::params_from_iter;
 #[cfg(feature = "duckdb")]
 use ::duckdb::types::Value as DuckValue;
 #[cfg(feature = "duckdb")]
-use corundum_parser::{ParserConfig, SimpleParser, SqlParser};
-use corundum_planner::PhysicalPlan;
+use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
+use chryso_planner::PhysicalPlan;
 use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
@@ -76,17 +76,17 @@ impl AdapterCapabilities {
 }
 
 pub trait ExecutorAdapter {
-    fn execute(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult>;
+    fn execute(&self, plan: &PhysicalPlan) -> ChrysoResult<QueryResult>;
 
     fn execute_with_params(
         &self,
         plan: &PhysicalPlan,
         params: &[ParamValue],
-    ) -> CorundumResult<QueryResult> {
+    ) -> ChrysoResult<QueryResult> {
         if params.is_empty() {
             self.execute(plan)
         } else {
-            Err(CorundumError::new(
+            Err(ChrysoError::new(
                 "adapter does not support parameter binding",
             ))
         }
@@ -96,11 +96,11 @@ pub trait ExecutorAdapter {
         AdapterCapabilities::all()
     }
 
-    fn validate_plan(&self, plan: &PhysicalPlan) -> CorundumResult<()> {
+    fn validate_plan(&self, plan: &PhysicalPlan) -> ChrysoResult<()> {
         if self.capabilities().supports_plan(plan) {
             Ok(())
         } else {
-            Err(CorundumError::new(
+            Err(ChrysoError::new(
                 "adapter does not support required plan operators",
             ))
         }
@@ -151,7 +151,7 @@ impl Default for MockAdapter {
 }
 
 impl ExecutorAdapter for MockAdapter {
-    fn execute(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
+    fn execute(&self, plan: &PhysicalPlan) -> ChrysoResult<QueryResult> {
         self.validate_plan(plan)?;
         *self.last_plan.borrow_mut() = Some(plan.explain(0));
         Ok(self.result.clone())
@@ -182,7 +182,7 @@ impl DuckDbAdapter {
         }
     }
 
-    pub fn try_new() -> CorundumResult<Self> {
+    pub fn try_new() -> ChrysoResult<Self> {
         #[cfg(feature = "duckdb")]
         {
             let conn = crate::duckdb::connect()?;
@@ -192,22 +192,22 @@ impl DuckDbAdapter {
         }
         #[cfg(not(feature = "duckdb"))]
         {
-            Err(CorundumError::new(
+            Err(ChrysoError::new(
                 "duckdb feature is disabled; enable with --features duckdb",
             ))
         }
     }
 
     #[cfg(feature = "duckdb")]
-    pub fn execute_sql(&self, sql: &str) -> CorundumResult<()> {
+    pub fn execute_sql(&self, sql: &str) -> ChrysoResult<()> {
         let conn = self.conn.borrow();
         conn.execute(sql, [])
-            .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb execute failed: {err}")))?;
         Ok(())
     }
 
     #[cfg(feature = "duckdb")]
-    pub fn analyze_table(&self, table: &str, cache: &mut StatsCache) -> CorundumResult<()> {
+    pub fn analyze_table(&self, table: &str, cache: &mut StatsCache) -> ChrysoResult<()> {
         self.execute_sql(&format!("analyze {table}"))?;
         let conn = self.conn.borrow();
         let row_count = query_i64(&conn, &format!("select count(*) from {table}"))?;
@@ -241,7 +241,7 @@ impl DuckDbAdapter {
     }
 
     #[cfg(feature = "duckdb")]
-    fn execute_with_duckdb(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
+    fn execute_with_duckdb(&self, plan: &PhysicalPlan) -> ChrysoResult<QueryResult> {
         let conn = self.conn.borrow();
         if let PhysicalPlan::Dml { sql } = plan {
             if Self::is_query_sql(sql) {
@@ -249,7 +249,7 @@ impl DuckDbAdapter {
             }
             let affected = conn
                 .execute(sql, [])
-                .map_err(|err| CorundumError::new(format!("duckdb execute failed: {err}")))?;
+                .map_err(|err| ChrysoError::new(format!("duckdb execute failed: {err}")))?;
             return Ok(QueryResult {
                 columns: vec!["rows_affected".to_string()],
                 rows: vec![vec![affected.to_string()]],
@@ -258,10 +258,10 @@ impl DuckDbAdapter {
         let sql = crate::physical_to_sql(plan);
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
         let mut rows_iter = stmt
             .query([])
-            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))?;
         let columns = rows_iter
             .as_ref()
             .map(|stmt| stmt.column_names())
@@ -269,12 +269,12 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
                     .get(idx)
-                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                    .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
                 values.push(format_duck_value(&value));
             }
             rows.push(values);
@@ -287,9 +287,9 @@ impl DuckDbAdapter {
         &self,
         plan: &PhysicalPlan,
         params: &[ParamValue],
-    ) -> CorundumResult<QueryResult> {
+    ) -> ChrysoResult<QueryResult> {
         if let PhysicalPlan::Dml { .. } = plan {
-            return Err(CorundumError::new(
+            return Err(ChrysoError::new(
                 "parameter binding not supported for DML in demo",
             ));
         }
@@ -297,11 +297,11 @@ impl DuckDbAdapter {
         let conn = self.conn.borrow();
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
         let duck_params = crate::duckdb::params_to_values(params);
         let mut rows_iter = stmt
             .query(params_from_iter(duck_params.iter()))
-            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))?;
         let columns = rows_iter
             .as_ref()
             .map(|stmt| stmt.column_names())
@@ -309,12 +309,12 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
                     .get(idx)
-                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                    .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
                 values.push(format_duck_value(&value));
             }
             rows.push(values);
@@ -326,13 +326,13 @@ impl DuckDbAdapter {
     fn query_with_sql(
         conn: &::duckdb::Connection,
         sql: &str,
-    ) -> CorundumResult<QueryResult> {
+    ) -> ChrysoResult<QueryResult> {
         let mut stmt = conn
             .prepare(sql)
-            .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
         let mut rows_iter = stmt
             .query([])
-            .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))?;
         let columns = rows_iter
             .as_ref()
             .map(|stmt| stmt.column_names())
@@ -340,12 +340,12 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
                     .get(idx)
-                    .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+                    .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
                 values.push(format_duck_value(&value));
             }
             rows.push(values);
@@ -437,7 +437,7 @@ impl StatsProvider for DuckDbAdapter {
         tables: &[String],
         _columns: &[(String, String)],
         cache: &mut StatsCache,
-    ) -> CorundumResult<()> {
+    ) -> ChrysoResult<()> {
         for table in tables {
             self.analyze_table(table, cache)?;
         }
@@ -486,43 +486,43 @@ fn format_duck_value(value: &DuckValue) -> String {
 }
 
 #[cfg(feature = "duckdb")]
-fn fetch_columns(conn: &::duckdb::Connection, table: &str) -> CorundumResult<Vec<String>> {
+fn fetch_columns(conn: &::duckdb::Connection, table: &str) -> ChrysoResult<Vec<String>> {
     let mut stmt = conn
         .prepare(&format!("pragma table_info('{table}')"))
-        .map_err(|err| CorundumError::new(format!("duckdb prepare failed: {err}")))?;
+        .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
     let mut rows = stmt
         .query([])
-        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))?;
+        .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))?;
     let mut columns = Vec::new();
     while let Some(row) = rows
         .next()
-        .map_err(|err| CorundumError::new(format!("duckdb row error: {err}")))? {
+        .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
         let name: String = row
             .get(1)
-            .map_err(|err| CorundumError::new(format!("duckdb value error: {err}")))?;
+            .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
         columns.push(name);
     }
     Ok(columns)
 }
 
 #[cfg(feature = "duckdb")]
-fn query_i64(conn: &::duckdb::Connection, sql: &str) -> CorundumResult<i64> {
+fn query_i64(conn: &::duckdb::Connection, sql: &str) -> ChrysoResult<i64> {
     conn.query_row(sql, [], |row| row.get(0))
-        .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))
+        .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))
 }
 
 #[cfg(feature = "duckdb")]
-fn query_i64_pair(conn: &::duckdb::Connection, sql: &str) -> CorundumResult<(i64, i64)> {
+fn query_i64_pair(conn: &::duckdb::Connection, sql: &str) -> ChrysoResult<(i64, i64)> {
     conn.query_row(sql, [], |row| {
         let a: i64 = row.get(0)?;
         let b: i64 = row.get(1)?;
         Ok((a, b))
     })
-    .map_err(|err| CorundumError::new(format!("duckdb query failed: {err}")))
+    .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))
 }
 
 impl ExecutorAdapter for DuckDbAdapter {
-    fn execute(&self, plan: &PhysicalPlan) -> CorundumResult<QueryResult> {
+    fn execute(&self, plan: &PhysicalPlan) -> ChrysoResult<QueryResult> {
         self.validate_plan(plan)?;
         #[cfg(feature = "duckdb")]
         {
@@ -531,7 +531,7 @@ impl ExecutorAdapter for DuckDbAdapter {
         #[cfg(not(feature = "duckdb"))]
         {
             let _ = plan;
-            Err(CorundumError::new(
+            Err(ChrysoError::new(
                 "duckdb feature is disabled; enable with --features duckdb",
             ))
         }
@@ -541,7 +541,7 @@ impl ExecutorAdapter for DuckDbAdapter {
         &self,
         plan: &PhysicalPlan,
         params: &[ParamValue],
-    ) -> CorundumResult<QueryResult> {
+    ) -> ChrysoResult<QueryResult> {
         self.validate_plan(plan)?;
         #[cfg(feature = "duckdb")]
         {
@@ -550,7 +550,7 @@ impl ExecutorAdapter for DuckDbAdapter {
         #[cfg(not(feature = "duckdb"))]
         {
             let _ = (plan, params);
-            Err(CorundumError::new(
+            Err(ChrysoError::new(
                 "duckdb feature is disabled; enable with --features duckdb",
             ))
         }
@@ -604,10 +604,10 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
             let left_sql = physical_to_sql(left);
             let right_sql = physical_to_sql(right);
             let join = match join_type {
-                corundum_core::ast::JoinType::Inner => "join",
-                corundum_core::ast::JoinType::Left => "left join",
-                corundum_core::ast::JoinType::Right => "right join",
-                corundum_core::ast::JoinType::Full => "full join",
+                chryso_core::ast::JoinType::Inner => "join",
+                chryso_core::ast::JoinType::Left => "left join",
+                chryso_core::ast::JoinType::Right => "right join",
+                chryso_core::ast::JoinType::Full => "full join",
             };
             format!(
                 "select * from ({left_sql}) as l {join} ({right_sql}) as r on {}",
@@ -707,12 +707,12 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
 
 #[cfg(feature = "duckdb")]
 pub mod duckdb {
-    use corundum_planner::PhysicalPlan;
+    use chryso_planner::PhysicalPlan;
     use duckdb::Connection;
 
-    pub fn connect() -> corundum_core::error::CorundumResult<Connection> {
+    pub fn connect() -> chryso_core::error::ChrysoResult<Connection> {
         Connection::open_in_memory()
-            .map_err(|err| corundum_core::error::CorundumError::new(format!("duckdb open failed: {err}")))
+            .map_err(|err| chryso_core::error::ChrysoError::new(format!("duckdb open failed: {err}")))
     }
 
     pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
@@ -740,7 +740,7 @@ pub mod duckdb {
 #[cfg(test)]
 mod tests {
     use super::{AdapterCapabilities, ExecutorAdapter, MockAdapter, ParamValue, QueryResult};
-    use corundum_planner::PhysicalPlan;
+    use chryso_planner::PhysicalPlan;
 
     #[test]
     fn mock_adapter_records_plan() {
@@ -756,15 +756,15 @@ mod tests {
     #[test]
     fn capabilities_reject_join() {
         let plan = PhysicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
-            algorithm: corundum_planner::JoinAlgorithm::Hash,
+            join_type: chryso_core::ast::JoinType::Inner,
+            algorithm: chryso_planner::JoinAlgorithm::Hash,
             left: Box::new(PhysicalPlan::TableScan {
                 table: "t1".to_string(),
             }),
             right: Box::new(PhysicalPlan::TableScan {
                 table: "t2".to_string(),
             }),
-            on: corundum_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
+            on: chryso_core::ast::Expr::Identifier("t1.id = t2.id".to_string()),
         };
         let caps = AdapterCapabilities {
             joins: false,
@@ -807,8 +807,8 @@ mod tests {
             limit: Some(10),
             offset: Some(5),
             input: Box::new(PhysicalPlan::Sort {
-                order_by: vec![corundum_core::ast::OrderByExpr {
-                    expr: corundum_core::ast::Expr::Identifier("id".to_string()),
+                order_by: vec![chryso_core::ast::OrderByExpr {
+                    expr: chryso_core::ast::Expr::Identifier("id".to_string()),
                     asc: false,
                     nulls_first: None,
                 }],
@@ -830,10 +830,10 @@ mod tests {
         let plan = PhysicalPlan::IndexScan {
             table: "users".to_string(),
             index: "idx_users_id".to_string(),
-            predicate: corundum_core::ast::Expr::BinaryOp {
-                left: Box::new(corundum_core::ast::Expr::Identifier("id".to_string())),
-                op: corundum_core::ast::BinaryOperator::Eq,
-                right: Box::new(corundum_core::ast::Expr::Literal(corundum_core::ast::Literal::Number(1.0))),
+            predicate: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier("id".to_string())),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Literal(chryso_core::ast::Literal::Number(1.0))),
             },
         };
         let sql = super::physical_to_sql(&plan);

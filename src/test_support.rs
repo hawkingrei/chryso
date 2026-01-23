@@ -1,5 +1,5 @@
 use crate::adapter::{ExecutorAdapter, MockAdapter, QueryResult};
-use crate::error::CorundumResult;
+use crate::error::ChrysoResult;
 use crate::metadata::StatsCache;
 use crate::optimizer::{CascadesOptimizer, OptimizerConfig};
 use crate::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
@@ -15,7 +15,7 @@ pub fn execute_with_adapter<A: ExecutorAdapter>(
     sql: &str,
     dialect: Dialect,
     adapter: &A,
-) -> CorundumResult<TestRun> {
+) -> ChrysoResult<TestRun> {
     let parser = SimpleParser::new(ParserConfig { dialect });
     let statement = parser.parse(sql)?;
     let logical = PlanBuilder::build(statement)?;
@@ -30,12 +30,12 @@ pub fn execute_with_adapter<A: ExecutorAdapter>(
     })
 }
 
-pub fn execute(sql: &str, dialect: Dialect) -> CorundumResult<TestRun> {
+pub fn execute(sql: &str, dialect: Dialect) -> ChrysoResult<TestRun> {
     let adapter = MockAdapter::new();
     execute_with_adapter(sql, dialect, &adapter)
 }
 
-pub fn explain(sql: &str, dialect: Dialect) -> CorundumResult<(String, String)> {
+pub fn explain(sql: &str, dialect: Dialect) -> ChrysoResult<(String, String)> {
     let parser = SimpleParser::new(ParserConfig { dialect });
     let statement = parser.parse(sql)?;
     let logical = PlanBuilder::build(statement)?;

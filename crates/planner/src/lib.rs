@@ -1,6 +1,6 @@
-use corundum_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
-use corundum_core::ast::Literal;
-use corundum_core::CorundumResult;
+use chryso_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
+use chryso_core::ast::Literal;
+use chryso_core::ChrysoResult;
 
 pub mod cost;
 pub mod plan_diff;
@@ -97,41 +97,41 @@ pub enum PhysicalPlan {
 pub struct PlanBuilder;
 
 impl PlanBuilder {
-    pub fn build(statement: Statement) -> CorundumResult<LogicalPlan> {
-        let statement = corundum_core::ast::normalize_statement(&statement);
+    pub fn build(statement: Statement) -> ChrysoResult<LogicalPlan> {
+        let statement = chryso_core::ast::normalize_statement(&statement);
         let plan = match statement {
-            Statement::With(_) => Err(corundum_core::CorundumError::new(
+            Statement::With(_) => Err(chryso_core::ChrysoError::new(
                 "WITH is not supported in the planner yet",
             )),
             Statement::Select(select) => build_select(select),
-            Statement::SetOp { .. } => Err(corundum_core::CorundumError::new(
+            Statement::SetOp { .. } => Err(chryso_core::ChrysoError::new(
                 "SET operations are not supported in the planner yet",
             )),
             Statement::Explain(_) => Ok(LogicalPlan::Dml {
-                sql: corundum_core::sql_format::format_statement(&statement),
+                sql: chryso_core::sql_format::format_statement(&statement),
             }),
             Statement::CreateTable(_)
             | Statement::DropTable(_)
             | Statement::Truncate(_)
             | Statement::Analyze(_) => Ok(LogicalPlan::Dml {
-                sql: corundum_core::sql_format::format_statement(&statement),
+                sql: chryso_core::sql_format::format_statement(&statement),
             }),
             Statement::Insert(_)
             | Statement::Update(_)
             | Statement::Delete(_) => Ok(LogicalPlan::Dml {
-                sql: corundum_core::sql_format::format_statement(&statement),
+                sql: chryso_core::sql_format::format_statement(&statement),
             }),
         }?;
         Ok(simplify_plan(plan))
     }
 }
 
-fn build_select(select: SelectStatement) -> CorundumResult<LogicalPlan> {
+fn build_select(select: SelectStatement) -> ChrysoResult<LogicalPlan> {
     let mut plan = if let Some(from) = select.from {
         build_from(from)?
     } else {
         return Ok(LogicalPlan::Dml {
-            sql: corundum_core::sql_format::format_statement(&Statement::Select(select)),
+            sql: chryso_core::sql_format::format_statement(&Statement::Select(select)),
         });
     };
     if let Some(predicate) = select.selection {
@@ -166,7 +166,7 @@ fn build_select(select: SelectStatement) -> CorundumResult<LogicalPlan> {
     };
     if select.distinct {
         if !select.distinct_on.is_empty() {
-            return Err(corundum_core::CorundumError::new(
+            return Err(chryso_core::ChrysoError::new(
                 "DISTINCT ON is not supported in the planner yet",
             ));
         }
@@ -190,10 +190,10 @@ fn build_select(select: SelectStatement) -> CorundumResult<LogicalPlan> {
     Ok(plan)
 }
 
-fn build_from(table: corundum_core::ast::TableRef) -> CorundumResult<LogicalPlan> {
+fn build_from(table: chryso_core::ast::TableRef) -> ChrysoResult<LogicalPlan> {
     let mut plan = match table.factor {
-        corundum_core::ast::TableFactor::Table { name } => LogicalPlan::Scan { table: name },
-        corundum_core::ast::TableFactor::Derived { query } => {
+        chryso_core::ast::TableFactor::Table { name } => LogicalPlan::Scan { table: name },
+        chryso_core::ast::TableFactor::Derived { query } => {
             let alias = table
                 .alias
                 .clone()
@@ -217,11 +217,11 @@ fn build_from(table: corundum_core::ast::TableRef) -> CorundumResult<LogicalPlan
     Ok(plan)
 }
 
-fn build_query_plan(statement: Statement) -> CorundumResult<LogicalPlan> {
+fn build_query_plan(statement: Statement) -> ChrysoResult<LogicalPlan> {
     match statement {
         Statement::Select(select) => build_select(select),
         Statement::SetOp { .. } | Statement::With(_) | Statement::Explain(_) => Ok(LogicalPlan::Dml {
-            sql: corundum_core::sql_format::format_statement(&statement),
+            sql: chryso_core::sql_format::format_statement(&statement),
         }),
         Statement::CreateTable(_)
         | Statement::DropTable(_)
@@ -229,7 +229,7 @@ fn build_query_plan(statement: Statement) -> CorundumResult<LogicalPlan> {
         | Statement::Analyze(_)
         | Statement::Insert(_)
         | Statement::Update(_)
-        | Statement::Delete(_) => Err(corundum_core::CorundumError::new(
+        | Statement::Delete(_) => Err(chryso_core::ChrysoError::new(
             "subquery in FROM must be a query",
         )),
     }
@@ -418,7 +418,7 @@ impl LogicalPlan {
     pub fn explain_typed(
         &self,
         indent: usize,
-        inferencer: &dyn corundum_metadata::type_inference::TypeInferencer,
+        inferencer: &dyn chryso_metadata::type_inference::TypeInferencer,
     ) -> String {
         let padding = " ".repeat(indent);
         match self {
@@ -448,7 +448,7 @@ impl LogicalPlan {
                 input.explain_typed(indent + 2, inferencer)
             ),
             LogicalPlan::Projection { exprs, input } => {
-                let types = corundum_metadata::type_inference::expr_types(exprs, inferencer);
+                let types = chryso_metadata::type_inference::expr_types(exprs, inferencer);
                 format!(
                     "{padding}LogicalProject exprs={} types={types:?}\n{}",
                     fmt_expr_list(exprs),
@@ -682,9 +682,9 @@ pub enum JoinAlgorithm {
 #[cfg(test)]
 mod tests {
     use super::{LogicalPlan, PlanBuilder};
-    use corundum_metadata::type_inference::SimpleTypeInferencer;
-    use corundum_optimizer::cost::UnitCostModel;
-    use corundum_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
+    use chryso_metadata::type_inference::SimpleTypeInferencer;
+    use chryso_optimizer::cost::UnitCostModel;
+    use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
 
     #[test]
     fn explain_with_types_and_costs() {
@@ -697,10 +697,10 @@ mod tests {
         let typed = logical.explain_typed(0, &SimpleTypeInferencer);
         assert!(typed.contains("LogicalAggregate"));
 
-        let physical = corundum_optimizer::CascadesOptimizer::new(
-            corundum_optimizer::OptimizerConfig::default(),
+        let physical = chryso_optimizer::CascadesOptimizer::new(
+            chryso_optimizer::OptimizerConfig::default(),
         )
-        .optimize(&logical, &mut corundum_metadata::StatsCache::new());
+        .optimize(&logical, &mut chryso_metadata::StatsCache::new());
         let costed = physical.explain_costed(0, &UnitCostModel);
         assert!(costed.contains("cost="));
     }

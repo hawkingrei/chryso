@@ -1,6 +1,6 @@
 use crate::utils::{collect_identifiers, collect_tables, table_prefix};
-use corundum_core::ast::{Expr, OrderByExpr};
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{Expr, OrderByExpr};
+use chryso_planner::LogicalPlan;
 use std::collections::HashSet;
 
 pub fn prune_plan(plan: &LogicalPlan) -> LogicalPlan {
@@ -302,15 +302,15 @@ fn collect_from_exprs(exprs: &[Expr]) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::prune_plan;
-    use corundum_core::ast::{BinaryOperator, Expr, Literal};
-    use corundum_planner::LogicalPlan;
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn inserts_projections_for_join_inputs() {
         let plan = LogicalPlan::Projection {
             exprs: vec![Expr::Identifier("t1.id".to_string())],
             input: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "t1".to_string(),
                 }),

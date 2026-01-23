@@ -1,5 +1,5 @@
 use crate::cost::{Cost, CostModel};
-use corundum_planner::{LogicalPlan, PhysicalPlan};
+use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GroupId(usize);
@@ -210,7 +210,7 @@ fn logical_to_physical(logical: &LogicalPlan, memo: &Memo) -> PhysicalPlan {
             on,
         } => PhysicalPlan::Join {
             join_type: *join_type,
-            algorithm: corundum_planner::JoinAlgorithm::Hash,
+            algorithm: chryso_planner::JoinAlgorithm::Hash,
             left: Box::new(logical_to_physical(left, memo)),
             right: Box::new(logical_to_physical(right, memo)),
             on: on.clone(),
@@ -255,12 +255,12 @@ fn logical_to_physical(logical: &LogicalPlan, memo: &Memo) -> PhysicalPlan {
 #[cfg(test)]
 mod tests {
     use super::Memo;
-    use corundum_planner::LogicalPlan;
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn memo_inserts_child_groups() {
         let plan = LogicalPlan::Filter {
-            predicate: corundum_core::ast::Expr::Identifier("x".to_string()),
+            predicate: chryso_core::ast::Expr::Identifier("x".to_string()),
             input: Box::new(LogicalPlan::Scan {
                 table: "users".to_string(),
             }),

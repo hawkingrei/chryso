@@ -475,15 +475,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "corundum"
+name = "chryso"
 version = "0.1.0"
 dependencies = [
- "corundum-adapter",
- "corundum-core",
- "corundum-metadata",
- "corundum-optimizer",
- "corundum-parser",
- "corundum-planner",
+ "chryso-adapter",
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-optimizer",
+ "chryso-parser",
+ "chryso-planner",
  "crossterm",
  "ratatui",
  "serde",
@@ -491,68 +491,68 @@ dependencies = [
 ]
 
 [[package]]
-name = "corundum-adapter"
+name = "chryso-adapter"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
- "corundum-metadata",
- "corundum-parser",
- "corundum-planner",
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-parser",
+ "chryso-planner",
  "duckdb",
 ]
 
 [[package]]
-name = "corundum-core"
+name = "chryso-core"
 version = "0.1.0"
 
 [[package]]
-name = "corundum-ffi"
+name = "chryso-ffi"
 version = "0.1.0"
 dependencies = [
- "corundum",
+ "chryso",
 ]
 
 [[package]]
-name = "corundum-metadata"
+name = "chryso-metadata"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
+ "chryso-core",
 ]
 
 [[package]]
-name = "corundum-optimizer"
+name = "chryso-optimizer"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
- "corundum-metadata",
- "corundum-planner",
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-planner",
 ]
 
 [[package]]
-name = "corundum-parser"
+name = "chryso-parser"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
+ "chryso-core",
 ]
 
 [[package]]
-name = "corundum-parser-yacc"
+name = "chryso-parser-yacc"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
- "corundum-parser",
+ "chryso-core",
+ "chryso-parser",
  "lrlex",
  "lrpar",
 ]
 
 [[package]]
-name = "corundum-planner"
+name = "chryso-planner"
 version = "0.1.0"
 dependencies = [
- "corundum-core",
- "corundum-metadata",
- "corundum-optimizer",
- "corundum-parser",
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-optimizer",
+ "chryso-parser",
 ]
 
 [[package]]

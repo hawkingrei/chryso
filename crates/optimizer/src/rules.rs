@@ -1,6 +1,6 @@
 use crate::utils::{collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix};
-use corundum_core::ast::{BinaryOperator, Expr, Literal};
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{BinaryOperator, Expr, Literal};
+use chryso_planner::LogicalPlan;
 
 pub trait Rule {
     fn name(&self) -> &str;
@@ -105,7 +105,7 @@ impl Rule for MergeFilters {
             return Vec::new();
         };
         let merged = LogicalPlan::Filter {
-            predicate: corundum_core::ast::Expr::BinaryOp {
+            predicate: chryso_core::ast::Expr::BinaryOp {
                 left: Box::new(inner_predicate.clone()),
                 op: BinaryOperator::And,
                 right: Box::new(predicate.clone()),
@@ -192,7 +192,7 @@ impl Rule for RemoveTrueFilter {
             return Vec::new();
         };
         match predicate {
-            Expr::Literal(corundum_core::ast::Literal::Bool(true)) => vec![*input.clone()],
+            Expr::Literal(chryso_core::ast::Literal::Bool(true)) => vec![*input.clone()],
             _ => Vec::new(),
         }
     }
@@ -255,7 +255,7 @@ impl Rule for FilterJoinPushdown {
         else {
             return Vec::new();
         };
-        if !matches!(join_type, corundum_core::ast::JoinType::Inner) {
+        if !matches!(join_type, chryso_core::ast::JoinType::Inner) {
             return Vec::new();
         }
 
@@ -370,7 +370,7 @@ impl Rule for JoinPredicatePushdown {
         else {
             return Vec::new();
         };
-        if !matches!(join_type, corundum_core::ast::JoinType::Inner) {
+        if !matches!(join_type, chryso_core::ast::JoinType::Inner) {
             return Vec::new();
         }
 
@@ -507,7 +507,7 @@ impl Rule for PredicateInference {
                     left,
                     right,
                     on,
-                } if matches!(join_type, corundum_core::ast::JoinType::Inner) => {
+                } if matches!(join_type, chryso_core::ast::JoinType::Inner) => {
                     let combined = Expr::BinaryOp {
                         left: Box::new(predicate.clone()),
                         op: BinaryOperator::And,
@@ -550,7 +550,7 @@ impl Rule for PredicateInference {
                 left,
                 right,
                 on,
-            } if matches!(join_type, corundum_core::ast::JoinType::Inner) => {
+            } if matches!(join_type, chryso_core::ast::JoinType::Inner) => {
                 let (on, changed) = infer_predicates(on);
                 if !changed {
                     return Vec::new();
@@ -584,7 +584,7 @@ impl Rule for JoinCommute {
         else {
             return Vec::new();
         };
-        if !matches!(join_type, corundum_core::ast::JoinType::Inner) {
+        if !matches!(join_type, chryso_core::ast::JoinType::Inner) {
             return Vec::new();
         }
         vec![LogicalPlan::Join {
@@ -700,8 +700,8 @@ mod tests {
         RemoveTrueFilter, Rule, TopNRule,
     };
     use crate::utils::split_conjuncts;
-    use corundum_core::ast::{BinaryOperator, Expr};
-    use corundum_planner::LogicalPlan;
+    use chryso_core::ast::{BinaryOperator, Expr};
+    use chryso_planner::LogicalPlan;
 
     #[test]
     fn merge_filters_combines_predicates() {
@@ -760,7 +760,7 @@ mod tests {
         let plan = LogicalPlan::Filter {
             predicate: Expr::Identifier("x".to_string()),
             input: Box::new(LogicalPlan::Sort {
-                order_by: vec![corundum_core::ast::OrderByExpr {
+                order_by: vec![chryso_core::ast::OrderByExpr {
                     expr: Expr::Identifier("id".to_string()),
                     asc: true,
                     nulls_first: None,
@@ -800,7 +800,7 @@ mod tests {
     fn normalize_predicates_removes_true_and() {
         let plan = LogicalPlan::Filter {
             predicate: Expr::BinaryOp {
-                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                left: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Identifier("x".to_string())),
             },
@@ -821,10 +821,10 @@ mod tests {
     fn normalize_predicates_removes_nested_true_and() {
         let plan = LogicalPlan::Filter {
             predicate: Expr::BinaryOp {
-                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                left: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                    left: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
                     op: BinaryOperator::And,
                     right: Box::new(Expr::Identifier("x".to_string())),
                 }),
@@ -857,7 +857,7 @@ mod tests {
             limit: Some(10),
             offset: None,
             input: Box::new(LogicalPlan::Sort {
-                order_by: vec![corundum_core::ast::OrderByExpr {
+                order_by: vec![chryso_core::ast::OrderByExpr {
                     expr: Expr::Identifier("id".to_string()),
                     asc: true,
                     nulls_first: None,
@@ -912,7 +912,7 @@ mod tests {
     #[test]
     fn remove_true_filter() {
         let plan = LogicalPlan::Filter {
-            predicate: Expr::Literal(corundum_core::ast::Literal::Bool(true)),
+            predicate: Expr::Literal(chryso_core::ast::Literal::Bool(true)),
             input: Box::new(LogicalPlan::Scan {
                 table: "t".to_string(),
             }),
@@ -927,7 +927,7 @@ mod tests {
     fn remove_true_filter_ignores_binary_predicate() {
         let plan = LogicalPlan::Filter {
             predicate: Expr::BinaryOp {
-                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                left: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Identifier("x".to_string())),
             },
@@ -946,10 +946,10 @@ mod tests {
             predicate: Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("t1.id".to_string())),
                 op: BinaryOperator::Eq,
-                right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(1.0))),
+                right: Box::new(Expr::Literal(chryso_core::ast::Literal::Number(1.0))),
             },
             input: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "t1".to_string(),
                 }),
@@ -977,7 +977,7 @@ mod tests {
                 right: Box::new(Expr::Identifier("t2.id".to_string())),
             },
             input: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "t1".to_string(),
                 }),
@@ -1023,7 +1023,7 @@ mod tests {
     #[test]
     fn join_predicate_pushdown_splits_single_side() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Scan {
                 table: "t1".to_string(),
             }),
@@ -1034,7 +1034,7 @@ mod tests {
                 left: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("t1.flag".to_string())),
                     op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                    right: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::BinaryOp {
@@ -1067,7 +1067,7 @@ mod tests {
                 right: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".to_string())),
                     op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(1.0))),
+                    right: Box::new(Expr::Literal(chryso_core::ast::Literal::Number(1.0))),
                 }),
             },
             input: Box::new(LogicalPlan::Scan {
@@ -1090,7 +1090,7 @@ mod tests {
     #[test]
     fn predicate_inference_on_join() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Scan {
                 table: "t1".to_string(),
             }),
@@ -1107,7 +1107,7 @@ mod tests {
                 right: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("t2.id".to_string())),
                     op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(5.0))),
+                    right: Box::new(Expr::Literal(chryso_core::ast::Literal::Number(5.0))),
                 }),
             },
         };
@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn predicate_inference_enables_join_pushdown() {
         let plan = LogicalPlan::Join {
-            join_type: corundum_core::ast::JoinType::Inner,
+            join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(LogicalPlan::Scan {
                 table: "t1".to_string(),
             }),
@@ -1144,7 +1144,7 @@ mod tests {
                 right: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("t1.id".to_string())),
                     op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(42.0))),
+                    right: Box::new(Expr::Literal(chryso_core::ast::Literal::Number(42.0))),
                 }),
             },
         };
@@ -1164,10 +1164,10 @@ mod tests {
             predicate: Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("t1.flag".to_string())),
                 op: BinaryOperator::Eq,
-                right: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                right: Box::new(Expr::Literal(chryso_core::ast::Literal::Bool(true))),
             },
             input: Box::new(LogicalPlan::Join {
-                join_type: corundum_core::ast::JoinType::Inner,
+                join_type: chryso_core::ast::JoinType::Inner,
                 left: Box::new(LogicalPlan::Scan {
                     table: "t1".to_string(),
                 }),
@@ -1184,7 +1184,7 @@ mod tests {
                     right: Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::Identifier("t1.id".to_string())),
                         op: BinaryOperator::Eq,
-                        right: Box::new(Expr::Literal(corundum_core::ast::Literal::Number(7.0))),
+                        right: Box::new(Expr::Literal(chryso_core::ast::Literal::Number(7.0))),
                     }),
                 },
             }),

@@ -1,7 +1,7 @@
 #[cfg(feature = "test-utils")]
-use corundum::parser::Dialect;
+use chryso::parser::Dialect;
 #[cfg(feature = "test-utils")]
-use corundum::test_support::execute;
+use chryso::test_support::execute;
 
 #[cfg(feature = "test-utils")]
 #[test]

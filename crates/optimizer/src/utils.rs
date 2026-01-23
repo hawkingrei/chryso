@@ -1,5 +1,5 @@
-use corundum_core::ast::{BinaryOperator, Expr};
-use corundum_planner::LogicalPlan;
+use chryso_core::ast::{BinaryOperator, Expr};
+use chryso_planner::LogicalPlan;
 use std::collections::HashSet;
 
 pub fn collect_identifiers(expr: &Expr) -> HashSet<String> {

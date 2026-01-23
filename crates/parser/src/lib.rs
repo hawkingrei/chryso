@@ -1,8 +1,8 @@
-use corundum_core::ast::{
+use chryso_core::ast::{
     BinaryOperator, Expr, Join, JoinType, Literal, OrderByExpr, SelectItem, SelectStatement,
     Statement, TableRef, UnaryOperator,
 };
-use corundum_core::{CorundumError, CorundumResult};
+use chryso_core::{ChrysoError, ChrysoResult};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Dialect {
@@ -24,7 +24,7 @@ impl Default for ParserConfig {
 }
 
 pub trait SqlParser {
-    fn parse(&self, sql: &str) -> CorundumResult<Statement>;
+    fn parse(&self, sql: &str) -> ChrysoResult<Statement>;
 }
 
 pub struct SimpleParser {
@@ -38,11 +38,11 @@ impl SimpleParser {
 }
 
 impl SqlParser for SimpleParser {
-    fn parse(&self, sql: &str) -> CorundumResult<Statement> {
+    fn parse(&self, sql: &str) -> ChrysoResult<Statement> {
         let tokens = tokenize(sql, self.config.dialect)?;
         let mut parser = Parser::new(tokens, self.config.dialect);
         let stmt = parser.parse_statement()?;
-        Ok(corundum_core::ast::normalize_statement(&stmt))
+        Ok(chryso_core::ast::normalize_statement(&stmt))
     }
 }
 
@@ -152,7 +152,7 @@ impl Parser {
         }
     }
 
-    fn parse_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_statement(&mut self) -> ChrysoResult<Statement> {
         if self.consume_keyword(Keyword::With) {
             self.parse_with_statement()
         } else if self.consume_keyword(Keyword::Explain) {
@@ -183,11 +183,11 @@ impl Parser {
             let select = self.parse_select()?;
             self.parse_query_tail(select)
         } else {
-            Err(CorundumError::new("unexpected statement"))
+            Err(ChrysoError::new("unexpected statement"))
         }
     }
 
-    fn parse_explain_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_explain_statement(&mut self) -> ChrysoResult<Statement> {
         if self.consume_keyword(Keyword::With) {
             self.parse_with_statement()
         } else if self.consume_keyword(Keyword::Select) {
@@ -204,31 +204,31 @@ impl Parser {
         } else if self.consume_keyword(Keyword::Analyze) {
             self.parse_analyze_statement()
         } else {
-            Err(CorundumError::new("EXPLAIN expects a statement"))
+            Err(ChrysoError::new("EXPLAIN expects a statement"))
         }
     }
 
-    fn parse_with_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_with_statement(&mut self) -> ChrysoResult<Statement> {
         let mut ctes = Vec::new();
         let mut seen_names = std::collections::HashSet::new();
         let recursive = self.consume_keyword(Keyword::Recursive);
         loop {
             let name = self.expect_identifier()?;
             if !seen_names.insert(name.clone()) {
-                return Err(CorundumError::new(format!(
+                return Err(ChrysoError::new(format!(
                     "duplicate CTE name {name}"
                 )));
             }
             let columns = if self.consume_token(&Token::LParen) {
                 if self.consume_token(&Token::RParen) {
-                    return Err(CorundumError::new("CTE column list cannot be empty"));
+                    return Err(ChrysoError::new("CTE column list cannot be empty"));
                 }
                 let cols = self.parse_identifier_list()?;
                 self.expect_token(Token::RParen)?;
                 let mut seen_cols = std::collections::HashSet::new();
                 for col in &cols {
                     if !seen_cols.insert(col.clone()) {
-                        return Err(CorundumError::new(format!(
+                        return Err(ChrysoError::new(format!(
                             "duplicate CTE column {col}"
                         )));
                     }
@@ -251,10 +251,10 @@ impl Parser {
             } else if self.consume_keyword(Keyword::With) {
                 self.parse_with_statement()?
             } else {
-                return Err(CorundumError::new("WITH expects SELECT/INSERT/UPDATE/DELETE or WITH in CTE"));
+                return Err(ChrysoError::new("WITH expects SELECT/INSERT/UPDATE/DELETE or WITH in CTE"));
             };
             self.expect_token(Token::RParen)?;
-            ctes.push(corundum_core::ast::Cte {
+            ctes.push(chryso_core::ast::Cte {
                 name,
                 columns,
                 query: Box::new(stmt),
@@ -273,35 +273,35 @@ impl Parser {
         } else if self.consume_keyword(Keyword::Delete) {
             self.parse_delete_statement()?
         } else {
-            return Err(CorundumError::new("WITH expects SELECT/INSERT/UPDATE/DELETE after CTEs"));
+            return Err(ChrysoError::new("WITH expects SELECT/INSERT/UPDATE/DELETE after CTEs"));
         };
-        Ok(Statement::With(corundum_core::ast::WithStatement {
+        Ok(Statement::With(chryso_core::ast::WithStatement {
             ctes,
             recursive,
             statement: Box::new(statement),
         }))
     }
 
-    fn parse_query_tail(&mut self, left: SelectStatement) -> CorundumResult<Statement> {
+    fn parse_query_tail(&mut self, left: SelectStatement) -> ChrysoResult<Statement> {
         let mut current = Statement::Select(left);
         loop {
             let op = if self.consume_keyword(Keyword::Union) {
                 if self.consume_keyword(Keyword::All) {
-                    corundum_core::ast::SetOperator::UnionAll
+                    chryso_core::ast::SetOperator::UnionAll
                 } else {
-                    corundum_core::ast::SetOperator::Union
+                    chryso_core::ast::SetOperator::Union
                 }
             } else if self.consume_keyword(Keyword::Intersect) {
                 if self.consume_keyword(Keyword::All) {
-                    corundum_core::ast::SetOperator::IntersectAll
+                    chryso_core::ast::SetOperator::IntersectAll
                 } else {
-                    corundum_core::ast::SetOperator::Intersect
+                    chryso_core::ast::SetOperator::Intersect
                 }
             } else if self.consume_keyword(Keyword::Except) {
                 if self.consume_keyword(Keyword::All) {
-                    corundum_core::ast::SetOperator::ExceptAll
+                    chryso_core::ast::SetOperator::ExceptAll
                 } else {
-                    corundum_core::ast::SetOperator::Except
+                    chryso_core::ast::SetOperator::Except
                 }
             } else {
                 break;
@@ -317,7 +317,7 @@ impl Parser {
         Ok(current)
     }
 
-    fn parse_create_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_create_statement(&mut self) -> ChrysoResult<Statement> {
         if self.consume_keyword(Keyword::Table) {
             let if_not_exists = if self.consume_keyword(Keyword::If) {
                 self.expect_keyword(Keyword::Not)?;
@@ -334,25 +334,25 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            Ok(Statement::CreateTable(corundum_core::ast::CreateTableStatement {
+            Ok(Statement::CreateTable(chryso_core::ast::CreateTableStatement {
                 name,
                 if_not_exists,
                 columns,
             }))
         } else {
-            Err(CorundumError::new("only CREATE TABLE is supported"))
+            Err(ChrysoError::new("only CREATE TABLE is supported"))
         }
     }
 
-    fn parse_column_definitions(&mut self) -> CorundumResult<Vec<corundum_core::ast::ColumnDef>> {
+    fn parse_column_definitions(&mut self) -> ChrysoResult<Vec<chryso_core::ast::ColumnDef>> {
         let mut columns = Vec::new();
         loop {
             let name = self.expect_identifier()?;
             let data_type = self.parse_type_name()?;
             if data_type.is_empty() {
-                return Err(CorundumError::new("column expects a data type"));
+                return Err(ChrysoError::new("column expects a data type"));
             }
-            columns.push(corundum_core::ast::ColumnDef { name, data_type });
+            columns.push(chryso_core::ast::ColumnDef { name, data_type });
             if !self.consume_token(&Token::Comma) {
                 break;
             }
@@ -360,7 +360,7 @@ impl Parser {
         Ok(columns)
     }
 
-    fn parse_type_name(&mut self) -> CorundumResult<String> {
+    fn parse_type_name(&mut self) -> ChrysoResult<String> {
         // TODO: Replace this heuristic with a grammar-backed type parser.
         // TODO: Implement a dedicated type parser for complex type syntax.
         let mut output = String::new();
@@ -386,14 +386,14 @@ impl Parser {
                 }
                 Some(Token::RParen) => {
                     if depth == 0 {
-                        return Err(CorundumError::new("unexpected ')' in type"));
+                        return Err(ChrysoError::new("unexpected ')' in type"));
                     }
                     depth -= 1;
                     ")".to_string()
                 }
                 Some(Token::Keyword(keyword)) => keyword_label(keyword).to_string(),
                 other => {
-                    return Err(CorundumError::new(format!(
+                    return Err(ChrysoError::new(format!(
                         "unexpected token in type: {}",
                         other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
                     )))
@@ -413,7 +413,7 @@ impl Parser {
         Ok(output)
     }
 
-    fn parse_drop_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_drop_statement(&mut self) -> ChrysoResult<Statement> {
         let _ = self.consume_keyword(Keyword::Table);
         let if_exists = if self.consume_keyword(Keyword::If) {
             self.expect_keyword(Keyword::Exists)?;
@@ -422,27 +422,27 @@ impl Parser {
             false
         };
         let name = self.expect_identifier()?;
-        Ok(Statement::DropTable(corundum_core::ast::DropTableStatement {
+        Ok(Statement::DropTable(chryso_core::ast::DropTableStatement {
             name,
             if_exists,
         }))
     }
 
-    fn parse_truncate_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_truncate_statement(&mut self) -> ChrysoResult<Statement> {
         let _ = self.consume_keyword(Keyword::Table);
         let name = self.expect_identifier()?;
-        Ok(Statement::Truncate(corundum_core::ast::TruncateStatement {
+        Ok(Statement::Truncate(chryso_core::ast::TruncateStatement {
             table: name,
         }))
     }
 
-    fn parse_analyze_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_analyze_statement(&mut self) -> ChrysoResult<Statement> {
         let _ = self.consume_keyword(Keyword::Table);
         let name = self.expect_identifier()?;
-        Ok(Statement::Analyze(corundum_core::ast::AnalyzeStatement { table: name }))
+        Ok(Statement::Analyze(chryso_core::ast::AnalyzeStatement { table: name }))
     }
 
-    fn parse_insert_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_insert_statement(&mut self) -> ChrysoResult<Statement> {
         self.expect_keyword(Keyword::Into)?;
         let table = self.expect_identifier()?;
         let columns = if self.consume_token(&Token::LParen) {
@@ -454,10 +454,10 @@ impl Parser {
         };
         if self.consume_keyword(Keyword::Default) {
             self.expect_keyword(Keyword::Values)?;
-            return Ok(Statement::Insert(corundum_core::ast::InsertStatement {
+            return Ok(Statement::Insert(chryso_core::ast::InsertStatement {
                 table,
                 columns,
-                source: corundum_core::ast::InsertSource::DefaultValues,
+                source: chryso_core::ast::InsertSource::DefaultValues,
                 returning: self.parse_returning_clause()?,
             }));
         }
@@ -472,18 +472,18 @@ impl Parser {
                     break;
                 }
             }
-            corundum_core::ast::InsertSource::Values(values)
+            chryso_core::ast::InsertSource::Values(values)
         } else if self.consume_keyword(Keyword::Select) {
             let select = self.parse_select()?;
             let statement = self.parse_query_tail(select)?;
-            corundum_core::ast::InsertSource::Query(Box::new(statement))
+            chryso_core::ast::InsertSource::Query(Box::new(statement))
         } else if self.consume_keyword(Keyword::With) {
             let statement = self.parse_with_statement()?;
-            corundum_core::ast::InsertSource::Query(Box::new(statement))
+            chryso_core::ast::InsertSource::Query(Box::new(statement))
         } else {
-            return Err(CorundumError::new("INSERT expects VALUES or SELECT"));
+            return Err(ChrysoError::new("INSERT expects VALUES or SELECT"));
         };
-        Ok(Statement::Insert(corundum_core::ast::InsertStatement {
+        Ok(Statement::Insert(chryso_core::ast::InsertStatement {
             table,
             columns,
             source,
@@ -491,7 +491,7 @@ impl Parser {
         }))
     }
 
-    fn parse_update_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_update_statement(&mut self) -> ChrysoResult<Statement> {
         let table = self.expect_identifier()?;
         self.expect_keyword(Keyword::Set)?;
         let assignments = self.parse_assignments()?;
@@ -500,7 +500,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Statement::Update(corundum_core::ast::UpdateStatement {
+        Ok(Statement::Update(chryso_core::ast::UpdateStatement {
             table,
             assignments,
             selection,
@@ -508,7 +508,7 @@ impl Parser {
         }))
     }
 
-    fn parse_delete_statement(&mut self) -> CorundumResult<Statement> {
+    fn parse_delete_statement(&mut self) -> ChrysoResult<Statement> {
         self.expect_keyword(Keyword::From)?;
         let table = self.expect_identifier()?;
         let selection = if self.consume_keyword(Keyword::Where) {
@@ -516,14 +516,14 @@ impl Parser {
         } else {
             None
         };
-        Ok(Statement::Delete(corundum_core::ast::DeleteStatement {
+        Ok(Statement::Delete(chryso_core::ast::DeleteStatement {
             table,
             selection,
             returning: self.parse_returning_clause()?,
         }))
     }
 
-    fn parse_select(&mut self) -> CorundumResult<SelectStatement> {
+    fn parse_select(&mut self) -> ChrysoResult<SelectStatement> {
         let distinct = self.consume_keyword(Keyword::Distinct);
         let distinct_on = if distinct && self.consume_keyword(Keyword::On) {
             self.expect_token(Token::LParen)?;
@@ -585,7 +585,7 @@ impl Parser {
         })
     }
 
-    fn parse_projection(&mut self) -> CorundumResult<Vec<SelectItem>> {
+    fn parse_projection(&mut self) -> ChrysoResult<Vec<SelectItem>> {
         let mut items = Vec::new();
         loop {
             let expr = if self.consume_token(&Token::Star) {
@@ -613,7 +613,7 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_returning_clause(&mut self) -> CorundumResult<Vec<SelectItem>> {
+    fn parse_returning_clause(&mut self) -> ChrysoResult<Vec<SelectItem>> {
         if self.consume_keyword(Keyword::Returning) {
             let mut items = Vec::new();
             loop {
@@ -645,7 +645,7 @@ impl Parser {
         }
     }
 
-    fn parse_table_ref(&mut self) -> CorundumResult<TableRef> {
+    fn parse_table_ref(&mut self) -> ChrysoResult<TableRef> {
         let factor = self.parse_table_factor()?;
         let alias = if self.consume_keyword(Keyword::As) {
             Some(self.expect_identifier()?)
@@ -660,7 +660,7 @@ impl Parser {
         };
         let column_aliases = if self.consume_token(&Token::LParen) {
             if alias.is_none() {
-                return Err(CorundumError::new("table alias list requires alias"));
+                return Err(ChrysoError::new("table alias list requires alias"));
             }
             let columns = self.parse_identifier_list()?;
             self.expect_token(Token::RParen)?;
@@ -668,9 +668,9 @@ impl Parser {
         } else {
             Vec::new()
         };
-        if matches!(factor, corundum_core::ast::TableFactor::Derived { .. }) && alias.is_none()
+        if matches!(factor, chryso_core::ast::TableFactor::Derived { .. }) && alias.is_none()
         {
-            return Err(CorundumError::new("subquery in FROM requires alias"));
+            return Err(ChrysoError::new("subquery in FROM requires alias"));
         }
         let mut table = TableRef {
             factor,
@@ -704,7 +704,7 @@ impl Parser {
                 } else if self.consume_keyword(Keyword::Join) {
                     JoinType::Inner
                 } else {
-                    return Err(CorundumError::new("NATURAL expects JOIN"));
+                    return Err(ChrysoError::new("NATURAL expects JOIN"));
                 }
             } else if self.consume_keyword(Keyword::Left) {
                 self.expect_keyword(Keyword::Join)?;
@@ -721,7 +721,7 @@ impl Parser {
             let right = self.parse_table_ref()?;
             let on = if cross_join || natural_join {
                 if self.peek_is_keyword(Keyword::On) || self.peek_is_keyword(Keyword::Using) {
-                    return Err(CorundumError::new(
+                    return Err(ChrysoError::new(
                         "NATURAL/CROSS JOIN cannot use ON or USING",
                     ));
                 }
@@ -736,7 +736,7 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 build_using_on(left_name.as_str(), right_name.as_str(), columns)
             } else {
-                return Err(CorundumError::new("JOIN expects ON or USING"));
+                return Err(ChrysoError::new("JOIN expects ON or USING"));
             };
             table.joins.push(Join {
                 join_type,
@@ -747,7 +747,7 @@ impl Parser {
         Ok(table)
     }
 
-    fn parse_table_factor(&mut self) -> CorundumResult<corundum_core::ast::TableFactor> {
+    fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
         if self.consume_token(&Token::LParen) {
             let statement = if self.consume_keyword(Keyword::With) {
                 self.parse_with_statement()?
@@ -755,21 +755,21 @@ impl Parser {
                 let select = self.parse_select()?;
                 self.parse_query_tail(select)?
             } else {
-                return Err(CorundumError::new(
+                return Err(ChrysoError::new(
                     "subquery in FROM expects SELECT or WITH",
                 ));
             };
             self.expect_token(Token::RParen)?;
-            return Ok(corundum_core::ast::TableFactor::Derived {
+            return Ok(chryso_core::ast::TableFactor::Derived {
                 query: Box::new(statement),
             });
         }
         let first = self.expect_identifier()?;
         let name = self.parse_qualified_identifier_from(first)?;
-        Ok(corundum_core::ast::TableFactor::Table { name })
+        Ok(chryso_core::ast::TableFactor::Table { name })
     }
 
-    fn parse_order_by_list(&mut self) -> CorundumResult<Vec<OrderByExpr>> {
+    fn parse_order_by_list(&mut self) -> ChrysoResult<Vec<OrderByExpr>> {
         let mut items = Vec::new();
         loop {
             let expr = self.parse_expr()?;
@@ -786,7 +786,7 @@ impl Parser {
                 } else if self.consume_keyword(Keyword::Last) {
                     Some(false)
                 } else {
-                    return Err(CorundumError::new("NULLS expects FIRST or LAST"));
+                    return Err(ChrysoError::new("NULLS expects FIRST or LAST"));
                 }
             } else {
                 None
@@ -803,17 +803,17 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_limit_value(&mut self) -> CorundumResult<u64> {
+    fn parse_limit_value(&mut self) -> ChrysoResult<u64> {
         if let Some(Token::Number(value)) = self.next() {
             value
                 .parse()
-                .map_err(|_| CorundumError::new("invalid LIMIT value"))
+                .map_err(|_| ChrysoError::new("invalid LIMIT value"))
         } else {
-            Err(CorundumError::new("LIMIT expects a number"))
+            Err(ChrysoError::new("LIMIT expects a number"))
         }
     }
 
-    fn parse_expr_list(&mut self) -> CorundumResult<Vec<Expr>> {
+    fn parse_expr_list(&mut self) -> ChrysoResult<Vec<Expr>> {
         let mut items = Vec::new();
         loop {
             items.push(self.parse_expr()?);
@@ -824,11 +824,11 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_expr(&mut self) -> CorundumResult<Expr> {
+    fn parse_expr(&mut self) -> ChrysoResult<Expr> {
         self.parse_or()
     }
 
-    fn parse_or(&mut self) -> CorundumResult<Expr> {
+    fn parse_or(&mut self) -> ChrysoResult<Expr> {
         let mut expr = self.parse_and()?;
         while self.consume_keyword(Keyword::Or) {
             let rhs = self.parse_and()?;
@@ -841,7 +841,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_and(&mut self) -> CorundumResult<Expr> {
+    fn parse_and(&mut self) -> ChrysoResult<Expr> {
         let mut expr = self.parse_comparison()?;
         while self.consume_keyword(Keyword::And) {
             let rhs = self.parse_comparison()?;
@@ -854,7 +854,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_comparison(&mut self) -> CorundumResult<Expr> {
+    fn parse_comparison(&mut self) -> ChrysoResult<Expr> {
         let mut expr = self.parse_additive()?;
         loop {
             if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Between) {
@@ -963,7 +963,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_in_payload(&mut self, expr: Expr) -> CorundumResult<Expr> {
+    fn parse_in_payload(&mut self, expr: Expr) -> ChrysoResult<Expr> {
         self.expect_token(Token::LParen)?;
         if self.peek_is_keyword(Keyword::Select) {
             let subquery = self.parse_subquery_select_after_lparen()?;
@@ -976,7 +976,7 @@ impl Parser {
         Ok(rewrite_in_list(expr, list))
     }
 
-    fn parse_like_payload(&mut self, expr: Expr, name: &str) -> CorundumResult<Expr> {
+    fn parse_like_payload(&mut self, expr: Expr, name: &str) -> ChrysoResult<Expr> {
         let pattern = self.parse_additive()?;
         let mut args = vec![expr, pattern];
         if self.consume_keyword(Keyword::Escape) {
@@ -989,10 +989,10 @@ impl Parser {
         })
     }
 
-    fn parse_expr_list_in_parens(&mut self) -> CorundumResult<Vec<Expr>> {
+    fn parse_expr_list_in_parens(&mut self) -> ChrysoResult<Vec<Expr>> {
         let mut items = Vec::new();
         if self.consume_token(&Token::RParen) {
-            return Err(CorundumError::new("IN list cannot be empty"));
+            return Err(ChrysoError::new("IN list cannot be empty"));
         }
         loop {
             items.push(self.parse_expr()?);
@@ -1005,7 +1005,7 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_additive(&mut self) -> CorundumResult<Expr> {
+    fn parse_additive(&mut self) -> ChrysoResult<Expr> {
         let mut expr = self.parse_multiplicative()?;
         loop {
             let op = if self.consume_token(&Token::Plus) {
@@ -1028,7 +1028,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_multiplicative(&mut self) -> CorundumResult<Expr> {
+    fn parse_multiplicative(&mut self) -> ChrysoResult<Expr> {
         let mut expr = self.parse_unary()?;
         loop {
             let op = if self.consume_token(&Token::Star) {
@@ -1051,7 +1051,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_unary(&mut self) -> CorundumResult<Expr> {
+    fn parse_unary(&mut self) -> ChrysoResult<Expr> {
         if self.consume_keyword(Keyword::Exists) {
             let subquery = self.parse_subquery_select()?;
             return Ok(Expr::Exists(Box::new(subquery)));
@@ -1073,7 +1073,7 @@ impl Parser {
         self.parse_primary()
     }
 
-    fn parse_primary(&mut self) -> CorundumResult<Expr> {
+    fn parse_primary(&mut self) -> ChrysoResult<Expr> {
         match self.next() {
             Some(Token::Ident(name)) => {
                 if self.consume_token(&Token::LParen) {
@@ -1103,7 +1103,7 @@ impl Parser {
             Some(Token::Number(value)) => Ok(Expr::Literal(Literal::Number(
                 value
                     .parse()
-                    .map_err(|_| CorundumError::new("invalid number"))?,
+                    .map_err(|_| ChrysoError::new("invalid number"))?,
             ))),
             Some(Token::String(value)) => Ok(Expr::Literal(Literal::String(value))),
             Some(Token::Keyword(Keyword::Case)) => self.parse_case_expr(),
@@ -1118,13 +1118,13 @@ impl Parser {
                     Ok(expr)
                 }
             }
-            _ => Err(CorundumError::new("unexpected token in expression")),
+            _ => Err(ChrysoError::new("unexpected token in expression")),
         }
     }
 
-    fn parse_case_expr(&mut self) -> CorundumResult<Expr> {
+    fn parse_case_expr(&mut self) -> ChrysoResult<Expr> {
         if self.peek_is_keyword(Keyword::End) {
-            return Err(CorundumError::new("CASE expects at least one WHEN"));
+            return Err(ChrysoError::new("CASE expects at least one WHEN"));
         }
         let operand = if self.peek_is_keyword(Keyword::When) {
             None
@@ -1142,7 +1142,7 @@ impl Parser {
             when_then.push((when_expr, then_expr));
         }
         if when_then.is_empty() {
-            return Err(CorundumError::new("CASE expects at least one WHEN"));
+            return Err(ChrysoError::new("CASE expects at least one WHEN"));
         }
         let else_expr = if self.consume_keyword(Keyword::Else) {
             Some(Box::new(self.parse_expr()?))
@@ -1157,19 +1157,19 @@ impl Parser {
         })
     }
 
-    fn expect_keyword(&mut self, keyword: Keyword) -> CorundumResult<()> {
+    fn expect_keyword(&mut self, keyword: Keyword) -> ChrysoResult<()> {
         if self.consume_keyword(keyword) {
             Ok(())
         } else {
             let found = self.peek().map(token_label).unwrap_or_else(|| "end of input".to_string());
-            Err(CorundumError::new(format!(
+            Err(ChrysoError::new(format!(
                 "expected keyword {} but found {found}",
                 keyword_label(keyword)
             )))
         }
     }
 
-    fn parse_subquery_select(&mut self) -> CorundumResult<SelectStatement> {
+    fn parse_subquery_select(&mut self) -> ChrysoResult<SelectStatement> {
         self.expect_token(Token::LParen)?;
         self.expect_keyword(Keyword::Select)?;
         let select = self.parse_select()?;
@@ -1177,14 +1177,14 @@ impl Parser {
         Ok(select)
     }
 
-    fn parse_subquery_select_after_lparen(&mut self) -> CorundumResult<SelectStatement> {
+    fn parse_subquery_select_after_lparen(&mut self) -> ChrysoResult<SelectStatement> {
         self.expect_keyword(Keyword::Select)?;
         let select = self.parse_select()?;
         self.expect_token(Token::RParen)?;
         Ok(select)
     }
 
-    fn parse_window_spec(&mut self) -> CorundumResult<corundum_core::ast::WindowSpec> {
+    fn parse_window_spec(&mut self) -> ChrysoResult<chryso_core::ast::WindowSpec> {
         self.expect_token(Token::LParen)?;
         let mut partition_by = Vec::new();
         let mut order_by = Vec::new();
@@ -1197,13 +1197,13 @@ impl Parser {
             order_by = self.parse_order_by_list()?;
         }
         self.expect_token(Token::RParen)?;
-        Ok(corundum_core::ast::WindowSpec {
+        Ok(chryso_core::ast::WindowSpec {
             partition_by,
             order_by,
         })
     }
 
-    fn parse_identifier_list(&mut self) -> CorundumResult<Vec<String>> {
+    fn parse_identifier_list(&mut self) -> ChrysoResult<Vec<String>> {
         let mut items = Vec::new();
         loop {
             items.push(self.expect_identifier()?);
@@ -1214,13 +1214,13 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_assignments(&mut self) -> CorundumResult<Vec<corundum_core::ast::Assignment>> {
+    fn parse_assignments(&mut self) -> ChrysoResult<Vec<chryso_core::ast::Assignment>> {
         let mut items = Vec::new();
         loop {
             let column = self.expect_identifier()?;
             self.expect_token(Token::Eq)?;
             let value = self.parse_expr()?;
-            items.push(corundum_core::ast::Assignment { column, value });
+            items.push(chryso_core::ast::Assignment { column, value });
             if !self.consume_token(&Token::Comma) {
                 break;
             }
@@ -1252,29 +1252,29 @@ impl Parser {
         }
     }
 
-    fn expect_token(&mut self, token: Token) -> CorundumResult<()> {
+    fn expect_token(&mut self, token: Token) -> ChrysoResult<()> {
         if self.consume_token(&token) {
             Ok(())
         } else {
             let found = self.peek().map(token_label).unwrap_or_else(|| "end of input".to_string());
-            Err(CorundumError::new(format!(
+            Err(ChrysoError::new(format!(
                 "expected token {} but found {found}",
                 token_label(&token)
             )))
         }
     }
 
-    fn expect_identifier(&mut self) -> CorundumResult<String> {
+    fn expect_identifier(&mut self) -> ChrysoResult<String> {
         match self.next() {
             Some(Token::Ident(name)) => Ok(name),
-            other => Err(CorundumError::new(format!(
+            other => Err(ChrysoError::new(format!(
                 "expected identifier but found {}",
                 other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
             ))),
         }
     }
 
-    fn parse_qualified_identifier_from(&mut self, first: String) -> CorundumResult<String> {
+    fn parse_qualified_identifier_from(&mut self, first: String) -> ChrysoResult<String> {
         let mut parts = vec![first];
         while self.consume_token(&Token::Dot) {
             if self.consume_token(&Token::Star) {
@@ -1371,14 +1371,14 @@ fn rewrite_in_list(expr: Expr, list: Vec<Expr>) -> Expr {
     combined
 }
 
-fn table_ref_name(table: &TableRef) -> CorundumResult<String> {
+fn table_ref_name(table: &TableRef) -> ChrysoResult<String> {
     if let Some(alias) = &table.alias {
         return Ok(alias.clone());
     }
     match &table.factor {
-        corundum_core::ast::TableFactor::Table { name } => Ok(name.clone()),
-        corundum_core::ast::TableFactor::Derived { .. } => {
-            Err(CorundumError::new("subquery in FROM requires alias"))
+        chryso_core::ast::TableFactor::Table { name } => Ok(name.clone()),
+        chryso_core::ast::TableFactor::Derived { .. } => {
+            Err(ChrysoError::new("subquery in FROM requires alias"))
         }
     }
 }
@@ -1499,7 +1499,7 @@ fn keyword_label(keyword: Keyword) -> &'static str {
     }
 }
 
-fn tokenize(input: &str, _dialect: Dialect) -> CorundumResult<Vec<Token>> {
+fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = input.trim().chars().collect();
     let mut index = 0;
@@ -1586,11 +1586,11 @@ fn tokenize(input: &str, _dialect: Dialect) -> CorundumResult<Vec<Token>> {
                 end += 1;
             }
             if end >= chars.len() {
-                return Err(CorundumError::with_span(
+                return Err(ChrysoError::with_span(
                     "unterminated string literal",
-                    corundum_core::error::Span { start, end },
+                    chryso_core::error::Span { start, end },
                 )
-                .with_code(corundum_core::error::ErrorCode::ParserError));
+                .with_code(chryso_core::error::ErrorCode::ParserError));
             }
             let value: String = chars[index + 1..end].iter().collect();
             tokens.push(Token::String(value));
@@ -1605,11 +1605,11 @@ fn tokenize(input: &str, _dialect: Dialect) -> CorundumResult<Vec<Token>> {
                 end += 1;
             }
             if end >= chars.len() {
-                return Err(CorundumError::with_span(
+                return Err(ChrysoError::with_span(
                     "unterminated quoted identifier",
-                    corundum_core::error::Span { start, end },
+                    chryso_core::error::Span { start, end },
                 )
-                .with_code(corundum_core::error::ErrorCode::ParserError));
+                .with_code(chryso_core::error::ErrorCode::ParserError));
             }
             let value: String = chars[index + 1..end].iter().collect();
             tokens.push(Token::Ident(value));
@@ -1644,14 +1644,14 @@ fn tokenize(input: &str, _dialect: Dialect) -> CorundumResult<Vec<Token>> {
             index += 1;
             continue;
         }
-        return Err(CorundumError::with_span(
+        return Err(ChrysoError::with_span(
             "unsupported character in SQL",
-            corundum_core::error::Span {
+            chryso_core::error::Span {
                 start: index,
                 end: index + 1,
             },
         )
-        .with_code(corundum_core::error::ErrorCode::ParserError));
+        .with_code(chryso_core::error::ErrorCode::ParserError));
     }
     Ok(tokens)
 }
@@ -1738,7 +1738,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
 #[cfg(test)]
 mod tests {
     use super::{Dialect, ParserConfig, SimpleParser, SqlParser};
-    use corundum_core::ast::{
+    use chryso_core::ast::{
         BinaryOperator, Expr, InsertSource, JoinType, Literal, SelectStatement, Statement,
         TableFactor, TableRef, UnaryOperator,
     };
@@ -1861,7 +1861,7 @@ mod tests {
         let Statement::SetOp { op, .. } = stmt else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::UnionAll));
+        assert!(matches!(op, chryso_core::ast::SetOperator::UnionAll));
     }
 
     #[test]
@@ -1874,14 +1874,14 @@ mod tests {
         let Statement::SetOp { op, .. } = stmt else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Intersect));
 
         let sql = "select id from t1 except all select id from t2";
         let stmt = parser.parse(sql).expect("parse");
         let Statement::SetOp { op, .. } = stmt else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::ExceptAll));
+        assert!(matches!(op, chryso_core::ast::SetOperator::ExceptAll));
     }
 
     #[test]
@@ -2131,7 +2131,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Union));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Union));
         let Statement::Update(update) = with_stmt.statement.as_ref() else {
             panic!("expected update");
         };
@@ -2151,7 +2151,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Intersect));
         let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
             panic!("expected delete");
         };
@@ -2171,7 +2171,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Except));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Except));
         let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
             panic!("expected insert");
         };
@@ -2206,7 +2206,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::IntersectAll));
+        assert!(matches!(op, chryso_core::ast::SetOperator::IntersectAll));
         let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
             panic!("expected delete");
         };
@@ -2226,7 +2226,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::ExceptAll));
+        assert!(matches!(op, chryso_core::ast::SetOperator::ExceptAll));
         let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
             panic!("expected insert");
         };
@@ -2323,7 +2323,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Union));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Union));
         let Statement::Insert(insert) = with_stmt.statement.as_ref() else {
             panic!("expected insert");
         };
@@ -2343,7 +2343,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Intersect));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Intersect));
         let Statement::Update(update) = with_stmt.statement.as_ref() else {
             panic!("expected update");
         };
@@ -2363,7 +2363,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::Except));
+        assert!(matches!(op, chryso_core::ast::SetOperator::Except));
         let Statement::Delete(delete) = with_stmt.statement.as_ref() else {
             panic!("expected delete");
         };
@@ -2447,7 +2447,7 @@ mod tests {
         let Statement::SetOp { op, .. } = with_stmt.ctes[0].query.as_ref() else {
             panic!("expected set op");
         };
-        assert!(matches!(op, corundum_core::ast::SetOperator::UnionAll));
+        assert!(matches!(op, chryso_core::ast::SetOperator::UnionAll));
     }
 
     #[test]
@@ -3414,7 +3414,7 @@ mod tests {
             panic!("expected select");
         };
         let from = select.from.expect("from");
-        let corundum_core::ast::TableFactor::Table { name } = from.factor else {
+        let chryso_core::ast::TableFactor::Table { name } = from.factor else {
             panic!("expected table factor");
         };
         assert_eq!(name, "public.users");

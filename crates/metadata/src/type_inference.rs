@@ -1,4 +1,4 @@
-use corundum_core::ast::{BinaryOperator, Expr, Literal, UnaryOperator};
+use chryso_core::ast::{BinaryOperator, Expr, Literal, UnaryOperator};
 use crate::types::DataType;
 
 pub trait TypeInferencer {
@@ -94,7 +94,7 @@ pub fn expr_types(exprs: &[Expr], inferencer: &dyn TypeInferencer) -> Vec<DataTy
 #[cfg(test)]
 mod tests {
     use super::{SimpleTypeInferencer, TypeInferencer};
-    use corundum_core::ast::{BinaryOperator, Expr, Literal};
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use crate::types::DataType;
 
     #[test]

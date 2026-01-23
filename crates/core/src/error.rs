@@ -7,13 +7,13 @@ pub struct Span {
 }
 
 #[derive(Debug)]
-pub struct CorundumError {
+pub struct ChrysoError {
     message: String,
     span: Option<Span>,
     code: Option<ErrorCode>,
 }
 
-impl CorundumError {
+impl ChrysoError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -36,7 +36,7 @@ impl CorundumError {
     }
 }
 
-impl fmt::Display for CorundumError {
+impl fmt::Display for ChrysoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(code) = self.code {
             write!(f, "[{:?}] ", code)?;
@@ -51,19 +51,19 @@ impl fmt::Display for CorundumError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CorundumError, ErrorCode};
+    use super::{ChrysoError, ErrorCode};
 
     #[test]
     fn error_code_in_display() {
-        let err = CorundumError::new("boom").with_code(ErrorCode::OptimizerError);
+        let err = ChrysoError::new("boom").with_code(ErrorCode::OptimizerError);
         let message = err.to_string();
         assert!(message.contains("OptimizerError"));
     }
 }
 
-impl std::error::Error for CorundumError {}
+impl std::error::Error for ChrysoError {}
 
-pub type CorundumResult<T> = Result<T, CorundumError>;
+pub type ChrysoResult<T> = Result<T, ChrysoError>;
 #[derive(Debug, Clone, Copy)]
 pub enum ErrorCode {
     ParserError,

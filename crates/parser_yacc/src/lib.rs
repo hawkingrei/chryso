@@ -1,5 +1,5 @@
-use corundum_core::CorundumResult;
-use corundum_parser::{ParserConfig, SimpleParser, SqlParser};
+use chryso_core::ChrysoResult;
+use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
 
 pub struct YaccParser {
     config: ParserConfig,
@@ -12,7 +12,7 @@ impl YaccParser {
 }
 
 impl SqlParser for YaccParser {
-    fn parse(&self, sql: &str) -> CorundumResult<corundum_core::ast::Statement> {
+    fn parse(&self, sql: &str) -> ChrysoResult<chryso_core::ast::Statement> {
         let parser = SimpleParser::new(self.config.clone());
         parser.parse(sql)
     }
@@ -21,7 +21,7 @@ impl SqlParser for YaccParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use corundum_parser::Dialect;
+    use chryso_parser::Dialect;
 
     #[test]
     fn yacc_parser_falls_back() {
@@ -30,7 +30,7 @@ mod tests {
         });
         let stmt = parser.parse("select 1").expect("parse");
         match stmt {
-            corundum_core::ast::Statement::Select(_) => {}
+            chryso_core::ast::Statement::Select(_) => {}
             _ => panic!("expected select"),
         }
     }

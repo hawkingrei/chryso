@@ -2,7 +2,7 @@
 
 extern crate test;
 
-use corundum::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
+use chryso::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
 use test::Bencher;
 
 #[bench]

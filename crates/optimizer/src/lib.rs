@@ -1,8 +1,8 @@
-use corundum_metadata::StatsCache;
+use chryso_metadata::StatsCache;
 use crate::cost::{CostModel, UnitCostModel};
 use crate::memo::Memo;
 use crate::rules::RuleSet;
-use corundum_planner::{LogicalPlan, PhysicalPlan};
+use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 pub mod cost;
 pub mod estimation;
@@ -39,7 +39,7 @@ pub struct OptimizerConfig {
     pub rules: RuleSet,
     pub trace: bool,
     pub debug_rules: bool,
-    pub stats_provider: Option<std::sync::Arc<dyn corundum_metadata::StatsProvider>>,
+    pub stats_provider: Option<std::sync::Arc<dyn chryso_metadata::StatsProvider>>,
 }
 
 impl std::fmt::Debug for OptimizerConfig {
@@ -140,7 +140,7 @@ fn ensure_stats(
     logical: &LogicalPlan,
     stats: &mut StatsCache,
     config: &OptimizerConfig,
-) -> corundum_core::CorundumResult<Vec<String>> {
+) -> chryso_core::ChrysoResult<Vec<String>> {
     let Some(provider) = &config.stats_provider else {
         return Ok(Vec::new());
     };
