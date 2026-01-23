@@ -362,7 +362,6 @@ impl Parser {
 
     fn parse_type_name(&mut self) -> ChrysoResult<String> {
         // TODO: Replace this heuristic with a grammar-backed type parser.
-        // TODO: Implement a dedicated type parser for complex type syntax.
         let mut output = String::new();
         let mut depth = 0usize;
         loop {
