@@ -764,7 +764,8 @@ impl Parser {
                 query: Box::new(statement),
             });
         }
-        let name = self.expect_identifier()?;
+        let first = self.expect_identifier()?;
+        let name = self.parse_qualified_identifier_from(first)?;
         Ok(corundum_core::ast::TableFactor::Table { name })
     }
 
@@ -1093,15 +1094,9 @@ impl Parser {
                     } else {
                         Ok(function)
                     }
-                } else if self.consume_token(&Token::Dot) {
-                    if self.consume_token(&Token::Star) {
-                        Ok(Expr::Identifier(format!("{name}.*")))
-                    } else {
-                        let rhs = self.expect_identifier()?;
-                        Ok(Expr::Identifier(format!("{}.{}", name, rhs)))
-                    }
                 } else {
-                    Ok(Expr::Identifier(name))
+                    let ident = self.parse_qualified_identifier_from(name)?;
+                    Ok(Expr::Identifier(ident))
                 }
             }
             Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
@@ -1278,6 +1273,22 @@ impl Parser {
                 other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
             ))),
         }
+    }
+
+    fn parse_qualified_identifier_from(&mut self, first: String) -> CorundumResult<String> {
+        let mut parts = vec![first];
+        let mut ends_with_star = false;
+        while self.consume_token(&Token::Dot) {
+            if self.consume_token(&Token::Star) {
+                ends_with_star = true;
+                break;
+            }
+            parts.push(self.expect_identifier()?);
+        }
+        if ends_with_star {
+            parts.push("*".to_string());
+        }
+        Ok(parts.join("."))
     }
 
     fn is_clause_boundary(&self) -> bool {
@@ -3395,6 +3406,37 @@ mod tests {
         };
         assert_eq!(delete.returning.len(), 1);
         assert!(matches!(delete.returning[0].expr, Expr::Identifier(ref name) if name == "users.*"));
+    }
+
+    #[test]
+    fn parse_schema_qualified_table() {
+        let sql = "select * from public.users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = select.from.expect("from");
+        let corundum_core::ast::TableFactor::Table { name } = from.factor else {
+            panic!("expected table factor");
+        };
+        assert_eq!(name, "public.users");
+    }
+
+    #[test]
+    fn parse_schema_qualified_identifier() {
+        let sql = "select public.users.id from public.users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.projection.len(), 1);
+        assert!(matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.id"));
     }
 
     #[test]
