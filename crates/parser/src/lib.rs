@@ -362,7 +362,6 @@ impl Parser {
 
     fn parse_type_name(&mut self) -> CorundumResult<String> {
         // TODO: Replace this heuristic with a grammar-backed type parser.
-        // TODO: Implement a dedicated type parser for complex type syntax.
         let mut output = String::new();
         let mut depth = 0usize;
         loop {
@@ -764,8 +763,7 @@ impl Parser {
                 query: Box::new(statement),
             });
         }
-        let first = self.expect_identifier()?;
-        let name = self.parse_qualified_identifier_from(first)?;
+        let name = self.parse_qualified_identifier_from(self.expect_identifier()?)?;
         Ok(corundum_core::ast::TableFactor::Table { name })
     }
 
@@ -1095,8 +1093,7 @@ impl Parser {
                         Ok(function)
                     }
                 } else {
-                    let ident = self.parse_qualified_identifier_from(name)?;
-                    Ok(Expr::Identifier(ident))
+                    Ok(Expr::Identifier(self.parse_qualified_identifier_from(name)?))
                 }
             }
             Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
@@ -1277,16 +1274,12 @@ impl Parser {
 
     fn parse_qualified_identifier_from(&mut self, first: String) -> CorundumResult<String> {
         let mut parts = vec![first];
-        let mut ends_with_star = false;
         while self.consume_token(&Token::Dot) {
             if self.consume_token(&Token::Star) {
-                ends_with_star = true;
+                parts.push("*".to_string());
                 break;
             }
             parts.push(self.expect_identifier()?);
-        }
-        if ends_with_star {
-            parts.push("*".to_string());
         }
         Ok(parts.join("."))
     }
