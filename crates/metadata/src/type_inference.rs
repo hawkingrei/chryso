@@ -13,6 +13,7 @@ impl TypeInferencer for SimpleTypeInferencer {
             Expr::Literal(Literal::Number(_)) => DataType::Float,
             Expr::Literal(Literal::String(_)) => DataType::String,
             Expr::Literal(Literal::Bool(_)) => DataType::Bool,
+            Expr::IsNull { .. } => DataType::Bool,
             Expr::Identifier(_) => DataType::Unknown,
             Expr::UnaryOp { op, .. } => match op {
                 UnaryOperator::Not => DataType::Bool,
@@ -40,6 +41,19 @@ impl TypeInferencer for SimpleTypeInferencer {
             Expr::WindowFunction { function, .. } => self.infer_expr(function),
             Expr::Exists(_) | Expr::InSubquery { .. } => DataType::Bool,
             Expr::Subquery(_) => DataType::Unknown,
+            Expr::Case {
+                when_then,
+                else_expr,
+                ..
+            } => {
+                if let Some(expr) = else_expr {
+                    return self.infer_expr(expr);
+                }
+                when_then
+                    .first()
+                    .map(|(_, then_expr)| self.infer_expr(then_expr))
+                    .unwrap_or(DataType::Unknown)
+            }
             Expr::Wildcard => DataType::Unknown,
         }
     }
@@ -56,6 +70,19 @@ pub fn infer_with_registry(
         Expr::WindowFunction { function, .. } => infer_with_registry(function, registry),
         Expr::Exists(_) | Expr::InSubquery { .. } => DataType::Bool,
         Expr::Subquery(_) => DataType::Unknown,
+        Expr::Case {
+            when_then,
+            else_expr,
+            ..
+        } => {
+            if let Some(expr) = else_expr {
+                return infer_with_registry(expr, registry);
+            }
+            when_then
+                .first()
+                .map(|(_, then_expr)| infer_with_registry(then_expr, registry))
+                .unwrap_or(DataType::Unknown)
+        }
         _ => SimpleTypeInferencer.infer_expr(expr),
     }
 }

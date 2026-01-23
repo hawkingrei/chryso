@@ -1,14 +1,23 @@
-use corundum_core::ast::{BinaryOperator, Expr, Literal, Statement};
+use corundum_core::ast::{BinaryOperator, Expr, Literal, Statement, TableFactor, TableRef};
 use crate::{LogicalPlan, PhysicalPlan};
 
 pub fn serialize_statement(statement: &Statement) -> String {
     match statement {
         Statement::Select(select) => format!(
             "select|distinct={}|from={}",
-            select.distinct, select.from.name
+            select.distinct,
+            select
+                .from
+                .as_ref()
+                .map(table_ref_label)
+                .unwrap_or_else(|| "none".to_string())
         ),
+        Statement::With(stmt) => format!("with|ctes={}", stmt.ctes.len()),
+        Statement::SetOp { op, .. } => format!("setop|op={op:?}"),
         Statement::Explain(_) => "explain".to_string(),
         Statement::CreateTable(stmt) => format!("create_table|name={}", stmt.name),
+        Statement::DropTable(stmt) => format!("drop_table|name={}", stmt.name),
+        Statement::Truncate(stmt) => format!("truncate|table={}", stmt.table),
         Statement::Analyze(stmt) => format!("analyze|table={}", stmt.table),
         Statement::Insert(stmt) => format!("insert|table={}", stmt.table),
         Statement::Update(stmt) => format!("update|table={}", stmt.table),
@@ -30,6 +39,9 @@ pub fn serialize_expr(expr: &Expr) -> String {
         Expr::Literal(Literal::String(value)) => format!("string:{value}"),
         Expr::Literal(Literal::Number(value)) => format!("number:{value}"),
         Expr::Literal(Literal::Bool(value)) => format!("bool:{value}"),
+        Expr::IsNull { expr, negated } => {
+            format!("isnull:{}({})", negated, serialize_expr(expr))
+        }
         Expr::BinaryOp { left, op, right } => format!(
             "binop:{:?}({},{})",
             op,
@@ -66,12 +78,46 @@ pub fn serialize_expr(expr: &Expr) -> String {
             select_to_marker(subquery)
         ),
         Expr::Subquery(select) => format!("subquery:{}", select_to_marker(select)),
+        Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        } => {
+            let mut output = String::from("case");
+            if let Some(expr) = operand {
+                output.push(':');
+                output.push_str(&serialize_expr(expr));
+            }
+            for (when_expr, then_expr) in when_then {
+                output.push_str(":when=");
+                output.push_str(&serialize_expr(when_expr));
+                output.push_str(":then=");
+                output.push_str(&serialize_expr(then_expr));
+            }
+            if let Some(expr) = else_expr {
+                output.push_str(":else=");
+                output.push_str(&serialize_expr(expr));
+            }
+            output
+        }
         Expr::Wildcard => "wildcard".to_string(),
     }
 }
 
 fn select_to_marker(select: &corundum_core::ast::SelectStatement) -> String {
-    format!("select:{}", select.from.name)
+    let from = select
+        .from
+        .as_ref()
+        .map(table_ref_label)
+        .unwrap_or_else(|| "none".to_string());
+    format!("select:{from}")
+}
+
+fn table_ref_label(table: &TableRef) -> String {
+    match &table.factor {
+        TableFactor::Table { name } => name.clone(),
+        TableFactor::Derived { .. } => "subquery".to_string(),
+    }
 }
 
 pub fn deserialize_expr(input: &str) -> Option<Expr> {

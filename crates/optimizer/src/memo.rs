@@ -90,6 +90,13 @@ impl GroupExpr {
                 operator: MemoOperator::Logical(plan.clone()),
                 children: Vec::new(),
             },
+            LogicalPlan::Derived { input, .. } => {
+                let child_group = memo.insert(input);
+                Self {
+                    operator: MemoOperator::Logical(plan.clone()),
+                    children: vec![child_group],
+                }
+            }
             LogicalPlan::Filter { input, .. } => {
                 let child_group = memo.insert(input);
                 Self {
@@ -179,6 +186,15 @@ fn logical_to_physical(logical: &LogicalPlan, memo: &Memo) -> PhysicalPlan {
             predicate: predicate.clone(),
         },
         LogicalPlan::Dml { sql } => PhysicalPlan::Dml { sql: sql.clone() },
+        LogicalPlan::Derived {
+            input,
+            alias,
+            column_aliases,
+        } => PhysicalPlan::Derived {
+            input: Box::new(logical_to_physical(input, memo)),
+            alias: alias.clone(),
+            column_aliases: column_aliases.clone(),
+        },
         LogicalPlan::Filter { predicate, input } => PhysicalPlan::Filter {
             predicate: predicate.clone(),
             input: Box::new(logical_to_physical(input, memo)),

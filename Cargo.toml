@@ -10,6 +10,8 @@ corundum-metadata = { path = "crates/metadata" }
 corundum-optimizer = { path = "crates/optimizer" }
 corundum-parser = { path = "crates/parser" }
 corundum-planner = { path = "crates/planner" }
+ratatui = "0.29"
+crossterm = "0.28"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -22,6 +24,7 @@ members = [
     "crates/metadata",
     "crates/optimizer",
     "crates/parser",
+    "crates/parser_yacc",
     "crates/planner",
     "ffi",
 ]

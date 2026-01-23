@@ -16,6 +16,7 @@ impl CardinalityEstimator for NaiveEstimator {
                 .unwrap_or(1000.0),
             LogicalPlan::IndexScan { .. } => 100.0,
             LogicalPlan::Dml { .. } => 1.0,
+            LogicalPlan::Derived { input, .. } => self.estimate(input, stats),
             LogicalPlan::Filter { input, .. } => self.estimate(input, stats) * 0.25,
             LogicalPlan::Projection { input, .. } => self.estimate(input, stats),
             LogicalPlan::Join { left, right, .. } => {

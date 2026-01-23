@@ -9,7 +9,10 @@ fn main() {
     let adapter = std::sync::Arc::new(DuckDbAdapter::new());
     let mut stats = StatsCache::new();
     adapter
-        .execute_sql("create table users(id integer, name varchar)")
+        .execute_sql("create table if not exists users(id integer, name varchar)")
+        .expect("create");
+    adapter
+        .execute_sql("create table if not exists items(id integer, user_id integer)")
         .expect("create");
 
     let parser = SimpleParser::new(ParserConfig {
@@ -21,6 +24,7 @@ fn main() {
 
     let dml = [
         "insert into users (id, name) values (1, 'alice'), (2, 'bob')",
+        "insert into items (id, user_id) values (10, 1), (11, 2)",
         "update users set name = 'bobby' where id = 2",
         "delete from users where id = 1",
     ];
@@ -42,6 +46,20 @@ fn main() {
     for row in result.rows {
         println!("{} {}", row[0], row[1]);
     }
+
+    let sql = "select 1 where 1 = 1 order by 1 limit 1";
+    let stmt = parser.parse(sql).expect("parse");
+    let logical = PlanBuilder::build(stmt).expect("plan");
+    let physical = optimizer.optimize(&logical, &mut stats);
+    let result = adapter.execute(&physical).expect("execute");
+    println!("select without from: {:?}", result.rows);
+
+    let sql = "select u.user_id, i.id from (select id as user_id from users) as u(user_id) join items as i using (user_id)";
+    let stmt = parser.parse(sql).expect("parse");
+    let logical = PlanBuilder::build(stmt).expect("plan");
+    let physical = optimizer.optimize(&logical, &mut stats);
+    let result = adapter.execute(&physical).expect("execute");
+    println!("derived join: {:?}", result.rows);
 }
 
 #[cfg(not(feature = "duckdb"))]

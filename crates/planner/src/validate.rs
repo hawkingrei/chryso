@@ -34,6 +34,7 @@ impl<'a, C: Catalog> Validator for NameResolver<'a, C> {
                 }
             }
             LogicalPlan::Dml { .. } => Ok(()),
+            LogicalPlan::Derived { input, .. } => self.validate(input),
             LogicalPlan::Filter { input, .. } => self.validate(input),
             LogicalPlan::Projection { input, .. } => self.validate(input),
             LogicalPlan::Join { left, right, .. } => {
@@ -87,6 +88,7 @@ pub fn validate_functions(
         | LogicalPlan::Sort { input, .. }
         | LogicalPlan::Limit { input, .. }
         | LogicalPlan::TopN { input, .. } => validate_functions(input, registry),
+        LogicalPlan::Derived { input, .. } => validate_functions(input, registry),
         LogicalPlan::Dml { .. } => Ok(()),
     }
 }
@@ -119,6 +121,7 @@ fn validate_expr_functions(
             validate_expr_functions(left, registry)?;
             validate_expr_functions(right, registry)
         }
+        corundum_core::ast::Expr::IsNull { expr, .. } => validate_expr_functions(expr, registry),
         corundum_core::ast::Expr::UnaryOp { expr, .. } => validate_expr_functions(expr, registry),
         corundum_core::ast::Expr::Subquery(select) | corundum_core::ast::Expr::Exists(select) => {
             for item in &select.projection {
@@ -130,6 +133,23 @@ fn validate_expr_functions(
             validate_expr_functions(expr, registry)?;
             for item in &subquery.projection {
                 validate_expr_functions(&item.expr, registry)?;
+            }
+            Ok(())
+        }
+        corundum_core::ast::Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        } => {
+            if let Some(expr) = operand {
+                validate_expr_functions(expr, registry)?;
+            }
+            for (when_expr, then_expr) in when_then {
+                validate_expr_functions(when_expr, registry)?;
+                validate_expr_functions(then_expr, registry)?;
+            }
+            if let Some(expr) = else_expr {
+                validate_expr_functions(expr, registry)?;
             }
             Ok(())
         }
