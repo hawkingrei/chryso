@@ -9,12 +9,6 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-parser-yacc"
 
 [dependencies]
-lrlex = "0.13"
-lrpar = "0.13"
-
-[build-dependencies]
-lrlex = "0.13"
-lrpar = "0.13"
 
 [dependencies.chryso-core]
 version = "0.0.1"
