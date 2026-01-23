@@ -17,6 +17,8 @@ These helpers are compiled for unit tests and can be enabled for integration tes
 ## Running Tests
 - Unit tests:
   - `cargo test`
+- Parser-focused unit tests:
+  - `cargo test -p corundum-parser`
 - Integration tests using test helpers:
   - `cargo test --features test-utils`
 - Plan snapshot tests:
