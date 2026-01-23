@@ -27,7 +27,7 @@ These helpers are compiled for unit tests and can be enabled for integration tes
 ## Snapshot Recording
 To update `tests/testdata/plan/case1/out.json`, run:
 ```
-CORUNDUM_RECORD=1 cargo test --test plan_snapshot
+CHRYSO_RECORD=1 cargo test --test plan_snapshot
 ```
 
 ## Example (Integration Test)
