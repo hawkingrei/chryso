@@ -49,7 +49,7 @@
 ")"                   return RPAREN;
 "="                   return EQ;
 [0-9]+(\.[0-9]+)?     return NUMBER;
-"'"([^\\']|\\.)*"'"           return STRING;
+"'"([^\\']|\\.|'')*"'"         return STRING;
 [a-zA-Z_][a-zA-Z0-9_]* return IDENT;
 [\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]  return ERROR;
 

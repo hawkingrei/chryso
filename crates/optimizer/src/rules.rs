@@ -479,7 +479,7 @@ impl Rule for NormalizePredicates {
             return Vec::new();
         };
         let normalized = predicate.normalize();
-        if normalized.to_sql() == predicate.to_sql() {
+        if normalized.structural_eq(predicate) {
             return Vec::new();
         }
         vec![LogicalPlan::Filter {
@@ -794,6 +794,52 @@ mod tests {
         let rule = NormalizePredicates;
         let results = rule.apply(&plan);
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn normalize_predicates_removes_true_and() {
+        let plan = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::Identifier("x".to_string())),
+            },
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let rule = NormalizePredicates;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Filter { predicate, .. } = &results[0] else {
+            panic!("expected filter");
+        };
+        assert_eq!(predicate.to_sql(), "x");
+    }
+
+    #[test]
+    fn normalize_predicates_removes_nested_true_and() {
+        let plan = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Literal(corundum_core::ast::Literal::Bool(true))),
+                    op: BinaryOperator::And,
+                    right: Box::new(Expr::Identifier("x".to_string())),
+                }),
+            },
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let rule = NormalizePredicates;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Filter { predicate, .. } = &results[0] else {
+            panic!("expected filter");
+        };
+        assert_eq!(predicate.to_sql(), "x");
     }
 
     #[test]
@@ -1470,13 +1516,24 @@ impl UnionFind {
 
     fn find(&mut self, key: &str) -> String {
         self.add(key);
-        let parent = self.parent.get(key).cloned().unwrap_or_else(|| key.to_string());
-        if parent == key {
-            return parent;
+        let mut current = key.to_string();
+        let mut path = Vec::new();
+        loop {
+            let parent = self
+                .parent
+                .get(&current)
+                .cloned()
+                .unwrap_or_else(|| current.clone());
+            if parent == current {
+                break;
+            }
+            path.push(current);
+            current = parent;
         }
-        let root = self.find(&parent);
-        self.parent.insert(key.to_string(), root.clone());
-        root
+        for node in path {
+            self.parent.insert(node, current.clone());
+        }
+        current
     }
 
     fn union(&mut self, left: &str, right: &str) {

@@ -1,10 +1,14 @@
 use corundum_core::error::{CorundumError, CorundumResult};
 #[cfg(feature = "duckdb")]
+use corundum_core::ast::Statement;
+#[cfg(feature = "duckdb")]
 use corundum_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 #[cfg(feature = "duckdb")]
 use ::duckdb::params_from_iter;
 #[cfg(feature = "duckdb")]
 use ::duckdb::types::Value as DuckValue;
+#[cfg(feature = "duckdb")]
+use corundum_parser::{ParserConfig, SimpleParser, SqlParser};
 use corundum_planner::PhysicalPlan;
 use std::cell::RefCell;
 
@@ -351,6 +355,10 @@ impl DuckDbAdapter {
 
     #[cfg(feature = "duckdb")]
     fn is_query_sql(sql: &str) -> bool {
+        let parser = SimpleParser::new(ParserConfig::default());
+        if let Ok(statement) = parser.parse(sql) {
+            return statement_returns_rows(&statement);
+        }
         let Some(keyword) = first_keyword(sql) else {
             return false;
         };
@@ -359,14 +367,15 @@ impl DuckDbAdapter {
 }
 
 #[cfg(feature = "duckdb")]
-#[cfg(feature = "duckdb")]
 fn first_keyword(sql: &str) -> Option<String> {
     let mut chars = sql.chars().peekable();
     loop {
         while matches!(chars.peek(), Some(ch) if ch.is_whitespace()) {
             chars.next();
         }
-        match (chars.peek(), chars.clone().nth(1)) {
+        let first = chars.peek().copied();
+        let second = chars.clone().nth(1);
+        match (first, second) {
             (Some('-'), Some('-')) => {
                 chars.next();
                 chars.next();
@@ -404,6 +413,20 @@ fn first_keyword(sql: &str) -> Option<String> {
         None
     } else {
         Some(keyword)
+    }
+}
+
+#[cfg(feature = "duckdb")]
+fn statement_returns_rows(statement: &Statement) -> bool {
+    match statement {
+        Statement::Select(_)
+        | Statement::SetOp { .. }
+        | Statement::Explain(_) => true,
+        Statement::With(with) => statement_returns_rows(&with.statement),
+        Statement::Insert(insert) => !insert.returning.is_empty(),
+        Statement::Update(update) => !update.returning.is_empty(),
+        Statement::Delete(delete) => !delete.returning.is_empty(),
+        _ => false,
     }
 }
 

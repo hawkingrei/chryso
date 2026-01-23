@@ -349,7 +349,13 @@ impl Expr {
             (Expr::Literal(left), Expr::Literal(right)) => match (left, right) {
                 (Literal::String(left), Literal::String(right)) => left == right,
                 (Literal::Number(left), Literal::Number(right)) => {
-                    (left - right).abs() <= FLOAT_EPSILON
+                    if left.is_nan() || right.is_nan() {
+                        false
+                    } else if left.is_infinite() || right.is_infinite() {
+                        left == right
+                    } else {
+                        (left - right).abs() <= FLOAT_EPSILON
+                    }
                 }
                 (Literal::Bool(left), Literal::Bool(right)) => left == right,
                 _ => false,
@@ -576,12 +582,8 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
             },
         },
         Expr::BinaryOp { left, op, right } => {
-            if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
-                let left_sql = left.to_sql();
-                let right_sql = right.to_sql();
-                if left_sql == right_sql {
-                    return *left;
-                }
+            if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.structural_eq(&right) {
+                return *left;
             }
             let same_expr = left.structural_eq(&right);
             if same_expr {
