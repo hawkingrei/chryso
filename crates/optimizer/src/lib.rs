@@ -55,6 +55,32 @@ impl std::fmt::Debug for OptimizerConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::cost::UnitCostModel;
+    use super::{CascadesOptimizer, OptimizerConfig};
+    use chryso_metadata::{type_inference::SimpleTypeInferencer, StatsCache};
+    use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
+    use chryso_planner::PlanBuilder;
+
+    #[test]
+    fn explain_with_types_and_costs() {
+        let sql = "select sum(amount) from sales group by region";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let typed = logical.explain_typed(0, &SimpleTypeInferencer);
+        assert!(typed.contains("LogicalAggregate"));
+
+        let physical = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize(&logical, &mut StatsCache::new());
+        let costed = physical.explain_costed(0, &UnitCostModel);
+        assert!(costed.contains("cost="));
+    }
+}
+
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {

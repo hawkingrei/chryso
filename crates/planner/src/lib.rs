@@ -683,27 +683,7 @@ pub enum JoinAlgorithm {
 mod tests {
     use super::{LogicalPlan, PlanBuilder};
     use chryso_metadata::type_inference::SimpleTypeInferencer;
-    use chryso_optimizer::cost::UnitCostModel;
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
-
-    #[test]
-    fn explain_with_types_and_costs() {
-        let sql = "select sum(amount) from sales group by region";
-        let parser = SimpleParser::new(ParserConfig {
-            dialect: Dialect::Postgres,
-        });
-        let stmt = parser.parse(sql).expect("parse");
-        let logical = PlanBuilder::build(stmt).expect("plan");
-        let typed = logical.explain_typed(0, &SimpleTypeInferencer);
-        assert!(typed.contains("LogicalAggregate"));
-
-        let physical = chryso_optimizer::CascadesOptimizer::new(
-            chryso_optimizer::OptimizerConfig::default(),
-        )
-        .optimize(&logical, &mut chryso_metadata::StatsCache::new());
-        let costed = physical.explain_costed(0, &UnitCostModel);
-        assert!(costed.contains("cost="));
-    }
 
     #[test]
     fn planner_simplifies_select_star() {
