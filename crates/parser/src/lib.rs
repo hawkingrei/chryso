@@ -763,7 +763,8 @@ impl Parser {
                 query: Box::new(statement),
             });
         }
-        let name = self.parse_qualified_identifier_from(self.expect_identifier()?)?;
+        let first = self.expect_identifier()?;
+        let name = self.parse_qualified_identifier_from(first)?;
         Ok(corundum_core::ast::TableFactor::Table { name })
     }
 
