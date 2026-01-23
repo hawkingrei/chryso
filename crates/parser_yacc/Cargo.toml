@@ -2,13 +2,24 @@
 name = "chryso-parser-yacc"
 version = "0.0.1"
 edition = "2024"
+description = "Chryso parser-yacc crate."
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso-parser-yacc"
 
 [dependencies]
-chryso-core = { version = "0.0.1", path = "../core" }
-chryso-parser = { version = "0.0.1", path = "../parser" }
 lrlex = "0.13"
 lrpar = "0.13"
 
 [build-dependencies]
 lrlex = "0.13"
 lrpar = "0.13"
+
+[dependencies.chryso-core]
+version = "0.0.1"
+path = "../core"
+
+[dependencies.chryso-parser]
+version = "0.0.1"
+path = "../parser"

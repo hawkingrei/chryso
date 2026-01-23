@@ -2,38 +2,61 @@
 name = "chryso"
 version = "0.0.1"
 edition = "2024"
+description = "Chryso is a Calcite-style SQL parser + optimizer engine in Rust."
+readme = "README.md"
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso"
 
 [dependencies]
-chryso-adapter = { version = "0.0.1", path = "crates/adapter", default-features = false }
-chryso-core = { version = "0.0.1", path = "crates/core" }
-chryso-metadata = { version = "0.0.1", path = "crates/metadata" }
-chryso-optimizer = { version = "0.0.1", path = "crates/optimizer" }
-chryso-parser = { version = "0.0.1", path = "crates/parser" }
-chryso-planner = { version = "0.0.1", path = "crates/planner" }
 ratatui = "0.29"
 crossterm = "0.28"
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [workspace]
-members = [
-    "crates/adapter",
-    "crates/core",
-    "crates/metadata",
-    "crates/optimizer",
-    "crates/parser",
-    "crates/parser_yacc",
-    "crates/planner",
-    "ffi",
-]
+members = [ "crates/adapter", "crates/core", "crates/metadata", "crates/optimizer", "crates/parser", "crates/parser_yacc", "crates/planner", "ffi",]
 
 [features]
 default = []
-duckdb = ["chryso-adapter/duckdb"]
+duckdb = [ "chryso-adapter/duckdb",]
 test-utils = []
 
+[dependencies.chryso-adapter]
+version = "0.0.1"
+path = "crates/adapter"
+default-features = false
+
+[dependencies.chryso-core]
+version = "0.0.1"
+path = "crates/core"
+
+[dependencies.chryso-metadata]
+version = "0.0.1"
+path = "crates/metadata"
+
+[dependencies.chryso-optimizer]
+version = "0.0.1"
+path = "crates/optimizer"
+
+[dependencies.chryso-parser]
+version = "0.0.1"
+path = "crates/parser"
+
+[dependencies.chryso-planner]
+version = "0.0.1"
+path = "crates/planner"
+
+[dev-dependencies.serde]
+version = "1"
+features = [ "derive",]
 
 [workspace.package]
 version = "0.0.1"
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso"
+description = "Chryso is a Calcite-style SQL parser + optimizer engine in Rust."

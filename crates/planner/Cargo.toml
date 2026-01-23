@@ -2,11 +2,24 @@
 name = "chryso-planner"
 version = "0.0.1"
 edition = "2024"
+description = "Chryso planner crate."
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso-planner"
 
-[dependencies]
-chryso-core = { version = "0.0.1", path = "../core" }
-chryso-metadata = { version = "0.0.1", path = "../metadata" }
+[dependencies.chryso-core]
+version = "0.0.1"
+path = "../core"
 
-[dev-dependencies]
-chryso-optimizer = { version = "0.0.1", path = "../optimizer" }
-chryso-parser = { version = "0.0.1", path = "../parser" }
+[dependencies.chryso-metadata]
+version = "0.0.1"
+path = "../metadata"
+
+[dev-dependencies.chryso-optimizer]
+version = "0.0.1"
+path = "../optimizer"
+
+[dev-dependencies.chryso-parser]
+version = "0.0.1"
+path = "../parser"

@@ -2,14 +2,32 @@
 name = "chryso-adapter"
 version = "0.0.1"
 edition = "2024"
-
-[dependencies]
-chryso-core = { version = "0.0.1", path = "../core" }
-chryso-planner = { version = "0.0.1", path = "../planner" }
-chryso-metadata = { version = "0.0.1", path = "../metadata" }
-chryso-parser = { version = "0.0.1", path = "../parser" }
-duckdb = { version = "1.4.3", optional = true }
+description = "Chryso adapter crate."
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso-adapter"
 
 [features]
 default = []
-duckdb = ["dep:duckdb", "duckdb/bundled"]
+duckdb = [ "dep:duckdb", "duckdb/bundled",]
+
+[dependencies.chryso-core]
+version = "0.0.1"
+path = "../core"
+
+[dependencies.chryso-planner]
+version = "0.0.1"
+path = "../planner"
+
+[dependencies.chryso-metadata]
+version = "0.0.1"
+path = "../metadata"
+
+[dependencies.chryso-parser]
+version = "0.0.1"
+path = "../parser"
+
+[dependencies.duckdb]
+version = "1.4.3"
+optional = true
