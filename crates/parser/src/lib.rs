@@ -3434,6 +3434,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_schema_qualified_wildcard() {
+        let sql = "select public.users.* from public.users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.projection.len(), 1);
+        assert!(matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.*"));
+    }
+
+    #[test]
     fn parse_returning_alias() {
         let sql = "update users set name = 'bob' returning id as user_id";
         let parser = SimpleParser::new(ParserConfig {
