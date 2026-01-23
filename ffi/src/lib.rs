@@ -5,7 +5,7 @@ pub struct ChrysoHandle {
     _private: [u8; 0],
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn chryso_parse_sql(sql: *const std::os::raw::c_char) -> *mut ChrysoHandle {
     if sql.is_null() {
         return std::ptr::null_mut();
