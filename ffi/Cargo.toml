@@ -1,10 +1,10 @@
 [package]
 name = "chryso-ffi"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-chryso = { path = ".." }
+chryso = { version = "0.0.1", path = ".." }

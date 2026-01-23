@@ -1,9 +1,9 @@
 [package]
 name = "chryso-optimizer"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-chryso-core = { path = "../core" }
-chryso-planner = { path = "../planner" }
-chryso-metadata = { path = "../metadata" }
+chryso-core = { version = "0.0.1", path = "../core" }
+chryso-planner = { version = "0.0.1", path = "../planner" }
+chryso-metadata = { version = "0.0.1", path = "../metadata" }

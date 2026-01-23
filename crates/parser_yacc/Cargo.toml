@@ -1,11 +1,11 @@
 [package]
 name = "chryso-parser-yacc"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-chryso-core = { path = "../core" }
-chryso-parser = { path = "../parser" }
+chryso-core = { version = "0.0.1", path = "../core" }
+chryso-parser = { version = "0.0.1", path = "../parser" }
 lrlex = "0.13"
 lrpar = "0.13"
 

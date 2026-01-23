@@ -424,6 +424,87 @@ dependencies = [
 ]
 
 [[package]]
+name = "chryso"
+version = "0.0.1"
+dependencies = [
+ "chryso-adapter",
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-optimizer",
+ "chryso-parser",
+ "chryso-planner",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "chryso-adapter"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-parser",
+ "chryso-planner",
+ "duckdb",
+]
+
+[[package]]
+name = "chryso-core"
+version = "0.0.1"
+
+[[package]]
+name = "chryso-ffi"
+version = "0.0.1"
+dependencies = [
+ "chryso",
+]
+
+[[package]]
+name = "chryso-metadata"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+]
+
+[[package]]
+name = "chryso-optimizer"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-planner",
+]
+
+[[package]]
+name = "chryso-parser"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+]
+
+[[package]]
+name = "chryso-parser-yacc"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+ "chryso-parser",
+ "lrlex",
+ "lrpar",
+]
+
+[[package]]
+name = "chryso-planner"
+version = "0.0.1"
+dependencies = [
+ "chryso-core",
+ "chryso-metadata",
+ "chryso-optimizer",
+ "chryso-parser",
+]
+
+[[package]]
 name = "comfy-table"
 version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -473,87 +554,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "chryso"
-version = "0.1.0"
-dependencies = [
- "chryso-adapter",
- "chryso-core",
- "chryso-metadata",
- "chryso-optimizer",
- "chryso-parser",
- "chryso-planner",
- "crossterm",
- "ratatui",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "chryso-adapter"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
- "chryso-metadata",
- "chryso-parser",
- "chryso-planner",
- "duckdb",
-]
-
-[[package]]
-name = "chryso-core"
-version = "0.1.0"
-
-[[package]]
-name = "chryso-ffi"
-version = "0.1.0"
-dependencies = [
- "chryso",
-]
-
-[[package]]
-name = "chryso-metadata"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
-]
-
-[[package]]
-name = "chryso-optimizer"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
- "chryso-metadata",
- "chryso-planner",
-]
-
-[[package]]
-name = "chryso-parser"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
-]
-
-[[package]]
-name = "chryso-parser-yacc"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
- "chryso-parser",
- "lrlex",
- "lrpar",
-]
-
-[[package]]
-name = "chryso-planner"
-version = "0.1.0"
-dependencies = [
- "chryso-core",
- "chryso-metadata",
- "chryso-optimizer",
- "chryso-parser",
-]
 
 [[package]]
 name = "crc32fast"

@@ -1,15 +1,15 @@
 [package]
 name = "chryso"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-chryso-adapter = { path = "crates/adapter", default-features = false }
-chryso-core = { path = "crates/core" }
-chryso-metadata = { path = "crates/metadata" }
-chryso-optimizer = { path = "crates/optimizer" }
-chryso-parser = { path = "crates/parser" }
-chryso-planner = { path = "crates/planner" }
+chryso-adapter = { version = "0.0.1", path = "crates/adapter", default-features = false }
+chryso-core = { version = "0.0.1", path = "crates/core" }
+chryso-metadata = { version = "0.0.1", path = "crates/metadata" }
+chryso-optimizer = { version = "0.0.1", path = "crates/optimizer" }
+chryso-parser = { version = "0.0.1", path = "crates/parser" }
+chryso-planner = { version = "0.0.1", path = "crates/planner" }
 ratatui = "0.29"
 crossterm = "0.28"
 
@@ -33,3 +33,7 @@ members = [
 default = []
 duckdb = ["chryso-adapter/duckdb"]
 test-utils = []
+
+
+[workspace.package]
+version = "0.0.1"
