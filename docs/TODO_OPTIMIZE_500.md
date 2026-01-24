@@ -84,7 +84,7 @@
 ## Parser (1-200)
 
 1. Parser: lexer: add token for CASE
-2. Parser: dialect: support CAST keyword parsing
+2. Parser: dialect: support CAST keyword parsing (done)
 3. Parser: expr: parse ILIKE operator precedence
 4. Parser: expr: parse IS NULL expression form
 5. Parser: literal: parse IS NOT NULL literal
@@ -125,12 +125,12 @@
 40. Parser: parser: handle MAP literal comments
 41. Parser: lexer: add token for STRUCT literal
 42. Parser: dialect: support JSON literal keyword parsing
-43. Parser: expr: parse INTERVAL literal operator precedence
-44. Parser: expr: parse DATE/TIME/TIMESTAMP expression form
+43. Parser: expr: parse INTERVAL literal operator precedence (done)
+44. Parser: expr: parse DATE/TIME/TIMESTAMP expression form (done)
 45. Parser: literal: parse BINARY/HEX literal literal
 46. Parser: identifier: support ESCAPE in LIKE quoting rules
 47. Parser: statement: parse POSITION/SUBSTRING statement variant
-48. Parser: select: support REGEXP clause
+48. Parser: select: support REGEXP clause (done, MySQL REGEXP keyword, PostgreSQL regex operators, and SIMILAR TO)
 49. Parser: join: support DELIMITED identifiers join syntax
 50. Parser: function: parse schema-qualified identifiers function call
 51. Parser: window: parse parameter placeholders window clause
