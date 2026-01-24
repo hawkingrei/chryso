@@ -130,7 +130,7 @@
 45. Parser: literal: parse BINARY/HEX literal literal
 46. Parser: identifier: support ESCAPE in LIKE quoting rules
 47. Parser: statement: parse POSITION/SUBSTRING statement variant
-48. Parser: select: support REGEXP clause (done, MySQL only)
+48. Parser: select: support REGEXP clause (done, MySQL REGEXP keyword, PostgreSQL regex operators, and SIMILAR TO)
 49. Parser: join: support DELIMITED identifiers join syntax
 50. Parser: function: parse schema-qualified identifiers function call
 51. Parser: window: parse parameter placeholders window clause

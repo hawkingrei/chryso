@@ -919,7 +919,7 @@ impl Parser {
             if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Regexp) {
                 self.next();
                 self.next();
-                let regexp_expr = self.parse_regexp_payload(expr, false)?;
+                let regexp_expr = self.parse_regexp_payload(expr, false, true)?;
                 return Ok(Expr::UnaryOp {
                     op: UnaryOperator::Not,
                     expr: Box::new(regexp_expr),
@@ -979,22 +979,18 @@ impl Parser {
             } else if self.consume_keyword(Keyword::ILike) {
                 return Ok(self.parse_like_payload(expr, "ilike")?);
             } else if self.consume_keyword(Keyword::Regexp) {
-                return Ok(self.parse_regexp_payload(expr, false)?);
+                return Ok(self.parse_regexp_payload(expr, false, true)?);
             } else if self.consume_keyword(Keyword::Similar) {
                 self.expect_keyword(Keyword::To)?;
                 return Ok(self.parse_like_payload(expr, "similar_to")?);
             } else if self.consume_token(&Token::Tilde) {
-                return Ok(self.parse_regexp_payload(expr, false)?);
+                return Ok(self.parse_regexp_payload(expr, false, false)?);
             } else if self.consume_token(&Token::TildeStar) {
-                return Ok(self.parse_regexp_payload(expr, true)?);
-            } else if self.consume_token(&Token::NotTilde) {
-                let regexp_expr = self.parse_regexp_payload(expr, false)?;
-                return Ok(Expr::UnaryOp {
-                    op: UnaryOperator::Not,
-                    expr: Box::new(regexp_expr),
-                });
-            } else if self.consume_token(&Token::NotTildeStar) {
-                let regexp_expr = self.parse_regexp_payload(expr, true)?;
+                return Ok(self.parse_regexp_payload(expr, true, false)?);
+            } else if matches!(self.peek(), Some(Token::NotTilde) | Some(Token::NotTildeStar)) {
+                let token = self.next().expect("peek ensures token");
+                let case_insensitive = matches!(token, Token::NotTildeStar);
+                let regexp_expr = self.parse_regexp_payload(expr, case_insensitive, false)?;
                 return Ok(Expr::UnaryOp {
                     op: UnaryOperator::Not,
                     expr: Box::new(regexp_expr),
@@ -1041,12 +1037,20 @@ impl Parser {
         })
     }
 
-    fn parse_regexp_payload(&mut self, expr: Expr, case_insensitive: bool) -> ChrysoResult<Expr> {
+    fn parse_regexp_payload(
+        &mut self,
+        expr: Expr,
+        case_insensitive: bool,
+        from_regexp_keyword: bool,
+    ) -> ChrysoResult<Expr> {
         if !matches!(self._dialect, Dialect::Postgres | Dialect::MySql) {
             return Err(ChrysoError::new("regex operator is not supported in this dialect"));
         }
-        if matches!(self._dialect, Dialect::Postgres) && self.peek_is_keyword(Keyword::Regexp) {
+        if matches!(self._dialect, Dialect::Postgres) && from_regexp_keyword {
             return Err(ChrysoError::new("REGEXP is not supported in Postgres dialect"));
+        }
+        if matches!(self._dialect, Dialect::MySql) && !from_regexp_keyword {
+            return Err(ChrysoError::new("regex operators are not supported in MySQL dialect"));
         }
         if matches!(self._dialect, Dialect::MySql) && case_insensitive {
             return Err(ChrysoError::new("REGEXP does not support case-insensitive operator in MySQL dialect"));
@@ -1262,12 +1266,7 @@ impl Parser {
                         self.expect_token(Token::RParen)?;
                         expr
                     }
-                    _ => {
-                        return Err(ChrysoError::new(format!(
-                            "{} expects a string literal",
-                            name.to_ascii_uppercase()
-                        )))
-                    }
+                    _ => unreachable!("expects a string, number, or expression"),
                 };
                 Ok(Expr::FunctionCall {
                     name: name.to_string(),
@@ -2031,10 +2030,12 @@ mod tests {
             panic!("expected select");
         };
         assert_eq!(select.projection.len(), 4);
-        for item in &select.projection {
-            let Expr::FunctionCall { args, .. } = &item.expr else {
+        let names = ["date", "time", "timestamp", "interval"];
+        for (item, expected_name) in select.projection.iter().zip(names.iter()) {
+            let Expr::FunctionCall { name, args } = &item.expr else {
                 panic!("expected function call");
             };
+            assert_eq!(name, *expected_name);
             assert_eq!(args.len(), 1);
         }
     }
@@ -2066,10 +2067,24 @@ mod tests {
         let Statement::Select(select) = stmt else {
             panic!("expected select");
         };
-        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+        let Expr::BinaryOp { op, left, right } = select.selection.expect("selection") else {
             panic!("expected binary op");
         };
         assert!(matches!(op, BinaryOperator::And));
+        let is_regexp = |expr: &Expr| matches!(
+            expr,
+            Expr::FunctionCall { name, .. } if name == "regexp"
+        );
+        let is_not_regexp_i = |expr: &Expr| matches!(
+            expr,
+            Expr::UnaryOp { op: UnaryOperator::Not, expr }
+                if matches!(expr.as_ref(), Expr::FunctionCall { name, .. } if name == "regexp_i")
+        );
+        let (left_expr, right_expr) = (left.as_ref(), right.as_ref());
+        assert!(
+            (is_regexp(left_expr) && is_not_regexp_i(right_expr))
+                || (is_regexp(right_expr) && is_not_regexp_i(left_expr))
+        );
     }
 
     #[test]
@@ -2087,6 +2102,28 @@ mod tests {
         };
         assert_eq!(name, "similar_to");
         assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn reject_regexp_in_postgres_dialect() {
+        let sql = "select * from users where name regexp 'alice'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("REGEXP is not supported"));
+    }
+
+    #[test]
+    fn reject_case_insensitive_regex_in_mysql_dialect() {
+        let sql = "select * from users where name ~* 'alice'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::MySql,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err
+            .to_string()
+            .contains("regex operators are not supported"));
     }
 
     #[test]
