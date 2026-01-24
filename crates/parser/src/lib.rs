@@ -65,6 +65,10 @@ enum Token {
     Plus,
     Minus,
     Slash,
+    Tilde,
+    TildeStar,
+    NotTilde,
+    NotTildeStar,
     Keyword(Keyword),
 }
 
@@ -135,6 +139,14 @@ enum Keyword {
     First,
     Last,
     Escape,
+    Cast,
+    Date,
+    Time,
+    Timestamp,
+    Interval,
+    Regexp,
+    Similar,
+    To,
 }
 
 struct Parser {
@@ -904,6 +916,25 @@ impl Parser {
                     expr: Box::new(like_expr),
                 });
             }
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Regexp) {
+                self.next();
+                self.next();
+                let regexp_expr = self.parse_regexp_payload(expr, false)?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(regexp_expr),
+                });
+            }
+            if self.peek_is_keyword(Keyword::Not) && self.peek_is_keyword_n(1, Keyword::Similar) {
+                self.next();
+                self.next();
+                self.expect_keyword(Keyword::To)?;
+                let similar_expr = self.parse_like_payload(expr, "similar_to")?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(similar_expr),
+                });
+            }
             if self.consume_keyword(Keyword::Between) {
                 let low = self.parse_additive()?;
                 self.expect_keyword(Keyword::And)?;
@@ -947,6 +978,27 @@ impl Parser {
                 return Ok(self.parse_like_payload(expr, "like")?);
             } else if self.consume_keyword(Keyword::ILike) {
                 return Ok(self.parse_like_payload(expr, "ilike")?);
+            } else if self.consume_keyword(Keyword::Regexp) {
+                return Ok(self.parse_regexp_payload(expr, false)?);
+            } else if self.consume_keyword(Keyword::Similar) {
+                self.expect_keyword(Keyword::To)?;
+                return Ok(self.parse_like_payload(expr, "similar_to")?);
+            } else if self.consume_token(&Token::Tilde) {
+                return Ok(self.parse_regexp_payload(expr, false)?);
+            } else if self.consume_token(&Token::TildeStar) {
+                return Ok(self.parse_regexp_payload(expr, true)?);
+            } else if self.consume_token(&Token::NotTilde) {
+                let regexp_expr = self.parse_regexp_payload(expr, false)?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(regexp_expr),
+                });
+            } else if self.consume_token(&Token::NotTildeStar) {
+                let regexp_expr = self.parse_regexp_payload(expr, true)?;
+                return Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    expr: Box::new(regexp_expr),
+                });
             } else {
                 None
             };
@@ -986,6 +1038,24 @@ impl Parser {
         Ok(Expr::FunctionCall {
             name: name.to_string(),
             args,
+        })
+    }
+
+    fn parse_regexp_payload(&mut self, expr: Expr, case_insensitive: bool) -> ChrysoResult<Expr> {
+        if !matches!(self._dialect, Dialect::Postgres | Dialect::MySql) {
+            return Err(ChrysoError::new("regex operator is not supported in this dialect"));
+        }
+        if matches!(self._dialect, Dialect::Postgres) && self.peek_is_keyword(Keyword::Regexp) {
+            return Err(ChrysoError::new("REGEXP is not supported in Postgres dialect"));
+        }
+        if matches!(self._dialect, Dialect::MySql) && case_insensitive {
+            return Err(ChrysoError::new("REGEXP does not support case-insensitive operator in MySQL dialect"));
+        }
+        let pattern = self.parse_additive()?;
+        let name = if case_insensitive { "regexp_i" } else { "regexp" };
+        Ok(Expr::FunctionCall {
+            name: name.to_string(),
+            args: vec![expr, pattern],
         })
     }
 
@@ -1100,6 +1170,11 @@ impl Parser {
             }
             Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
             Some(Token::Keyword(Keyword::False)) => Ok(Expr::Literal(Literal::Bool(false))),
+            Some(Token::Keyword(Keyword::Cast)) => self.parse_cast_expr(),
+            Some(Token::Keyword(Keyword::Date)) => self.parse_keyword_literal("date"),
+            Some(Token::Keyword(Keyword::Time)) => self.parse_keyword_literal("time"),
+            Some(Token::Keyword(Keyword::Timestamp)) => self.parse_keyword_literal("timestamp"),
+            Some(Token::Keyword(Keyword::Interval)) => self.parse_keyword_literal("interval"),
             Some(Token::Number(value)) => Ok(Expr::Literal(Literal::Number(
                 value
                     .parse()
@@ -1155,6 +1230,52 @@ impl Parser {
             when_then,
             else_expr,
         })
+    }
+
+    fn parse_cast_expr(&mut self) -> ChrysoResult<Expr> {
+        self.expect_token(Token::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect_keyword(Keyword::As)?;
+        let data_type = self.parse_type_name()?;
+        if data_type.is_empty() {
+            return Err(ChrysoError::new("CAST expects a type name"));
+        }
+        self.expect_token(Token::RParen)?;
+        Ok(Expr::FunctionCall {
+            name: "cast".to_string(),
+            args: vec![expr, Expr::Literal(Literal::String(data_type))],
+        })
+    }
+
+    fn parse_keyword_literal(&mut self, name: &str) -> ChrysoResult<Expr> {
+        match self.peek() {
+            Some(Token::String(_)) | Some(Token::Number(_)) | Some(Token::LParen) => {
+                let value = match self.next() {
+                    Some(Token::String(value)) => Expr::Literal(Literal::String(value)),
+                    Some(Token::Number(value)) => Expr::Literal(Literal::Number(
+                        value
+                            .parse()
+                            .map_err(|_| ChrysoError::new("invalid number"))?,
+                    )),
+                    Some(Token::LParen) => {
+                        let expr = self.parse_expr()?;
+                        self.expect_token(Token::RParen)?;
+                        expr
+                    }
+                    _ => {
+                        return Err(ChrysoError::new(format!(
+                            "{} expects a string literal",
+                            name.to_ascii_uppercase()
+                        )))
+                    }
+                };
+                Ok(Expr::FunctionCall {
+                    name: name.to_string(),
+                    args: vec![value],
+                })
+            }
+            _ => Ok(Expr::Identifier(name.to_string())),
+        }
     }
 
     fn expect_keyword(&mut self, keyword: Keyword) -> ChrysoResult<()> {
@@ -1425,6 +1546,10 @@ fn token_label(token: &Token) -> String {
         Token::Plus => "+".to_string(),
         Token::Minus => "-".to_string(),
         Token::Slash => "/".to_string(),
+        Token::Tilde => "~".to_string(),
+        Token::TildeStar => "~*".to_string(),
+        Token::NotTilde => "!~".to_string(),
+        Token::NotTildeStar => "!~*".to_string(),
         Token::Keyword(keyword) => keyword_label(*keyword).to_string(),
     }
 }
@@ -1496,6 +1621,14 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::First => "first",
         Keyword::Last => "last",
         Keyword::Escape => "escape",
+        Keyword::Cast => "cast",
+        Keyword::Date => "date",
+        Keyword::Time => "time",
+        Keyword::Timestamp => "timestamp",
+        Keyword::Interval => "interval",
+        Keyword::Regexp => "regexp",
+        Keyword::Similar => "similar",
+        Keyword::To => "to",
     }
 }
 
@@ -1557,6 +1690,26 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
         if c == '!' && index + 1 < chars.len() && chars[index + 1] == '=' {
             tokens.push(Token::NotEq);
             index += 2;
+            continue;
+        }
+        if c == '!' && index + 1 < chars.len() && chars[index + 1] == '~' {
+            if index + 2 < chars.len() && chars[index + 2] == '*' {
+                tokens.push(Token::NotTildeStar);
+                index += 3;
+            } else {
+                tokens.push(Token::NotTilde);
+                index += 2;
+            }
+            continue;
+        }
+        if c == '~' {
+            if index + 1 < chars.len() && chars[index + 1] == '*' {
+                tokens.push(Token::TildeStar);
+                index += 2;
+            } else {
+                tokens.push(Token::Tilde);
+                index += 1;
+            }
             continue;
         }
         if c == '<' {
@@ -1731,6 +1884,14 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "first" => Some(Keyword::First),
         "last" => Some(Keyword::Last),
         "escape" => Some(Keyword::Escape),
+        "cast" => Some(Keyword::Cast),
+        "date" => Some(Keyword::Date),
+        "time" => Some(Keyword::Time),
+        "timestamp" => Some(Keyword::Timestamp),
+        "interval" => Some(Keyword::Interval),
+        "regexp" => Some(Keyword::Regexp),
+        "similar" => Some(Keyword::Similar),
+        "to" => Some(Keyword::To),
         _ => None,
     }
 }
@@ -1835,6 +1996,97 @@ mod tests {
         assert!(select.distinct);
         assert!(select.distinct_on.is_empty());
         assert_eq!(select.offset, Some(5));
+    }
+
+    #[test]
+    fn parse_cast_expression() {
+        let sql = "select cast(amount as decimal(10,2)) from sales";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let expr = &select.projection[0].expr;
+        let Expr::FunctionCall { name, args } = expr else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "cast");
+        assert_eq!(args.len(), 2);
+        let Expr::Literal(Literal::String(data_type)) = &args[1] else {
+            panic!("expected type literal");
+        };
+        assert_eq!(data_type, "decimal(10,2)");
+    }
+
+    #[test]
+    fn parse_date_time_interval_literals() {
+        let sql = "select date '2024-01-01', time '12:34:56', timestamp '2024-01-01 12:00:00', interval '1 day'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.projection.len(), 4);
+        for item in &select.projection {
+            let Expr::FunctionCall { args, .. } = &item.expr else {
+                panic!("expected function call");
+            };
+            assert_eq!(args.len(), 1);
+        }
+    }
+
+    #[test]
+    fn parse_regexp_operator() {
+        let sql = "select * from users where name regexp 'alice'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::MySql,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = select.selection.expect("selection") else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "regexp");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_pg_regex_operators() {
+        let sql = "select * from users where name ~ 'alice' and tag !~* 'bot'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::And));
+    }
+
+    #[test]
+    fn parse_pg_similar_to() {
+        let sql = "select * from users where name similar to 'a%'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = select.selection.expect("selection") else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "similar_to");
+        assert_eq!(args.len(), 2);
     }
 
     #[test]
