@@ -1235,8 +1235,8 @@ mod tests {
         // Key test: verify │ connection line exists on left subtree path
         // Expected structure:
         // LogicalJoin
-        // └── LogicalFilter
-        //     └── LogicalScan: table=users
+        // ├── LogicalFilter
+        // │   └── LogicalScan: table=users
         // └── LogicalScan: table=orders
 
         let lines: Vec<&str> = output.lines().collect();
