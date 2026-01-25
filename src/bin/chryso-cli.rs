@@ -3,6 +3,7 @@ use chryso::{
     metadata::StatsCache, parser::SimpleParser, CascadesOptimizer, Dialect, DuckDbAdapter,
     MockAdapter, OptimizerConfig, ParserConfig, PlanBuilder, SqlParser, Statement,
 };
+use chryso::planner::{ExplainConfig, ExplainFormatter};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
@@ -275,6 +276,7 @@ struct CliState {
     timing: bool,
     explain_next: bool,
     show_help: bool,
+    explain_verbose: bool,
 }
 
 impl Default for CliState {
@@ -285,6 +287,7 @@ impl Default for CliState {
             timing: false,
             explain_next: false,
             show_help: false,
+            explain_verbose: false,
         }
     }
 }
@@ -395,6 +398,20 @@ fn handle_meta_command(
                 _ => Err(chryso::ChrysoError::new(".mode expects table, csv, or tsv")),
             }
         }
+        ".explain-mode" => {
+            let value = parts.next().unwrap_or("");
+            match value {
+                "brief" => {
+                    state.explain_verbose = false;
+                    Ok(vec!["explain mode: brief (default)".to_string()])
+                }
+                "verbose" => {
+                    state.explain_verbose = true;
+                    Ok(vec!["explain mode: verbose (with cardinality)".to_string()])
+                }
+                _ => Err(chryso::ChrysoError::new(".explain-mode expects brief or verbose")),
+            }
+        }
         ".help" => Ok(help_lines()),
         ".exit" | "\\q" => Ok(vec!["exit".to_string()]),
         _ => Err(chryso::ChrysoError::new("unknown meta command")),
@@ -470,9 +487,40 @@ impl PipelineRunner {
             Statement::Explain(inner) => {
                 let logical = PlanBuilder::build(*inner)?;
                 let physical = self.optimizer.optimize(&logical, &mut self.stats);
+                
+                // Use the new formatted explain output with real cost model and stats
+                let config = ExplainConfig {
+                    show_types: true,
+                    show_costs: true,
+                    show_cardinality: state.explain_verbose,  // Only show cardinality in verbose mode
+                    compact: !state.explain_verbose,          // Use compact format unless verbose
+                    max_expr_length: if state.explain_verbose { 80 } else { 60 },
+                };
+                let formatter = ExplainFormatter::new(config);
+                let logical_output = if state.explain_verbose {
+                    formatter.format_logical_plan_with_stats(
+                        &logical,
+                        &chryso_metadata::type_inference::SimpleTypeInferencer,
+                        &self.stats,
+                    )
+                } else {
+                    formatter.format_logical_plan(
+                        &logical,
+                        &chryso_metadata::type_inference::SimpleTypeInferencer,
+                    )
+                };
+                
+                let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
+                let physical_output = if state.explain_verbose {
+                    formatter.format_physical_plan_with_stats(&physical, &cost_model, &self.stats)
+                } else {
+                    formatter.format_physical_plan(&physical, &cost_model)
+                };
+                
                 let mut lines = Vec::new();
-                lines.extend(logical.explain(0).lines().map(|line| line.to_string()));
-                lines.extend(physical.explain(0).lines().map(|line| line.to_string()));
+                lines.extend(logical_output.lines().map(|line: &str| line.to_string()));
+                lines.push(String::new());
+                lines.extend(physical_output.lines().map(|line: &str| line.to_string()));
                 Ok(lines)
             }
             _ => {
@@ -644,6 +692,7 @@ fn help_lines() -> Vec<String> {
         ".schema [table]".to_string(),
         ".read <path>".to_string(),
         ".explain <sql>".to_string(),
+        ".explain-mode brief|verbose".to_string(),
         ".headers on|off".to_string(),
         ".mode table|csv|tsv".to_string(),
         ".timing on|off".to_string(),

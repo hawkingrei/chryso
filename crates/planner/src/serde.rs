@@ -154,7 +154,7 @@ pub fn deserialize_binary_operator(input: &str) -> Option<BinaryOperator> {
 #[cfg(test)]
 mod tests {
     use super::{deserialize_expr, serialize_expr, serialize_statement};
-    use crate::ast::{Expr, Statement};
+    use chryso_core::ast::{Expr, Statement};
 
     #[test]
     fn serialize_expr_roundtrip() {
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn serialize_statement_marker() {
         let stmt = Statement::Explain(Box::new(Statement::Analyze(
-            crate::ast::AnalyzeStatement {
+            chryso_core::ast::AnalyzeStatement {
                 table: "t".to_string(),
             },
         )));

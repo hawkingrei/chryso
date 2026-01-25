@@ -1,13 +1,16 @@
 use chryso_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
 use chryso_core::ast::Literal;
 use chryso_core::ChrysoResult;
+use chryso_metadata::type_inference::TypeInferencer;
 
 pub mod cost;
+pub mod explain;
 pub mod plan_diff;
 pub mod serde;
 pub mod validate;
 
 pub use cost::{Cost, CostModel};
+pub use explain::{ExplainConfig, ExplainFormatter, format_simple_logical_plan, format_simple_physical_plan};
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlan {
@@ -415,6 +418,11 @@ impl LogicalPlan {
         }
     }
 
+    pub fn explain_formatted(&self, config: &ExplainConfig, inferencer: &dyn TypeInferencer) -> String {
+        let formatter = ExplainFormatter::new(config.clone());
+        formatter.format_logical_plan(self, inferencer)
+    }
+
     pub fn explain_typed(
         &self,
         indent: usize,
@@ -682,7 +690,6 @@ pub enum JoinAlgorithm {
 #[cfg(test)]
 mod tests {
     use super::{LogicalPlan, PlanBuilder};
-    use chryso_metadata::type_inference::SimpleTypeInferencer;
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
 
     #[test]
