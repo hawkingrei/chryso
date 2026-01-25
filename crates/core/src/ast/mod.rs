@@ -243,7 +243,11 @@ impl Expr {
             Expr::Literal(Literal::String(value)) => format!("'{}'", value),
             Expr::Literal(Literal::Number(value)) => value.to_string(),
             Expr::Literal(Literal::Bool(value)) => {
-                if *value { "true".to_string() } else { "false".to_string() }
+                if *value {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
             }
             Expr::BinaryOp { left, op, right } => {
                 let op_str = match op {
@@ -360,72 +364,136 @@ impl Expr {
                 (Literal::Bool(left), Literal::Bool(right)) => left == right,
                 _ => false,
             },
-            (Expr::UnaryOp { op: left_op, expr: left }, Expr::UnaryOp { op: right_op, expr: right }) => {
-                left_op == right_op && left.structural_eq(right)
+            (
+                Expr::UnaryOp {
+                    op: left_op,
+                    expr: left,
+                },
+                Expr::UnaryOp {
+                    op: right_op,
+                    expr: right,
+                },
+            ) => left_op == right_op && left.structural_eq(right),
+            (
+                Expr::BinaryOp {
+                    left: left_lhs,
+                    op: left_op,
+                    right: left_rhs,
+                },
+                Expr::BinaryOp {
+                    left: right_lhs,
+                    op: right_op,
+                    right: right_rhs,
+                },
+            ) => {
+                left_op == right_op
+                    && left_lhs.structural_eq(right_lhs)
+                    && left_rhs.structural_eq(right_rhs)
             }
             (
-                Expr::BinaryOp { left: left_lhs, op: left_op, right: left_rhs },
-                Expr::BinaryOp { left: right_lhs, op: right_op, right: right_rhs },
-            ) => left_op == right_op
-                && left_lhs.structural_eq(right_lhs)
-                && left_rhs.structural_eq(right_rhs),
-            (
-                Expr::IsNull { expr: left, negated: left_negated },
-                Expr::IsNull { expr: right, negated: right_negated },
+                Expr::IsNull {
+                    expr: left,
+                    negated: left_negated,
+                },
+                Expr::IsNull {
+                    expr: right,
+                    negated: right_negated,
+                },
             ) => left_negated == right_negated && left.structural_eq(right),
             (
-                Expr::FunctionCall { name: left_name, args: left_args },
-                Expr::FunctionCall { name: right_name, args: right_args },
-            ) => left_name == right_name
-                && left_args.len() == right_args.len()
-                && left_args
-                    .iter()
-                    .zip(right_args.iter())
-                    .all(|(left, right)| left.structural_eq(right)),
+                Expr::FunctionCall {
+                    name: left_name,
+                    args: left_args,
+                },
+                Expr::FunctionCall {
+                    name: right_name,
+                    args: right_args,
+                },
+            ) => {
+                left_name == right_name
+                    && left_args.len() == right_args.len()
+                    && left_args
+                        .iter()
+                        .zip(right_args.iter())
+                        .all(|(left, right)| left.structural_eq(right))
+            }
             (
-                Expr::WindowFunction { function: left_func, spec: left_spec },
-                Expr::WindowFunction { function: right_func, spec: right_spec },
-            ) => left_func.structural_eq(right_func)
-                && left_spec.partition_by.len() == right_spec.partition_by.len()
-                && left_spec
-                    .partition_by
-                    .iter()
-                    .zip(right_spec.partition_by.iter())
-                    .all(|(left, right)| left.structural_eq(right))
-                && left_spec.order_by.len() == right_spec.order_by.len()
-                && left_spec
-                    .order_by
-                    .iter()
-                    .zip(right_spec.order_by.iter())
-                    .all(|(left, right)| {
-                        left.asc == right.asc
-                            && left.nulls_first == right.nulls_first
-                            && left.expr.structural_eq(&right.expr)
-                    }),
-            (Expr::Subquery(left), Expr::Subquery(right)) => select_to_sql(left) == select_to_sql(right),
-            (Expr::Exists(left), Expr::Exists(right)) => select_to_sql(left) == select_to_sql(right),
+                Expr::WindowFunction {
+                    function: left_func,
+                    spec: left_spec,
+                },
+                Expr::WindowFunction {
+                    function: right_func,
+                    spec: right_spec,
+                },
+            ) => {
+                left_func.structural_eq(right_func)
+                    && left_spec.partition_by.len() == right_spec.partition_by.len()
+                    && left_spec
+                        .partition_by
+                        .iter()
+                        .zip(right_spec.partition_by.iter())
+                        .all(|(left, right)| left.structural_eq(right))
+                    && left_spec.order_by.len() == right_spec.order_by.len()
+                    && left_spec
+                        .order_by
+                        .iter()
+                        .zip(right_spec.order_by.iter())
+                        .all(|(left, right)| {
+                            left.asc == right.asc
+                                && left.nulls_first == right.nulls_first
+                                && left.expr.structural_eq(&right.expr)
+                        })
+            }
+            (Expr::Subquery(left), Expr::Subquery(right)) => {
+                select_to_sql(left) == select_to_sql(right)
+            }
+            (Expr::Exists(left), Expr::Exists(right)) => {
+                select_to_sql(left) == select_to_sql(right)
+            }
             (
-                Expr::InSubquery { expr: left_expr, subquery: left_subquery },
-                Expr::InSubquery { expr: right_expr, subquery: right_subquery },
-            ) => left_expr.structural_eq(right_expr)
-                && select_to_sql(left_subquery) == select_to_sql(right_subquery),
+                Expr::InSubquery {
+                    expr: left_expr,
+                    subquery: left_subquery,
+                },
+                Expr::InSubquery {
+                    expr: right_expr,
+                    subquery: right_subquery,
+                },
+            ) => {
+                left_expr.structural_eq(right_expr)
+                    && select_to_sql(left_subquery) == select_to_sql(right_subquery)
+            }
             (
-                Expr::Case { operand: left_operand, when_then: left_when_then, else_expr: left_else },
-                Expr::Case { operand: right_operand, when_then: right_when_then, else_expr: right_else },
-            ) => left_operand
-                .as_ref()
-                .zip(right_operand.as_ref())
-                .map(|(left, right)| left.structural_eq(right))
-                .unwrap_or(left_operand.is_none() && right_operand.is_none())
-                && left_when_then.len() == right_when_then.len()
-                && left_when_then.iter().zip(right_when_then.iter()).all(|(left, right)| {
-                    left.0.structural_eq(&right.0) && left.1.structural_eq(&right.1)
-                })
-                && left_else
+                Expr::Case {
+                    operand: left_operand,
+                    when_then: left_when_then,
+                    else_expr: left_else,
+                },
+                Expr::Case {
+                    operand: right_operand,
+                    when_then: right_when_then,
+                    else_expr: right_else,
+                },
+            ) => {
+                left_operand
                     .as_ref()
-                    .zip(right_else.as_ref())
+                    .zip(right_operand.as_ref())
                     .map(|(left, right)| left.structural_eq(right))
-                    .unwrap_or(left_else.is_none() && right_else.is_none()),
+                    .unwrap_or(left_operand.is_none() && right_operand.is_none())
+                    && left_when_then.len() == right_when_then.len()
+                    && left_when_then
+                        .iter()
+                        .zip(right_when_then.iter())
+                        .all(|(left, right)| {
+                            left.0.structural_eq(&right.0) && left.1.structural_eq(&right.1)
+                        })
+                    && left_else
+                        .as_ref()
+                        .zip(right_else.as_ref())
+                        .map(|(left, right)| left.structural_eq(right))
+                        .unwrap_or(left_else.is_none() && right_else.is_none())
+            }
             (Expr::Wildcard, Expr::Wildcard) => true,
             _ => false,
         }
@@ -573,16 +641,15 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
             op: UnaryOperator::Neg,
             expr,
         } => match *expr {
-            Expr::Literal(Literal::Number(value)) => {
-                Expr::Literal(Literal::Number(-value))
-            }
+            Expr::Literal(Literal::Number(value)) => Expr::Literal(Literal::Number(-value)),
             other => Expr::UnaryOp {
                 op: UnaryOperator::Neg,
                 expr: Box::new(other),
             },
         },
         Expr::BinaryOp { left, op, right } => {
-            if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.structural_eq(&right) {
+            if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.structural_eq(&right)
+            {
                 return *left;
             }
             let same_expr = left.structural_eq(&right);
@@ -598,79 +665,129 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
                 };
             }
             match (*left, op, *right) {
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
-                Expr::Literal(Literal::Bool(a && b))
-            }
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Or, Expr::Literal(Literal::Bool(b))) => {
-                Expr::Literal(Literal::Bool(a || b))
-            }
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, other) => {
-                if a { other } else { Expr::Literal(Literal::Bool(false)) }
-            }
-            (other, BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
-                if b { other } else { Expr::Literal(Literal::Bool(false)) }
-            }
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Or, other) => {
-                if a { Expr::Literal(Literal::Bool(true)) } else { other }
-            }
-            (other, BinaryOperator::Or, Expr::Literal(Literal::Bool(b))) => {
-                if b { Expr::Literal(Literal::Bool(true)) } else { other }
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Eq, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a == b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::NotEq, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a != b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Lt, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a < b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::LtEq, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a <= b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Gt, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a > b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::GtEq, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Bool(a >= b))
-            }
-            (Expr::Literal(Literal::String(a)), BinaryOperator::Eq, Expr::Literal(Literal::String(b))) => {
-                Expr::Literal(Literal::Bool(a == b))
-            }
-            (Expr::Literal(Literal::String(a)), BinaryOperator::NotEq, Expr::Literal(Literal::String(b))) => {
-                Expr::Literal(Literal::Bool(a != b))
-            }
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::Eq, Expr::Literal(Literal::Bool(b))) => {
-                Expr::Literal(Literal::Bool(a == b))
-            }
-            (Expr::Literal(Literal::Bool(a)), BinaryOperator::NotEq, Expr::Literal(Literal::Bool(b))) => {
-                Expr::Literal(Literal::Bool(a != b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Add, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Number(a + b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Sub, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Number(a - b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Mul, Expr::Literal(Literal::Number(b))) => {
-                Expr::Literal(Literal::Number(a * b))
-            }
-            (Expr::Literal(Literal::Number(a)), BinaryOperator::Div, Expr::Literal(Literal::Number(b))) => {
-                if b == 0.0 {
-                    Expr::BinaryOp {
-                        left: Box::new(Expr::Literal(Literal::Number(a))),
-                        op: BinaryOperator::Div,
-                        right: Box::new(Expr::Literal(Literal::Number(b))),
+                (
+                    Expr::Literal(Literal::Bool(a)),
+                    BinaryOperator::And,
+                    Expr::Literal(Literal::Bool(b)),
+                ) => Expr::Literal(Literal::Bool(a && b)),
+                (
+                    Expr::Literal(Literal::Bool(a)),
+                    BinaryOperator::Or,
+                    Expr::Literal(Literal::Bool(b)),
+                ) => Expr::Literal(Literal::Bool(a || b)),
+                (Expr::Literal(Literal::Bool(a)), BinaryOperator::And, other) => {
+                    if a {
+                        other
+                    } else {
+                        Expr::Literal(Literal::Bool(false))
                     }
-                } else {
-                    Expr::Literal(Literal::Number(a / b))
                 }
-            }
-            (left, op, right) => Expr::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            },
+                (other, BinaryOperator::And, Expr::Literal(Literal::Bool(b))) => {
+                    if b {
+                        other
+                    } else {
+                        Expr::Literal(Literal::Bool(false))
+                    }
+                }
+                (Expr::Literal(Literal::Bool(a)), BinaryOperator::Or, other) => {
+                    if a {
+                        Expr::Literal(Literal::Bool(true))
+                    } else {
+                        other
+                    }
+                }
+                (other, BinaryOperator::Or, Expr::Literal(Literal::Bool(b))) => {
+                    if b {
+                        Expr::Literal(Literal::Bool(true))
+                    } else {
+                        other
+                    }
+                }
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Eq,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a == b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::NotEq,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a != b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Lt,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a < b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::LtEq,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a <= b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Gt,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a > b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::GtEq,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Bool(a >= b)),
+                (
+                    Expr::Literal(Literal::String(a)),
+                    BinaryOperator::Eq,
+                    Expr::Literal(Literal::String(b)),
+                ) => Expr::Literal(Literal::Bool(a == b)),
+                (
+                    Expr::Literal(Literal::String(a)),
+                    BinaryOperator::NotEq,
+                    Expr::Literal(Literal::String(b)),
+                ) => Expr::Literal(Literal::Bool(a != b)),
+                (
+                    Expr::Literal(Literal::Bool(a)),
+                    BinaryOperator::Eq,
+                    Expr::Literal(Literal::Bool(b)),
+                ) => Expr::Literal(Literal::Bool(a == b)),
+                (
+                    Expr::Literal(Literal::Bool(a)),
+                    BinaryOperator::NotEq,
+                    Expr::Literal(Literal::Bool(b)),
+                ) => Expr::Literal(Literal::Bool(a != b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Add,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Number(a + b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Sub,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Number(a - b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Mul,
+                    Expr::Literal(Literal::Number(b)),
+                ) => Expr::Literal(Literal::Number(a * b)),
+                (
+                    Expr::Literal(Literal::Number(a)),
+                    BinaryOperator::Div,
+                    Expr::Literal(Literal::Number(b)),
+                ) => {
+                    if b == 0.0 {
+                        Expr::BinaryOp {
+                            left: Box::new(Expr::Literal(Literal::Number(a))),
+                            op: BinaryOperator::Div,
+                            right: Box::new(Expr::Literal(Literal::Number(b))),
+                        }
+                    } else {
+                        Expr::Literal(Literal::Number(a / b))
+                    }
+                }
+                (left, op, right) => Expr::BinaryOp {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(right),
+                },
             }
         }
         other => other,
@@ -765,7 +882,11 @@ pub fn normalize_statement(statement: &Statement) -> Statement {
 fn normalize_select(select: &SelectStatement) -> SelectStatement {
     SelectStatement {
         distinct: select.distinct,
-        distinct_on: select.distinct_on.iter().map(|expr| expr.normalize()).collect(),
+        distinct_on: select
+            .distinct_on
+            .iter()
+            .map(|expr| expr.normalize())
+            .collect(),
         projection: select
             .projection
             .iter()
@@ -776,7 +897,11 @@ fn normalize_select(select: &SelectStatement) -> SelectStatement {
             .collect(),
         from: select.from.as_ref().map(normalize_table_ref),
         selection: select.selection.as_ref().map(|expr| expr.normalize()),
-        group_by: select.group_by.iter().map(|expr| expr.normalize()).collect(),
+        group_by: select
+            .group_by
+            .iter()
+            .map(|expr| expr.normalize())
+            .collect(),
         having: select.having.as_ref().map(|expr| expr.normalize()),
         order_by: select
             .order_by
@@ -800,9 +925,9 @@ fn normalize_table_ref(table: &TableRef) -> TableRef {
     TableRef {
         factor: match &table.factor {
             TableFactor::Table { name } => TableFactor::Table { name: name.clone() },
-            TableFactor::Derived { query } => {
-                TableFactor::Derived { query: Box::new(normalize_statement(query)) }
-            }
+            TableFactor::Derived { query } => TableFactor::Derived {
+                query: Box::new(normalize_statement(query)),
+            },
         },
         alias: table.alias.clone(),
         column_aliases: table.column_aliases.clone(),
@@ -961,7 +1086,10 @@ pub fn statement_to_sql(statement: &Statement) -> String {
             } else {
                 "with"
             };
-            format!("{keyword} {ctes} {}", statement_to_sql(&with_stmt.statement))
+            format!(
+                "{keyword} {ctes} {}",
+                statement_to_sql(&with_stmt.statement)
+            )
         }
         Statement::Explain(inner) => format!("explain {}", statement_to_sql(inner)),
         Statement::CreateTable(stmt) => {

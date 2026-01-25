@@ -1,4 +1,6 @@
-use crate::utils::{collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix};
+use crate::utils::{
+    collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix,
+};
 use chryso_core::ast::{BinaryOperator, Expr, Literal};
 use chryso_metadata::StatsCache;
 use chryso_planner::LogicalPlan;
@@ -105,7 +107,11 @@ fn reorder_joins(plan: &LogicalPlan, stats: &StatsCache) -> LogicalPlan {
     }
 }
 
-fn collect_inner_joins(plan: &LogicalPlan, inputs: &mut Vec<LogicalPlan>, predicates: &mut Vec<Expr>) {
+fn collect_inner_joins(
+    plan: &LogicalPlan,
+    inputs: &mut Vec<LogicalPlan>,
+    predicates: &mut Vec<Expr>,
+) {
     match plan {
         LogicalPlan::Join {
             join_type,
@@ -121,7 +127,11 @@ fn collect_inner_joins(plan: &LogicalPlan, inputs: &mut Vec<LogicalPlan>, predic
     }
 }
 
-fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats: &StatsCache) -> LogicalPlan {
+fn build_greedy_join(
+    mut inputs: Vec<LogicalPlan>,
+    predicates: Vec<Expr>,
+    stats: &StatsCache,
+) -> LogicalPlan {
     let mut items = inputs
         .drain(..)
         .map(|plan| JoinItem::new(plan, stats))
@@ -160,10 +170,7 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
                 best_score = score;
                 best_index = Some(idx);
                 best_key = Some(item.sort_key.clone());
-            } else if !best_connected
-                && candidate_rows == best_rows
-                && better_key
-            {
+            } else if !best_connected && candidate_rows == best_rows && better_key {
                 best_index = Some(idx);
                 best_key = Some(item.sort_key.clone());
             }
@@ -173,8 +180,8 @@ fn build_greedy_join(mut inputs: Vec<LogicalPlan>, predicates: Vec<Expr>, stats:
         let (join_preds, leftover) =
             take_connecting_predicates(&current.tables, &item.tables, remaining_preds);
         remaining_preds = leftover;
-        let on = combine_conjuncts(join_preds)
-            .unwrap_or_else(|| Expr::Literal(Literal::Bool(true)));
+        let on =
+            combine_conjuncts(join_preds).unwrap_or_else(|| Expr::Literal(Literal::Bool(true)));
         let joined_plan = LogicalPlan::Join {
             join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(current.plan),
@@ -270,7 +277,17 @@ fn estimate_predicate_selectivity(predicate: &Expr) -> f64 {
                 0.2
             }
         }
-        Expr::BinaryOp { op, .. } if matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq | BinaryOperator::Gt | BinaryOperator::GtEq) => 0.3,
+        Expr::BinaryOp { op, .. }
+            if matches!(
+                op,
+                BinaryOperator::Lt
+                    | BinaryOperator::LtEq
+                    | BinaryOperator::Gt
+                    | BinaryOperator::GtEq
+            ) =>
+        {
+            0.3
+        }
         Expr::IsNull { .. } => 0.2,
         Expr::UnaryOp { op, .. } if matches!(op, chryso_core::ast::UnaryOperator::Not) => 0.5,
         Expr::BinaryOp { op, .. } if matches!(op, BinaryOperator::And) => 0.2,
@@ -330,9 +347,7 @@ fn estimate_rows(plan: &LogicalPlan, stats: &StatsCache) -> f64 {
         LogicalPlan::Projection { input, .. } => estimate_rows(input, stats),
         LogicalPlan::Aggregate { input, .. } => (estimate_rows(input, stats) * 0.1).max(1.0),
         LogicalPlan::Distinct { input } => (estimate_rows(input, stats) * 0.3).max(1.0),
-        LogicalPlan::TopN { limit, input, .. } => {
-            estimate_rows(input, stats).min(*limit as f64)
-        }
+        LogicalPlan::TopN { limit, input, .. } => estimate_rows(input, stats).min(*limit as f64),
         LogicalPlan::Sort { input, .. } => estimate_rows(input, stats),
         LogicalPlan::Limit { limit, input, .. } => match limit {
             Some(limit) => estimate_rows(input, stats).min(*limit as f64),
@@ -418,7 +433,12 @@ mod tests {
             },
         };
         let mut stats = StatsCache::new();
-        stats.insert_table_stats("large", TableStats { row_count: 10_000.0 });
+        stats.insert_table_stats(
+            "large",
+            TableStats {
+                row_count: 10_000.0,
+            },
+        );
         stats.insert_table_stats("medium", TableStats { row_count: 1_000.0 });
         stats.insert_table_stats("small", TableStats { row_count: 10.0 });
 
@@ -426,7 +446,12 @@ mod tests {
         let LogicalPlan::Join { left, right, .. } = &reordered[0] else {
             panic!("expected join");
         };
-        let LogicalPlan::Join { left: inner_left, right: inner_right, .. } = left.as_ref() else {
+        let LogicalPlan::Join {
+            left: inner_left,
+            right: inner_right,
+            ..
+        } = left.as_ref()
+        else {
             panic!("expected join");
         };
         let LogicalPlan::Scan { table: left_table } = inner_left.as_ref() else {
@@ -437,7 +462,10 @@ mod tests {
         };
         assert_eq!(left_table, "small");
         assert!(right_table == "medium" || right_table == "large");
-        assert!(matches!(right.as_ref(), LogicalPlan::Scan { .. } | LogicalPlan::Join { .. }));
+        assert!(matches!(
+            right.as_ref(),
+            LogicalPlan::Scan { .. } | LogicalPlan::Join { .. }
+        ));
     }
 
     #[test]

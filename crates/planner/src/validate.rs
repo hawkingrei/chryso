@@ -1,6 +1,6 @@
+use crate::LogicalPlan;
 use chryso_core::error::{ChrysoError, ChrysoResult};
 use chryso_metadata::catalog::Catalog;
-use crate::LogicalPlan;
 
 pub trait Validator {
     fn validate(&self, plan: &LogicalPlan) -> ChrysoResult<()>;
@@ -66,7 +66,9 @@ pub fn validate_functions(
             }
             validate_functions(input, registry)
         }
-        LogicalPlan::Join { on, left, right, .. } => {
+        LogicalPlan::Join {
+            on, left, right, ..
+        } => {
             validate_expr_functions(on, registry)?;
             validate_functions(left, registry)?;
             validate_functions(right, registry)
@@ -162,8 +164,8 @@ fn validate_expr_functions(
 #[cfg(test)]
 mod function_tests {
     use super::validate_functions;
-    use chryso_metadata::functions::FunctionRegistry;
     use crate::LogicalPlan;
+    use chryso_metadata::functions::FunctionRegistry;
 
     #[test]
     fn rejects_unknown_function() {
@@ -185,13 +187,18 @@ mod function_tests {
 #[cfg(test)]
 mod resolver_tests {
     use super::{NameResolver, Validator};
-    use chryso_metadata::catalog::{Catalog, MockCatalog, TableSchema};
     use crate::LogicalPlan;
+    use chryso_metadata::catalog::{Catalog, MockCatalog, TableSchema};
 
     #[test]
     fn resolve_known_table() {
         let mut catalog = MockCatalog::new();
-        catalog.add_table("users", TableSchema { columns: Vec::new() });
+        catalog.add_table(
+            "users",
+            TableSchema {
+                columns: Vec::new(),
+            },
+        );
         let plan = LogicalPlan::Scan {
             table: "users".to_string(),
         };

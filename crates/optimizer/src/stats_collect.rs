@@ -36,7 +36,11 @@ fn collect_tables(plan: &LogicalPlan, tables: &mut HashSet<String>) {
     }
 }
 
-fn collect_columns(plan: &LogicalPlan, tables: &HashSet<String>, columns: &mut HashSet<(String, String)>) {
+fn collect_columns(
+    plan: &LogicalPlan,
+    tables: &HashSet<String>,
+    columns: &mut HashSet<(String, String)>,
+) {
     match plan {
         LogicalPlan::Scan { .. } | LogicalPlan::IndexScan { .. } | LogicalPlan::Dml { .. } => {}
         LogicalPlan::Derived { input, .. } => collect_columns(input, tables, columns),
@@ -48,7 +52,9 @@ fn collect_columns(plan: &LogicalPlan, tables: &HashSet<String>, columns: &mut H
             collect_exprs_columns(exprs, tables, columns);
             collect_columns(input, tables, columns);
         }
-        LogicalPlan::Join { on, left, right, .. } => {
+        LogicalPlan::Join {
+            on, left, right, ..
+        } => {
             collect_expr_columns(on, tables, columns);
             collect_columns(left, tables, columns);
             collect_columns(right, tables, columns);
@@ -63,7 +69,9 @@ fn collect_columns(plan: &LogicalPlan, tables: &HashSet<String>, columns: &mut H
             collect_columns(input, tables, columns);
         }
         LogicalPlan::Distinct { input } => collect_columns(input, tables, columns),
-        LogicalPlan::TopN { order_by, input, .. } => {
+        LogicalPlan::TopN {
+            order_by, input, ..
+        } => {
             collect_order_by_columns(order_by, tables, columns);
             collect_columns(input, tables, columns);
         }
@@ -75,19 +83,31 @@ fn collect_columns(plan: &LogicalPlan, tables: &HashSet<String>, columns: &mut H
     }
 }
 
-fn collect_exprs_columns(exprs: &[Expr], tables: &HashSet<String>, columns: &mut HashSet<(String, String)>) {
+fn collect_exprs_columns(
+    exprs: &[Expr],
+    tables: &HashSet<String>,
+    columns: &mut HashSet<(String, String)>,
+) {
     for expr in exprs {
         collect_expr_columns(expr, tables, columns);
     }
 }
 
-fn collect_order_by_columns(order_by: &[OrderByExpr], tables: &HashSet<String>, columns: &mut HashSet<(String, String)>) {
+fn collect_order_by_columns(
+    order_by: &[OrderByExpr],
+    tables: &HashSet<String>,
+    columns: &mut HashSet<(String, String)>,
+) {
     for item in order_by {
         collect_expr_columns(&item.expr, tables, columns);
     }
 }
 
-fn collect_expr_columns(expr: &Expr, tables: &HashSet<String>, columns: &mut HashSet<(String, String)>) {
+fn collect_expr_columns(
+    expr: &Expr,
+    tables: &HashSet<String>,
+    columns: &mut HashSet<(String, String)>,
+) {
     match expr {
         Expr::Identifier(name) => {
             if let Some((table, column)) = name.split_once('.') {

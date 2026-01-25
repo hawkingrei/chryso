@@ -110,7 +110,12 @@ impl PhysicalRule for DerivedRule {
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
-        let LogicalPlan::Derived { alias, column_aliases, .. } = logical else {
+        let LogicalPlan::Derived {
+            alias,
+            column_aliases,
+            ..
+        } = logical
+        else {
             return Vec::new();
         };
         let Some(input) = inputs.first() else {
@@ -174,10 +179,7 @@ impl PhysicalRule for JoinRule {
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
-        let LogicalPlan::Join {
-            join_type, on, ..
-        } = logical
-        else {
+        let LogicalPlan::Join { join_type, on, .. } = logical else {
             return Vec::new();
         };
         if inputs.len() < 2 {
@@ -192,12 +194,12 @@ impl PhysicalRule for JoinRule {
                 on: on.clone(),
             },
             PhysicalPlan::Join {
-            join_type: *join_type,
-            algorithm: chryso_planner::JoinAlgorithm::NestedLoop,
-            left: Box::new(inputs[0].clone()),
-            right: Box::new(inputs[1].clone()),
-            on: on.clone(),
-        },
+                join_type: *join_type,
+                algorithm: chryso_planner::JoinAlgorithm::NestedLoop,
+                left: Box::new(inputs[0].clone()),
+                right: Box::new(inputs[1].clone()),
+                on: on.clone(),
+            },
         ]
     }
 }
@@ -278,7 +280,10 @@ impl PhysicalRule for TopNRule {
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
-        let LogicalPlan::TopN { order_by, limit, .. } = logical else {
+        let LogicalPlan::TopN {
+            order_by, limit, ..
+        } = logical
+        else {
             return Vec::new();
         };
         let Some(input) = inputs.first() else {

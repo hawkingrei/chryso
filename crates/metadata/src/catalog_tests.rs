@@ -1,5 +1,5 @@
-use super::catalog::{Catalog, ColumnSchema, MockCatalog, TableSchema};
 use super::TableStats;
+use super::catalog::{Catalog, ColumnSchema, MockCatalog, TableSchema};
 
 #[test]
 fn mock_catalog_roundtrip() {

@@ -35,7 +35,7 @@ impl Analyzer for MockAnalyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_analyze, Analyzer, MockAnalyzer};
+    use super::{Analyzer, MockAnalyzer, apply_analyze};
     use crate::StatsCache;
 
     #[test]

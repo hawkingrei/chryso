@@ -1,12 +1,12 @@
-use chryso_core::error::{ChrysoError, ChrysoResult};
-#[cfg(feature = "duckdb")]
-use chryso_core::ast::Statement;
-#[cfg(feature = "duckdb")]
-use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 #[cfg(feature = "duckdb")]
 use ::duckdb::params_from_iter;
 #[cfg(feature = "duckdb")]
 use ::duckdb::types::Value as DuckValue;
+#[cfg(feature = "duckdb")]
+use chryso_core::ast::Statement;
+use chryso_core::error::{ChrysoError, ChrysoResult};
+#[cfg(feature = "duckdb")]
+use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 #[cfg(feature = "duckdb")]
 use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
 use chryso_planner::PhysicalPlan;
@@ -66,7 +66,11 @@ impl AdapterCapabilities {
             PhysicalPlan::Distinct { input } => self.distinct && self.supports_plan(input),
             PhysicalPlan::TopN { input, .. } => self.topn && self.supports_plan(input),
             PhysicalPlan::Sort { input, .. } => self.sort && self.supports_plan(input),
-            PhysicalPlan::Limit { limit, offset, input } => {
+            PhysicalPlan::Limit {
+                limit,
+                offset,
+                input,
+            } => {
                 let offset_ok = if offset.is_some() { self.offset } else { true };
                 let limit_ok = if limit.is_some() { self.limit } else { true };
                 offset_ok && limit_ok && self.supports_plan(input)
@@ -269,7 +273,8 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))?
+        {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
@@ -309,7 +314,8 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))?
+        {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
@@ -323,10 +329,7 @@ impl DuckDbAdapter {
     }
 
     #[cfg(feature = "duckdb")]
-    fn query_with_sql(
-        conn: &::duckdb::Connection,
-        sql: &str,
-    ) -> ChrysoResult<QueryResult> {
+    fn query_with_sql(conn: &::duckdb::Connection, sql: &str) -> ChrysoResult<QueryResult> {
         let mut stmt = conn
             .prepare(sql)
             .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
@@ -340,7 +343,8 @@ impl DuckDbAdapter {
         let mut rows = Vec::new();
         while let Some(row) = rows_iter
             .next()
-            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
+            .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))?
+        {
             let mut values = Vec::new();
             for idx in 0..columns.len() {
                 let value: DuckValue = row
@@ -419,9 +423,7 @@ fn first_keyword(sql: &str) -> Option<String> {
 #[cfg(feature = "duckdb")]
 fn statement_returns_rows(statement: &Statement) -> bool {
     match statement {
-        Statement::Select(_)
-        | Statement::SetOp { .. }
-        | Statement::Explain(_) => true,
+        Statement::Select(_) | Statement::SetOp { .. } | Statement::Explain(_) => true,
         Statement::With(with) => statement_returns_rows(&with.statement),
         Statement::Insert(insert) => !insert.returning.is_empty(),
         Statement::Update(update) => !update.returning.is_empty(),
@@ -467,7 +469,11 @@ fn format_duck_value(value: &DuckValue) -> String {
         DuckValue::Blob(v) => format!("{v:?}"),
         DuckValue::Date32(v) => v.to_string(),
         DuckValue::Time64(_, v) => v.to_string(),
-        DuckValue::Interval { months, days, nanos } => {
+        DuckValue::Interval {
+            months,
+            days,
+            nanos,
+        } => {
             format!("interval({months},{days},{nanos})")
         }
         DuckValue::List(items) => {
@@ -496,7 +502,8 @@ fn fetch_columns(conn: &::duckdb::Connection, table: &str) -> ChrysoResult<Vec<S
     let mut columns = Vec::new();
     while let Some(row) = rows
         .next()
-        .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))? {
+        .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))?
+    {
         let name: String = row
             .get(1)
             .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
@@ -594,13 +601,13 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
                 .join(", ");
             format!("select {projection} from ({base}) as t")
         }
-            PhysicalPlan::Join {
-                join_type,
-                algorithm: _,
-                left,
-                right,
-                on,
-            } => {
+        PhysicalPlan::Join {
+            join_type,
+            algorithm: _,
+            left,
+            right,
+            on,
+        } => {
             let left_sql = physical_to_sql(left);
             let right_sql = physical_to_sql(right);
             let join = match join_type {
@@ -711,8 +718,9 @@ pub mod duckdb {
     use duckdb::Connection;
 
     pub fn connect() -> chryso_core::error::ChrysoResult<Connection> {
-        Connection::open_in_memory()
-            .map_err(|err| chryso_core::error::ChrysoError::new(format!("duckdb open failed: {err}")))
+        Connection::open_in_memory().map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("duckdb open failed: {err}"))
+        })
     }
 
     pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
@@ -724,13 +732,9 @@ pub mod duckdb {
             .iter()
             .map(|param| match param {
                 crate::ParamValue::Int(value) => duckdb::types::Value::BigInt(*value),
-                crate::ParamValue::Float(value) => {
-                    duckdb::types::Value::Double(*value)
-                }
+                crate::ParamValue::Float(value) => duckdb::types::Value::Double(*value),
                 crate::ParamValue::Bool(value) => duckdb::types::Value::Boolean(*value),
-                crate::ParamValue::String(value) => {
-                    duckdb::types::Value::Text(value.clone())
-                }
+                crate::ParamValue::String(value) => duckdb::types::Value::Text(value.clone()),
                 crate::ParamValue::Null => duckdb::types::Value::Null,
             })
             .collect()
@@ -822,7 +826,10 @@ mod tests {
             sql.contains("order by id desc"),
             "expected order by in sql: {sql}"
         );
-        assert!(sql.contains("limit 10 offset 5"), "expected limit/offset: {sql}");
+        assert!(
+            sql.contains("limit 10 offset 5"),
+            "expected limit/offset: {sql}"
+        );
     }
 
     #[test]
@@ -833,7 +840,9 @@ mod tests {
             predicate: chryso_core::ast::Expr::BinaryOp {
                 left: Box::new(chryso_core::ast::Expr::Identifier("id".to_string())),
                 op: chryso_core::ast::BinaryOperator::Eq,
-                right: Box::new(chryso_core::ast::Expr::Literal(chryso_core::ast::Literal::Number(1.0))),
+                right: Box::new(chryso_core::ast::Expr::Literal(
+                    chryso_core::ast::Literal::Number(1.0),
+                )),
             },
         };
         let sql = super::physical_to_sql(&plan);

@@ -63,8 +63,16 @@ fn snapshot_plan_explain() {
             let mut stats = StatsCache::new();
             let physical = optimizer.optimize(&logical, &mut stats);
             let output = PlanTestOutput {
-                logical_explain: logical.explain(0).lines().map(|line| line.to_string()).collect(),
-                physical_explain: physical.explain(0).lines().map(|line| line.to_string()).collect(),
+                logical_explain: logical
+                    .explain(0)
+                    .lines()
+                    .map(|line| line.to_string())
+                    .collect(),
+                physical_explain: physical
+                    .explain(0)
+                    .lines()
+                    .map(|line| line.to_string())
+                    .collect(),
             };
             actual.cases.insert(case.name, output);
         }
@@ -98,5 +106,7 @@ fn write_json<T: serde::Serialize>(path: &std::path::Path, value: &T) {
 }
 
 fn should_record() -> bool {
-    std::env::var("CHRYSO_RECORD").map(|value| value == "1").unwrap_or(false)
+    std::env::var("CHRYSO_RECORD")
+        .map(|value| value == "1")
+        .unwrap_or(false)
 }

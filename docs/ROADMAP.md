@@ -34,7 +34,7 @@ TODO: Add richer AST/Logical rewrite rules (e.g., `a=a`, `a!=a`, null-aware simp
 20. done - Implement logical plan builder for new clauses
 21. done - Add expression normalization utilities
 22. done - Define physical plan node set
-23. todo - Add plan explain formatting improvements
+23. done - Add plan explain formatting improvements
 24. done - Introduce memo data structures
 25. done - Add group/group expr insertion from logical tree
 26. done - Implement rule trait and rule registry

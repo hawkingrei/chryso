@@ -227,9 +227,7 @@ impl Parser {
         loop {
             let name = self.expect_identifier()?;
             if !seen_names.insert(name.clone()) {
-                return Err(ChrysoError::new(format!(
-                    "duplicate CTE name {name}"
-                )));
+                return Err(ChrysoError::new(format!("duplicate CTE name {name}")));
             }
             let columns = if self.consume_token(&Token::LParen) {
                 if self.consume_token(&Token::RParen) {
@@ -240,9 +238,7 @@ impl Parser {
                 let mut seen_cols = std::collections::HashSet::new();
                 for col in &cols {
                     if !seen_cols.insert(col.clone()) {
-                        return Err(ChrysoError::new(format!(
-                            "duplicate CTE column {col}"
-                        )));
+                        return Err(ChrysoError::new(format!("duplicate CTE column {col}")));
                     }
                 }
                 cols
@@ -263,7 +259,9 @@ impl Parser {
             } else if self.consume_keyword(Keyword::With) {
                 self.parse_with_statement()?
             } else {
-                return Err(ChrysoError::new("WITH expects SELECT/INSERT/UPDATE/DELETE or WITH in CTE"));
+                return Err(ChrysoError::new(
+                    "WITH expects SELECT/INSERT/UPDATE/DELETE or WITH in CTE",
+                ));
             };
             self.expect_token(Token::RParen)?;
             ctes.push(chryso_core::ast::Cte {
@@ -285,7 +283,9 @@ impl Parser {
         } else if self.consume_keyword(Keyword::Delete) {
             self.parse_delete_statement()?
         } else {
-            return Err(ChrysoError::new("WITH expects SELECT/INSERT/UPDATE/DELETE after CTEs"));
+            return Err(ChrysoError::new(
+                "WITH expects SELECT/INSERT/UPDATE/DELETE after CTEs",
+            ));
         };
         Ok(Statement::With(chryso_core::ast::WithStatement {
             ctes,
@@ -346,11 +346,13 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            Ok(Statement::CreateTable(chryso_core::ast::CreateTableStatement {
-                name,
-                if_not_exists,
-                columns,
-            }))
+            Ok(Statement::CreateTable(
+                chryso_core::ast::CreateTableStatement {
+                    name,
+                    if_not_exists,
+                    columns,
+                },
+            ))
         } else {
             Err(ChrysoError::new("only CREATE TABLE is supported"))
         }
@@ -407,8 +409,11 @@ impl Parser {
                 other => {
                     return Err(ChrysoError::new(format!(
                         "unexpected token in type: {}",
-                        other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
-                    )))
+                        other
+                            .as_ref()
+                            .map(token_label)
+                            .unwrap_or_else(|| "end of input".to_string())
+                    )));
                 }
             };
             if output.is_empty() {
@@ -451,7 +456,9 @@ impl Parser {
     fn parse_analyze_statement(&mut self) -> ChrysoResult<Statement> {
         let _ = self.consume_keyword(Keyword::Table);
         let name = self.expect_identifier()?;
-        Ok(Statement::Analyze(chryso_core::ast::AnalyzeStatement { table: name }))
+        Ok(Statement::Analyze(chryso_core::ast::AnalyzeStatement {
+            table: name,
+        }))
     }
 
     fn parse_insert_statement(&mut self) -> ChrysoResult<Statement> {
@@ -680,8 +687,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        if matches!(factor, chryso_core::ast::TableFactor::Derived { .. }) && alias.is_none()
-        {
+        if matches!(factor, chryso_core::ast::TableFactor::Derived { .. }) && alias.is_none() {
             return Err(ChrysoError::new("subquery in FROM requires alias"));
         }
         let mut table = TableRef {
@@ -767,9 +773,7 @@ impl Parser {
                 let select = self.parse_select()?;
                 self.parse_query_tail(select)?
             } else {
-                return Err(ChrysoError::new(
-                    "subquery in FROM expects SELECT or WITH",
-                ));
+                return Err(ChrysoError::new("subquery in FROM expects SELECT or WITH"));
             };
             self.expect_token(Token::RParen)?;
             return Ok(chryso_core::ast::TableFactor::Derived {
@@ -987,7 +991,10 @@ impl Parser {
                 return Ok(self.parse_regexp_payload(expr, false, false)?);
             } else if self.consume_token(&Token::TildeStar) {
                 return Ok(self.parse_regexp_payload(expr, true, false)?);
-            } else if matches!(self.peek(), Some(Token::NotTilde) | Some(Token::NotTildeStar)) {
+            } else if matches!(
+                self.peek(),
+                Some(Token::NotTilde) | Some(Token::NotTildeStar)
+            ) {
                 let token = self.next().expect("peek ensures token");
                 let case_insensitive = matches!(token, Token::NotTildeStar);
                 let regexp_expr = self.parse_regexp_payload(expr, case_insensitive, false)?;
@@ -1044,19 +1051,31 @@ impl Parser {
         from_regexp_keyword: bool,
     ) -> ChrysoResult<Expr> {
         if !matches!(self._dialect, Dialect::Postgres | Dialect::MySql) {
-            return Err(ChrysoError::new("regex operator is not supported in this dialect"));
+            return Err(ChrysoError::new(
+                "regex operator is not supported in this dialect",
+            ));
         }
         if matches!(self._dialect, Dialect::Postgres) && from_regexp_keyword {
-            return Err(ChrysoError::new("REGEXP is not supported in Postgres dialect"));
+            return Err(ChrysoError::new(
+                "REGEXP is not supported in Postgres dialect",
+            ));
         }
         if matches!(self._dialect, Dialect::MySql) && !from_regexp_keyword {
-            return Err(ChrysoError::new("regex operators are not supported in MySQL dialect"));
+            return Err(ChrysoError::new(
+                "regex operators are not supported in MySQL dialect",
+            ));
         }
         if matches!(self._dialect, Dialect::MySql) && case_insensitive {
-            return Err(ChrysoError::new("REGEXP does not support case-insensitive operator in MySQL dialect"));
+            return Err(ChrysoError::new(
+                "REGEXP does not support case-insensitive operator in MySQL dialect",
+            ));
         }
         let pattern = self.parse_additive()?;
-        let name = if case_insensitive { "regexp_i" } else { "regexp" };
+        let name = if case_insensitive {
+            "regexp_i"
+        } else {
+            "regexp"
+        };
         Ok(Expr::FunctionCall {
             name: name.to_string(),
             args: vec![expr, pattern],
@@ -1169,7 +1188,9 @@ impl Parser {
                         Ok(function)
                     }
                 } else {
-                    Ok(Expr::Identifier(self.parse_qualified_identifier_from(name)?))
+                    Ok(Expr::Identifier(
+                        self.parse_qualified_identifier_from(name)?,
+                    ))
                 }
             }
             Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
@@ -1281,7 +1302,10 @@ impl Parser {
         if self.consume_keyword(keyword) {
             Ok(())
         } else {
-            let found = self.peek().map(token_label).unwrap_or_else(|| "end of input".to_string());
+            let found = self
+                .peek()
+                .map(token_label)
+                .unwrap_or_else(|| "end of input".to_string());
             Err(ChrysoError::new(format!(
                 "expected keyword {} but found {found}",
                 keyword_label(keyword)
@@ -1376,7 +1400,10 @@ impl Parser {
         if self.consume_token(&token) {
             Ok(())
         } else {
-            let found = self.peek().map(token_label).unwrap_or_else(|| "end of input".to_string());
+            let found = self
+                .peek()
+                .map(token_label)
+                .unwrap_or_else(|| "end of input".to_string());
             Err(ChrysoError::new(format!(
                 "expected token {} but found {found}",
                 token_label(&token)
@@ -1389,7 +1416,10 @@ impl Parser {
             Some(Token::Ident(name)) => Ok(name),
             other => Err(ChrysoError::new(format!(
                 "expected identifier but found {}",
-                other.as_ref().map(token_label).unwrap_or_else(|| "end of input".to_string())
+                other
+                    .as_ref()
+                    .map(token_label)
+                    .unwrap_or_else(|| "end of input".to_string())
             ))),
         }
     }
@@ -1925,7 +1955,8 @@ mod tests {
 
     #[test]
     fn parse_select_with_group_order_limit() {
-        let sql = "select sum(amount) as total from sales group by region order by total desc limit 10";
+        let sql =
+            "select sum(amount) as total from sales group by region order by total desc limit 10";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
@@ -2071,15 +2102,19 @@ mod tests {
             panic!("expected binary op");
         };
         assert!(matches!(op, BinaryOperator::And));
-        let is_regexp = |expr: &Expr| matches!(
-            expr,
-            Expr::FunctionCall { name, .. } if name == "regexp"
-        );
-        let is_not_regexp_i = |expr: &Expr| matches!(
-            expr,
-            Expr::UnaryOp { op: UnaryOperator::Not, expr }
-                if matches!(expr.as_ref(), Expr::FunctionCall { name, .. } if name == "regexp_i")
-        );
+        let is_regexp = |expr: &Expr| {
+            matches!(
+                expr,
+                Expr::FunctionCall { name, .. } if name == "regexp"
+            )
+        };
+        let is_not_regexp_i = |expr: &Expr| {
+            matches!(
+                expr,
+                Expr::UnaryOp { op: UnaryOperator::Not, expr }
+                    if matches!(expr.as_ref(), Expr::FunctionCall { name, .. } if name == "regexp_i")
+            )
+        };
         let (left_expr, right_expr) = (left.as_ref(), right.as_ref());
         assert!(
             (is_regexp(left_expr) && is_not_regexp_i(right_expr))
@@ -2121,9 +2156,10 @@ mod tests {
             dialect: Dialect::MySql,
         });
         let err = parser.parse(sql).expect_err("expected error");
-        assert!(err
-            .to_string()
-            .contains("regex operators are not supported"));
+        assert!(
+            err.to_string()
+                .contains("regex operators are not supported")
+        );
     }
 
     #[test]
@@ -2273,7 +2309,9 @@ mod tests {
             panic!("expected delete");
         };
         assert_eq!(delete.returning.len(), 2);
-        assert!(matches!(delete.returning[1].expr, Expr::Identifier(ref name) if name == "users.*"));
+        assert!(
+            matches!(delete.returning[1].expr, Expr::Identifier(ref name) if name == "users.*")
+        );
     }
 
     #[test]
@@ -2287,7 +2325,10 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 2);
-        assert!(matches!(update.returning[0].alias.as_deref(), Some("next_id")));
+        assert!(matches!(
+            update.returning[0].alias.as_deref(),
+            Some("next_id")
+        ));
     }
 
     #[test]
@@ -2308,7 +2349,8 @@ mod tests {
 
     #[test]
     fn parse_with_update_returning_mixed() {
-        let sql = "with t as (select id from users) update users set name = 'bob' returning id, users.*";
+        let sql =
+            "with t as (select id from users) update users set name = 'bob' returning id, users.*";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
@@ -2324,7 +2366,8 @@ mod tests {
 
     #[test]
     fn parse_returning_case_expr() {
-        let sql = "update users set active = true returning case when active then 1 else 0 end as flag";
+        let sql =
+            "update users set active = true returning case when active then 1 else 0 end as flag";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
@@ -2351,7 +2394,8 @@ mod tests {
 
     #[test]
     fn parse_returning_multiple_aliases() {
-        let sql = "insert into users (id, name) values (1, 'alice') returning id as id1, name as name1";
+        let sql =
+            "insert into users (id, name) values (1, 'alice') returning id as id1, name as name1";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
@@ -2361,7 +2405,10 @@ mod tests {
         };
         assert_eq!(insert.returning.len(), 2);
         assert!(matches!(insert.returning[0].alias.as_deref(), Some("id1")));
-        assert!(matches!(insert.returning[1].alias.as_deref(), Some("name1")));
+        assert!(matches!(
+            insert.returning[1].alias.as_deref(),
+            Some("name1")
+        ));
     }
 
     #[test]
@@ -2404,7 +2451,10 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 1);
-        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+        assert!(matches!(
+            update.returning[0].alias.as_deref(),
+            Some("cname")
+        ));
     }
 
     #[test]
@@ -2478,8 +2528,13 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 3);
-        assert!(matches!(update.returning[1].alias.as_deref(), Some("next_id")));
-        assert!(matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*"));
+        assert!(matches!(
+            update.returning[1].alias.as_deref(),
+            Some("next_id")
+        ));
+        assert!(
+            matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*")
+        );
     }
 
     #[test]
@@ -2533,7 +2588,10 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 1);
-        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+        assert!(matches!(
+            update.returning[0].alias.as_deref(),
+            Some("cname")
+        ));
     }
 
     #[test]
@@ -2595,8 +2653,12 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 3);
-        assert!(matches!(update.returning[0].expr, Expr::Identifier(ref name) if name == "users.id"));
-        assert!(matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*"));
+        assert!(
+            matches!(update.returning[0].expr, Expr::Identifier(ref name) if name == "users.id")
+        );
+        assert!(
+            matches!(update.returning[2].expr, Expr::Identifier(ref name) if name == "users.*")
+        );
     }
 
     #[test]
@@ -2641,7 +2703,8 @@ mod tests {
 
     #[test]
     fn parse_with_cte_setop_delete_returning() {
-        let sql = "with t as (select id from t1 except select id from t2) delete from users returning id";
+        let sql =
+            "with t as (select id from t1 except select id from t2) delete from users returning id";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
@@ -2670,7 +2733,10 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 2);
-        assert!(matches!(update.returning[0].alias.as_deref(), Some("cname")));
+        assert!(matches!(
+            update.returning[0].alias.as_deref(),
+            Some("cname")
+        ));
     }
 
     #[test]
@@ -2812,10 +2878,7 @@ mod tests {
             panic!("expected select");
         };
         let from = unwrap_from(&select);
-        assert!(matches!(
-            from.factor,
-            TableFactor::Derived { .. }
-        ));
+        assert!(matches!(from.factor, TableFactor::Derived { .. }));
         assert_eq!(from.alias.as_deref(), Some("u"));
     }
 
@@ -2832,7 +2895,10 @@ mod tests {
         let from = unwrap_from(&select);
         assert!(matches!(from.factor, TableFactor::Derived { .. }));
         assert_eq!(from.joins.len(), 1);
-        assert!(matches!(from.joins[0].right.factor, TableFactor::Table { .. }));
+        assert!(matches!(
+            from.joins[0].right.factor,
+            TableFactor::Table { .. }
+        ));
     }
 
     #[test]
@@ -3020,7 +3086,10 @@ mod tests {
             dialect: Dialect::Postgres,
         });
         let err = parser.parse(sql).expect_err("expected error");
-        assert!(err.to_string().contains("NATURAL/CROSS JOIN cannot use ON or USING"));
+        assert!(
+            err.to_string()
+                .contains("NATURAL/CROSS JOIN cannot use ON or USING")
+        );
     }
 
     #[test]
@@ -3030,7 +3099,10 @@ mod tests {
             dialect: Dialect::Postgres,
         });
         let err = parser.parse(sql).expect_err("expected error");
-        assert!(err.to_string().contains("NATURAL/CROSS JOIN cannot use ON or USING"));
+        assert!(
+            err.to_string()
+                .contains("NATURAL/CROSS JOIN cannot use ON or USING")
+        );
     }
 
     #[test]
@@ -3384,10 +3456,7 @@ mod tests {
             panic!("expected select");
         };
         let expr = select.selection.expect("selection");
-        assert_eq!(
-            expr.to_sql(),
-            "id = 1 or id = 2 or id = 3"
-        );
+        assert_eq!(expr.to_sql(), "id = 1 or id = 2 or id = 3");
     }
 
     #[test]
@@ -3689,7 +3758,9 @@ mod tests {
             panic!("expected delete");
         };
         assert_eq!(delete.returning.len(), 1);
-        assert!(matches!(delete.returning[0].expr, Expr::Identifier(ref name) if name == "users.*"));
+        assert!(
+            matches!(delete.returning[0].expr, Expr::Identifier(ref name) if name == "users.*")
+        );
     }
 
     #[test]
@@ -3720,7 +3791,9 @@ mod tests {
             panic!("expected select");
         };
         assert_eq!(select.projection.len(), 1);
-        assert!(matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.id"));
+        assert!(
+            matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.id")
+        );
     }
 
     #[test]
@@ -3734,7 +3807,9 @@ mod tests {
             panic!("expected select");
         };
         assert_eq!(select.projection.len(), 1);
-        assert!(matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.*"));
+        assert!(
+            matches!(select.projection[0].expr, Expr::Identifier(ref name) if name == "public.users.*")
+        );
     }
 
     #[test]
@@ -3748,7 +3823,10 @@ mod tests {
             panic!("expected update");
         };
         assert_eq!(update.returning.len(), 1);
-        assert!(matches!(update.returning[0].alias.as_deref(), Some("user_id")));
+        assert!(matches!(
+            update.returning[0].alias.as_deref(),
+            Some("user_id")
+        ));
     }
 
     #[test]
@@ -3763,8 +3841,13 @@ mod tests {
         };
         assert_eq!(insert.returning.len(), 3);
         assert!(matches!(insert.returning[0].expr, Expr::Identifier(ref name) if name == "id"));
-        assert!(matches!(insert.returning[1].expr, Expr::Identifier(ref name) if name == "users.*"));
-        assert!(matches!(insert.returning[2].alias.as_deref(), Some("username")));
+        assert!(
+            matches!(insert.returning[1].expr, Expr::Identifier(ref name) if name == "users.*")
+        );
+        assert!(matches!(
+            insert.returning[2].alias.as_deref(),
+            Some("username")
+        ));
     }
 
     #[test]
