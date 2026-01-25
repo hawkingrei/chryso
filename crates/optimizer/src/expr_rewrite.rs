@@ -3,7 +3,9 @@ use chryso_planner::LogicalPlan;
 
 pub fn rewrite_plan(plan: &LogicalPlan) -> LogicalPlan {
     match plan {
-        LogicalPlan::Scan { table } => LogicalPlan::Scan { table: table.clone() },
+        LogicalPlan::Scan { table } => LogicalPlan::Scan {
+            table: table.clone(),
+        },
         LogicalPlan::IndexScan {
             table,
             index,
@@ -94,7 +96,13 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
                 (UnaryOperator::Not, Expr::Literal(Literal::Bool(value))) => {
                     Expr::Literal(Literal::Bool(!value))
                 }
-                (UnaryOperator::Not, Expr::UnaryOp { op: UnaryOperator::Not, expr }) => *expr,
+                (
+                    UnaryOperator::Not,
+                    Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        expr,
+                    },
+                ) => *expr,
                 (UnaryOperator::Not, Expr::IsNull { expr, negated }) => Expr::IsNull {
                     expr,
                     negated: !negated,
@@ -186,16 +194,26 @@ fn rewrite_binary(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
             Expr::Literal(Literal::Number(0.0))
         }
         (BinaryOperator::Div, _, Expr::Literal(Literal::Number(1.0))) => left,
-        (BinaryOperator::Add, Expr::Literal(Literal::Number(a)), Expr::Literal(Literal::Number(b))) => {
-            Expr::Literal(Literal::Number(a + b))
-        }
-        (BinaryOperator::Sub, Expr::Literal(Literal::Number(a)), Expr::Literal(Literal::Number(b))) => {
-            Expr::Literal(Literal::Number(a - b))
-        }
-        (BinaryOperator::Mul, Expr::Literal(Literal::Number(a)), Expr::Literal(Literal::Number(b))) => {
-            Expr::Literal(Literal::Number(a * b))
-        }
-        (BinaryOperator::Div, Expr::Literal(Literal::Number(a)), Expr::Literal(Literal::Number(b))) => {
+        (
+            BinaryOperator::Add,
+            Expr::Literal(Literal::Number(a)),
+            Expr::Literal(Literal::Number(b)),
+        ) => Expr::Literal(Literal::Number(a + b)),
+        (
+            BinaryOperator::Sub,
+            Expr::Literal(Literal::Number(a)),
+            Expr::Literal(Literal::Number(b)),
+        ) => Expr::Literal(Literal::Number(a - b)),
+        (
+            BinaryOperator::Mul,
+            Expr::Literal(Literal::Number(a)),
+            Expr::Literal(Literal::Number(b)),
+        ) => Expr::Literal(Literal::Number(a * b)),
+        (
+            BinaryOperator::Div,
+            Expr::Literal(Literal::Number(a)),
+            Expr::Literal(Literal::Number(b)),
+        ) => {
             if *b == 0.0 {
                 Expr::BinaryOp {
                     left: Box::new(left),
@@ -391,13 +409,23 @@ mod tests {
         };
         let rewritten = rewrite_expr(&expr);
         match rewritten {
-            Expr::BinaryOp { op: BinaryOperator::Or, left, right } => {
-                match (*left, *right) {
-                    (Expr::UnaryOp { op: chryso_core::ast::UnaryOperator::Not, .. },
-                     Expr::UnaryOp { op: chryso_core::ast::UnaryOperator::Not, .. }) => {}
-                    other => panic!("expected negated operands, got {other:?}"),
-                }
-            }
+            Expr::BinaryOp {
+                op: BinaryOperator::Or,
+                left,
+                right,
+            } => match (*left, *right) {
+                (
+                    Expr::UnaryOp {
+                        op: chryso_core::ast::UnaryOperator::Not,
+                        ..
+                    },
+                    Expr::UnaryOp {
+                        op: chryso_core::ast::UnaryOperator::Not,
+                        ..
+                    },
+                ) => {}
+                other => panic!("expected negated operands, got {other:?}"),
+            },
             other => panic!("expected OR, got {other:?}"),
         }
     }

@@ -1,5 +1,5 @@
-use chryso_core::ast::{BinaryOperator, Expr, Literal, Statement, TableFactor, TableRef};
 use crate::{LogicalPlan, PhysicalPlan};
+use chryso_core::ast::{BinaryOperator, Expr, Literal, Statement, TableFactor, TableRef};
 
 pub fn serialize_statement(statement: &Statement) -> String {
     match statement {
@@ -72,11 +72,9 @@ pub fn serialize_expr(expr: &Expr) -> String {
                 .join(",")
         ),
         Expr::Exists(select) => format!("exists:{}", select_to_marker(select)),
-        Expr::InSubquery { expr, subquery } => format!(
-            "in:{}:{}",
-            serialize_expr(expr),
-            select_to_marker(subquery)
-        ),
+        Expr::InSubquery { expr, subquery } => {
+            format!("in:{}:{}", serialize_expr(expr), select_to_marker(subquery))
+        }
         Expr::Subquery(select) => format!("subquery:{}", select_to_marker(select)),
         Expr::Case {
             operand,
@@ -127,7 +125,10 @@ pub fn deserialize_expr(input: &str) -> Option<Expr> {
     match kind {
         "ident" => Some(Expr::Identifier(payload.to_string())),
         "string" => Some(Expr::Literal(Literal::String(payload.to_string()))),
-        "number" => payload.parse().ok().map(|value| Expr::Literal(Literal::Number(value))),
+        "number" => payload
+            .parse()
+            .ok()
+            .map(|value| Expr::Literal(Literal::Number(value))),
         "wildcard" => Some(Expr::Wildcard),
         _ => None,
     }

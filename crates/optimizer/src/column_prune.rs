@@ -74,11 +74,18 @@ fn prune_plan_with_required(plan: &LogicalPlan, required: Option<&HashSet<String
             join_required.extend(collect_identifiers(on));
             let left_tables = collect_tables(left.as_ref());
             let right_tables = collect_tables(right.as_ref());
-            let (left_required, right_required) = split_required(&join_required, &left_tables, &right_tables);
+            let (left_required, right_required) =
+                split_required(&join_required, &left_tables, &right_tables);
             LogicalPlan::Join {
                 join_type: *join_type,
-                left: Box::new(prune_plan_with_required(left.as_ref(), left_required.as_ref())),
-                right: Box::new(prune_plan_with_required(right.as_ref(), right_required.as_ref())),
+                left: Box::new(prune_plan_with_required(
+                    left.as_ref(),
+                    left_required.as_ref(),
+                )),
+                right: Box::new(prune_plan_with_required(
+                    right.as_ref(),
+                    right_required.as_ref(),
+                )),
                 on: on.clone(),
             }
         }
@@ -141,9 +148,11 @@ fn prune_plan_with_required(plan: &LogicalPlan, required: Option<&HashSet<String
 fn prune_scan(table: &str, required: Option<&HashSet<String>>) -> LogicalPlan {
     let required = match required {
         Some(required) => required,
-        None => return LogicalPlan::Scan {
-            table: table.to_string(),
-        },
+        None => {
+            return LogicalPlan::Scan {
+                table: table.to_string(),
+            };
+        }
     };
     let exprs = required_exprs_for_table(table, required);
     if exprs.is_empty() {
@@ -173,7 +182,7 @@ fn prune_index_scan(
                 table: table.to_string(),
                 index: index.to_string(),
                 predicate: predicate.clone(),
-            }
+            };
         }
     };
     let mut combined = required.clone();
@@ -371,6 +380,10 @@ mod tests {
         let LogicalPlan::Projection { exprs, .. } = input.as_ref() else {
             panic!("expected projection on index scan");
         };
-        assert!(exprs.iter().any(|expr| matches!(expr, Expr::Identifier(name) if name == "t.region")));
+        assert!(
+            exprs
+                .iter()
+                .any(|expr| matches!(expr, Expr::Identifier(name) if name == "t.region"))
+        );
     }
 }

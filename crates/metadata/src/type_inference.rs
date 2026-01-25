@@ -1,5 +1,5 @@
-use chryso_core::ast::{BinaryOperator, Expr, Literal, UnaryOperator};
 use crate::types::DataType;
+use chryso_core::ast::{BinaryOperator, Expr, Literal, UnaryOperator};
 
 pub trait TypeInferencer {
     fn infer_expr(&self, expr: &Expr) -> DataType;
@@ -59,14 +59,9 @@ impl TypeInferencer for SimpleTypeInferencer {
     }
 }
 
-pub fn infer_with_registry(
-    expr: &Expr,
-    registry: &crate::functions::FunctionRegistry,
-) -> DataType {
+pub fn infer_with_registry(expr: &Expr, registry: &crate::functions::FunctionRegistry) -> DataType {
     match expr {
-        Expr::FunctionCall { name, .. } => registry
-            .return_type(name)
-            .unwrap_or(DataType::Unknown),
+        Expr::FunctionCall { name, .. } => registry.return_type(name).unwrap_or(DataType::Unknown),
         Expr::WindowFunction { function, .. } => infer_with_registry(function, registry),
         Expr::Exists(_) | Expr::InSubquery { .. } => DataType::Bool,
         Expr::Subquery(_) => DataType::Unknown,
@@ -88,14 +83,17 @@ pub fn infer_with_registry(
 }
 
 pub fn expr_types(exprs: &[Expr], inferencer: &dyn TypeInferencer) -> Vec<DataType> {
-    exprs.iter().map(|expr| inferencer.infer_expr(expr)).collect()
+    exprs
+        .iter()
+        .map(|expr| inferencer.infer_expr(expr))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{SimpleTypeInferencer, TypeInferencer};
-    use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use crate::types::DataType;
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
 
     #[test]
     fn infer_numeric_binary() {

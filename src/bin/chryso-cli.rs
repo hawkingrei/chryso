@@ -1,19 +1,21 @@
 use chryso::adapter::ExecutorAdapter;
-use chryso::{
-    metadata::StatsCache, parser::SimpleParser, CascadesOptimizer, Dialect, DuckDbAdapter,
-    MockAdapter, OptimizerConfig, ParserConfig, PlanBuilder, SqlParser, Statement,
-};
 use chryso::planner::{ExplainConfig, ExplainFormatter};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use chryso::{
+    CascadesOptimizer, Dialect, DuckDbAdapter, MockAdapter, OptimizerConfig, ParserConfig,
+    PlanBuilder, SqlParser, Statement, metadata::StatsCache, parser::SimpleParser,
+};
 use crossterm::ExecutableCommand;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Terminal;
-use std::io::{self, Read};
 use std::io::IsTerminal;
+use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
 fn main() {
@@ -65,8 +67,8 @@ fn run_tui(runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
         .execute(EnterAlternateScreen)
         .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)
-        .map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
+    let mut terminal =
+        Terminal::new(backend).map_err(|err| chryso::ChrysoError::new(err.to_string()))?;
 
     let mut app = AppState::default();
     let mut last_tick = Instant::now();
@@ -78,8 +80,8 @@ fn run_tui(runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
 
         let timeout = Duration::from_millis(200);
         if event::poll(timeout).map_err(|err| chryso::ChrysoError::new(err.to_string()))? {
-            if let Event::Key(key) = event::read()
-                .map_err(|err| chryso::ChrysoError::new(err.to_string()))?
+            if let Event::Key(key) =
+                event::read().map_err(|err| chryso::ChrysoError::new(err.to_string()))?
             {
                 if handle_key_event(key, &mut app, runner)? == Action::Exit {
                     break;
@@ -103,18 +105,27 @@ fn run_tui(runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
 fn draw_ui(frame: &mut ratatui::Frame, app: &AppState) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
         .split(frame.area());
 
-    let output = Text::from(app.output.iter().map(|line| Line::from(line.clone())).collect::<Vec<_>>());
+    let output = Text::from(
+        app.output
+            .iter()
+            .map(|line| Line::from(line.clone()))
+            .collect::<Vec<_>>(),
+    );
     let output_block = Paragraph::new(output)
         .block(Block::default().borders(Borders::ALL).title("Output"))
         .style(Style::default().fg(Color::White));
     frame.render_widget(output_block, layout[0]);
 
     let prompt = format!("> {}", app.input);
-    let input_block = Paragraph::new(prompt)
-        .block(Block::default().borders(Borders::ALL).title("SQL"));
+    let input_block =
+        Paragraph::new(prompt).block(Block::default().borders(Borders::ALL).title("SQL"));
     frame.render_widget(input_block, layout[1]);
 
     let cursor_x = layout[1].x + 2 + app.cursor as u16;
@@ -490,13 +501,13 @@ impl PipelineRunner {
             Statement::Explain(inner) => {
                 let logical = PlanBuilder::build(*inner)?;
                 let physical = self.optimizer.optimize(&logical, &mut self.stats);
-                
+
                 // Use the new formatted explain output with real cost model and stats
                 let config = ExplainConfig {
                     show_types: true,
                     show_costs: true,
-                    show_cardinality: state.explain_verbose,  // Only show cardinality in verbose mode
-                    compact: !state.explain_verbose,          // Use compact format unless verbose
+                    show_cardinality: state.explain_verbose, // Only show cardinality in verbose mode
+                    compact: !state.explain_verbose,         // Use compact format unless verbose
                     max_expr_length: if state.explain_verbose {
                         Self::VERBOSE_EXPLAIN_MAX_EXPR_LENGTH
                     } else {
@@ -516,14 +527,14 @@ impl PipelineRunner {
                         &chryso_metadata::type_inference::SimpleTypeInferencer,
                     )
                 };
-                
+
                 let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
                 let physical_output = if state.explain_verbose {
                     formatter.format_physical_plan_with_stats(&physical, &cost_model, &self.stats)
                 } else {
                     formatter.format_physical_plan(&physical, &cost_model)
                 };
-                
+
                 let mut lines = Vec::new();
                 lines.extend(logical_output.lines().map(|line: &str| line.to_string()));
                 lines.push(String::new());
@@ -551,10 +562,7 @@ enum Adapter {
 }
 
 impl Adapter {
-    fn execute(
-        &self,
-        plan: &chryso::PhysicalPlan,
-    ) -> chryso::ChrysoResult<chryso::QueryResult> {
+    fn execute(&self, plan: &chryso::PhysicalPlan) -> chryso::ChrysoResult<chryso::QueryResult> {
         match self {
             Adapter::Duck(adapter) => adapter.execute(plan),
             Adapter::Mock(adapter) => adapter.execute(plan),
@@ -717,7 +725,9 @@ mod tests {
 
     impl MockRunner {
         fn new() -> Self {
-            Self { executed: Vec::new() }
+            Self {
+                executed: Vec::new(),
+            }
         }
 
         fn execute_line(&mut self, sql: &str) -> chryso::ChrysoResult<Vec<String>> {

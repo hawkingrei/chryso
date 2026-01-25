@@ -1,21 +1,21 @@
-use chryso_metadata::StatsCache;
 use crate::cost::{CostModel, UnitCostModel};
 use crate::memo::Memo;
 use crate::rules::RuleSet;
+use chryso_metadata::StatsCache;
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 
-pub mod cost;
-pub mod estimation;
-pub mod enforcer;
 pub mod column_prune;
+pub mod cost;
+pub mod enforcer;
+pub mod estimation;
+pub mod expr_rewrite;
 pub mod join_order;
-pub mod stats_collect;
 pub mod memo;
 pub mod physical_rules;
 pub mod properties;
 pub mod rules;
+pub mod stats_collect;
 pub mod subquery;
-pub mod expr_rewrite;
 pub mod utils;
 
 #[derive(Debug)]
@@ -59,7 +59,7 @@ impl std::fmt::Debug for OptimizerConfig {
 mod tests {
     use super::cost::UnitCostModel;
     use super::{CascadesOptimizer, OptimizerConfig};
-    use chryso_metadata::{type_inference::SimpleTypeInferencer, StatsCache};
+    use chryso_metadata::{StatsCache, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::PlanBuilder;
 
@@ -211,11 +211,21 @@ fn apply_rules_recursive(
     let rewritten = match rewritten {
         LogicalPlan::Filter { predicate, input } => LogicalPlan::Filter {
             predicate,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Projection { exprs, input } => LogicalPlan::Projection {
             exprs,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Join {
             join_type,
@@ -224,8 +234,18 @@ fn apply_rules_recursive(
             on,
         } => LogicalPlan::Join {
             join_type,
-            left: Box::new(apply_rules_recursive(left.as_ref(), rules, trace, debug_rules)),
-            right: Box::new(apply_rules_recursive(right.as_ref(), rules, trace, debug_rules)),
+            left: Box::new(apply_rules_recursive(
+                left.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
+            right: Box::new(apply_rules_recursive(
+                right.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
             on,
         },
         LogicalPlan::Aggregate {
@@ -235,10 +255,20 @@ fn apply_rules_recursive(
         } => LogicalPlan::Aggregate {
             group_exprs,
             aggr_exprs,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::TopN {
             order_by,
@@ -247,11 +277,21 @@ fn apply_rules_recursive(
         } => LogicalPlan::TopN {
             order_by,
             limit,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Sort { order_by, input } => LogicalPlan::Sort {
             order_by,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Limit {
             limit,
@@ -260,14 +300,24 @@ fn apply_rules_recursive(
         } => LogicalPlan::Limit {
             limit,
             offset,
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
         },
         LogicalPlan::Derived {
             input,
             alias,
             column_aliases,
         } => LogicalPlan::Derived {
-            input: Box::new(apply_rules_recursive(input.as_ref(), rules, trace, debug_rules)),
+            input: Box::new(apply_rules_recursive(
+                input.as_ref(),
+                rules,
+                trace,
+                debug_rules,
+            )),
             alias,
             column_aliases,
         },

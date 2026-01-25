@@ -1,6 +1,6 @@
-pub use chryso_planner::cost::{Cost, CostModel};
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
+pub use chryso_planner::cost::{Cost, CostModel};
 
 pub struct UnitCostModel;
 
@@ -40,7 +40,7 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostModel, StatsCostModel, StatsCache, UnitCostModel};
+    use super::{CostModel, StatsCache, StatsCostModel, UnitCostModel};
     use chryso_metadata::ColumnStats;
     use chryso_planner::PhysicalPlan;
 

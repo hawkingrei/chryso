@@ -1,4 +1,6 @@
-use crate::utils::{collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix};
+use crate::utils::{
+    collect_identifiers, collect_tables, combine_conjuncts, split_conjuncts, table_prefix,
+};
 use chryso_core::ast::{BinaryOperator, Expr, Literal};
 use chryso_planner::LogicalPlan;
 
@@ -498,10 +500,7 @@ impl Rule for PredicateInference {
 
     fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
         match plan {
-            LogicalPlan::Filter {
-                predicate,
-                input,
-            } => match input.as_ref() {
+            LogicalPlan::Filter { predicate, input } => match input.as_ref() {
                 LogicalPlan::Join {
                     join_type,
                     left,
@@ -894,7 +893,10 @@ mod tests {
         let plan = LogicalPlan::Projection {
             exprs: vec![Expr::Identifier("id".to_string())],
             input: Box::new(LogicalPlan::Projection {
-                exprs: vec![Expr::Identifier("id".to_string()), Expr::Identifier("name".to_string())],
+                exprs: vec![
+                    Expr::Identifier("id".to_string()),
+                    Expr::Identifier("name".to_string()),
+                ],
                 input: Box::new(LogicalPlan::Scan {
                     table: "t".to_string(),
                 }),
@@ -1408,7 +1410,10 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
     }
     let mut all = conjuncts;
     all.extend(inferred);
-    (combine_conjuncts(all).unwrap_or_else(|| predicate.clone()), true)
+    (
+        combine_conjuncts(all).unwrap_or_else(|| predicate.clone()),
+        true,
+    )
 }
 
 fn split_predicates_by_source(
@@ -1511,7 +1516,9 @@ impl UnionFind {
     }
 
     fn add(&mut self, key: &str) {
-        self.parent.entry(key.to_string()).or_insert_with(|| key.to_string());
+        self.parent
+            .entry(key.to_string())
+            .or_insert_with(|| key.to_string());
     }
 
     fn find(&mut self, key: &str) -> String {

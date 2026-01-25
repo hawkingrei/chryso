@@ -21,13 +21,8 @@ impl FunctionRegistry {
     pub fn register(&mut self, name: impl Into<String>, return_type: DataType) {
         let name = name.into();
         let key = name.to_ascii_lowercase();
-        self.functions.insert(
-            key,
-            FunctionSignature {
-                name,
-                return_type,
-            },
-        );
+        self.functions
+            .insert(key, FunctionSignature { name, return_type });
     }
 
     pub fn is_known(&self, name: &str) -> bool {

@@ -1,6 +1,6 @@
-use chryso_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
-use chryso_core::ast::Literal;
 use chryso_core::ChrysoResult;
+use chryso_core::ast::Literal;
+use chryso_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
 use chryso_metadata::type_inference::TypeInferencer;
 
 pub mod cost;
@@ -10,20 +10,36 @@ pub mod serde;
 pub mod validate;
 
 pub use cost::{Cost, CostModel};
-pub use explain::{ExplainConfig, ExplainFormatter, format_simple_logical_plan, format_simple_physical_plan};
+pub use explain::{
+    ExplainConfig, ExplainFormatter, format_simple_logical_plan, format_simple_physical_plan,
+};
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlan {
-    Scan { table: String },
-    IndexScan { table: String, index: String, predicate: Expr },
-    Dml { sql: String },
+    Scan {
+        table: String,
+    },
+    IndexScan {
+        table: String,
+        index: String,
+        predicate: Expr,
+    },
+    Dml {
+        sql: String,
+    },
     Derived {
         input: Box<LogicalPlan>,
         alias: String,
         column_aliases: Vec<String>,
     },
-    Filter { predicate: Expr, input: Box<LogicalPlan> },
-    Projection { exprs: Vec<Expr>, input: Box<LogicalPlan> },
+    Filter {
+        predicate: Expr,
+        input: Box<LogicalPlan>,
+    },
+    Projection {
+        exprs: Vec<Expr>,
+        input: Box<LogicalPlan>,
+    },
     Join {
         join_type: JoinType,
         left: Box<LogicalPlan>,
@@ -56,16 +72,30 @@ pub enum LogicalPlan {
 
 #[derive(Debug, Clone)]
 pub enum PhysicalPlan {
-    TableScan { table: String },
-    IndexScan { table: String, index: String, predicate: Expr },
-    Dml { sql: String },
+    TableScan {
+        table: String,
+    },
+    IndexScan {
+        table: String,
+        index: String,
+        predicate: Expr,
+    },
+    Dml {
+        sql: String,
+    },
     Derived {
         input: Box<PhysicalPlan>,
         alias: String,
         column_aliases: Vec<String>,
     },
-    Filter { predicate: Expr, input: Box<PhysicalPlan> },
-    Projection { exprs: Vec<Expr>, input: Box<PhysicalPlan> },
+    Filter {
+        predicate: Expr,
+        input: Box<PhysicalPlan>,
+    },
+    Projection {
+        exprs: Vec<Expr>,
+        input: Box<PhysicalPlan>,
+    },
     Join {
         join_type: JoinType,
         algorithm: JoinAlgorithm,
@@ -119,11 +149,11 @@ impl PlanBuilder {
             | Statement::Analyze(_) => Ok(LogicalPlan::Dml {
                 sql: chryso_core::sql_format::format_statement(&statement),
             }),
-            Statement::Insert(_)
-            | Statement::Update(_)
-            | Statement::Delete(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
-            }),
+            Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) => {
+                Ok(LogicalPlan::Dml {
+                    sql: chryso_core::sql_format::format_statement(&statement),
+                })
+            }
         }?;
         Ok(simplify_plan(plan))
     }
@@ -197,10 +227,7 @@ fn build_from(table: chryso_core::ast::TableRef) -> ChrysoResult<LogicalPlan> {
     let mut plan = match table.factor {
         chryso_core::ast::TableFactor::Table { name } => LogicalPlan::Scan { table: name },
         chryso_core::ast::TableFactor::Derived { query } => {
-            let alias = table
-                .alias
-                .clone()
-                .unwrap_or_else(|| "derived".to_string());
+            let alias = table.alias.clone().unwrap_or_else(|| "derived".to_string());
             LogicalPlan::Derived {
                 input: Box::new(build_query_plan(*query)?),
                 alias,
@@ -223,9 +250,11 @@ fn build_from(table: chryso_core::ast::TableRef) -> ChrysoResult<LogicalPlan> {
 fn build_query_plan(statement: Statement) -> ChrysoResult<LogicalPlan> {
     match statement {
         Statement::Select(select) => build_select(select),
-        Statement::SetOp { .. } | Statement::With(_) | Statement::Explain(_) => Ok(LogicalPlan::Dml {
-            sql: chryso_core::sql_format::format_statement(&statement),
-        }),
+        Statement::SetOp { .. } | Statement::With(_) | Statement::Explain(_) => {
+            Ok(LogicalPlan::Dml {
+                sql: chryso_core::sql_format::format_statement(&statement),
+            })
+        }
         Statement::CreateTable(_)
         | Statement::DropTable(_)
         | Statement::Truncate(_)
@@ -240,9 +269,7 @@ fn build_query_plan(statement: Statement) -> ChrysoResult<LogicalPlan> {
 
 fn simplify_plan(plan: LogicalPlan) -> LogicalPlan {
     match plan {
-        LogicalPlan::Scan { .. }
-        | LogicalPlan::IndexScan { .. }
-        | LogicalPlan::Dml { .. } => plan,
+        LogicalPlan::Scan { .. } | LogicalPlan::IndexScan { .. } | LogicalPlan::Dml { .. } => plan,
         LogicalPlan::Derived {
             input,
             alias,
@@ -264,7 +291,10 @@ fn simplify_plan(plan: LogicalPlan) -> LogicalPlan {
             }
         }
         LogicalPlan::Projection { exprs, input } => {
-            let exprs = exprs.into_iter().map(|expr| expr.normalize()).collect::<Vec<_>>();
+            let exprs = exprs
+                .into_iter()
+                .map(|expr| expr.normalize())
+                .collect::<Vec<_>>();
             let input = simplify_plan(*input);
             if exprs.len() == 1 && matches!(exprs[0], Expr::Wildcard) {
                 return input;
@@ -294,7 +324,10 @@ fn simplify_plan(plan: LogicalPlan) -> LogicalPlan {
                 .into_iter()
                 .map(|expr| expr.normalize())
                 .collect(),
-            aggr_exprs: aggr_exprs.into_iter().map(|expr| expr.normalize()).collect(),
+            aggr_exprs: aggr_exprs
+                .into_iter()
+                .map(|expr| expr.normalize())
+                .collect(),
             input: Box::new(simplify_plan(*input)),
         },
         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
@@ -344,7 +377,11 @@ impl LogicalPlan {
         let padding = " ".repeat(indent);
         match self {
             LogicalPlan::Scan { table } => format!("{padding}LogicalScan table={table}"),
-            LogicalPlan::IndexScan { table, index, predicate } => format!(
+            LogicalPlan::IndexScan {
+                table,
+                index,
+                predicate,
+            } => format!(
                 "{padding}LogicalIndexScan table={table} index={index} predicate={}",
                 fmt_expr(predicate)
             ),
@@ -389,10 +426,9 @@ impl LogicalPlan {
                 fmt_expr_list(aggr_exprs),
                 input.explain(indent + 2)
             ),
-            LogicalPlan::Distinct { input } => format!(
-                "{padding}LogicalDistinct\n{}",
-                input.explain(indent + 2)
-            ),
+            LogicalPlan::Distinct { input } => {
+                format!("{padding}LogicalDistinct\n{}", input.explain(indent + 2))
+            }
             LogicalPlan::TopN {
                 order_by,
                 limit,
@@ -418,7 +454,11 @@ impl LogicalPlan {
         }
     }
 
-    pub fn explain_formatted(&self, config: &ExplainConfig, inferencer: &dyn TypeInferencer) -> String {
+    pub fn explain_formatted(
+        &self,
+        config: &ExplainConfig,
+        inferencer: &dyn TypeInferencer,
+    ) -> String {
         let formatter = ExplainFormatter::new(config.clone());
         formatter.format_logical_plan(self, inferencer)
     }
@@ -519,7 +559,11 @@ impl PhysicalPlan {
         let padding = " ".repeat(indent);
         match self {
             PhysicalPlan::TableScan { table } => format!("{padding}TableScan table={table}"),
-            PhysicalPlan::IndexScan { table, index, predicate } => format!(
+            PhysicalPlan::IndexScan {
+                table,
+                index,
+                predicate,
+            } => format!(
                 "{padding}IndexScan table={table} index={index} predicate={}",
                 fmt_expr(predicate)
             ),
@@ -565,10 +609,9 @@ impl PhysicalPlan {
                 fmt_expr_list(aggr_exprs),
                 input.explain(indent + 2)
             ),
-            PhysicalPlan::Distinct { input } => format!(
-                "{padding}Distinct\n{}",
-                input.explain(indent + 2)
-            ),
+            PhysicalPlan::Distinct { input } => {
+                format!("{padding}Distinct\n{}", input.explain(indent + 2))
+            }
             PhysicalPlan::TopN {
                 order_by,
                 limit,
@@ -594,18 +637,18 @@ impl PhysicalPlan {
         }
     }
 
-    pub fn explain_costed(
-        &self,
-        indent: usize,
-        cost_model: &dyn crate::cost::CostModel,
-    ) -> String {
+    pub fn explain_costed(&self, indent: usize, cost_model: &dyn crate::cost::CostModel) -> String {
         let padding = " ".repeat(indent);
         let cost = cost_model.cost(self).0;
         match self {
             PhysicalPlan::TableScan { table } => {
                 format!("{padding}TableScan table={table} cost={cost}")
             }
-            PhysicalPlan::IndexScan { table, index, predicate } => format!(
+            PhysicalPlan::IndexScan {
+                table,
+                index,
+                predicate,
+            } => format!(
                 "{padding}IndexScan table={table} index={index} predicate={} cost={cost}",
                 fmt_expr(predicate)
             ),

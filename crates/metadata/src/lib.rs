@@ -147,9 +147,9 @@ pub trait StatsProvider {
 pub mod analyze;
 pub mod catalog;
 pub mod functions;
-pub mod types;
-pub mod type_inference;
 pub mod type_coercion;
+pub mod type_inference;
+pub mod types;
 
 #[cfg(test)]
 mod catalog_tests;

@@ -11,9 +11,7 @@ pub fn format_expr(expr: &Expr) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_statement;
-    use crate::ast::{
-        InsertSource, SelectItem, SelectStatement, Statement, TableFactor, TableRef,
-    };
+    use crate::ast::{InsertSource, SelectItem, SelectStatement, Statement, TableFactor, TableRef};
 
     #[test]
     fn format_simple_select() {

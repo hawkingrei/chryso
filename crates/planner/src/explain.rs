@@ -1,7 +1,7 @@
-use chryso_core::ast::Expr;
-use crate::{LogicalPlan, PhysicalPlan};
-use chryso_metadata::type_inference::TypeInferencer;
 use crate::cost::CostModel;
+use crate::{LogicalPlan, PhysicalPlan};
+use chryso_core::ast::Expr;
+use chryso_metadata::type_inference::TypeInferencer;
 
 pub trait CardinalityEstimator {
     fn estimate(&self, plan: &LogicalPlan, stats: &chryso_metadata::StatsCache) -> f64;
@@ -73,7 +73,7 @@ impl ExplainFormatter {
         self.format_logical_node(plan, 0, inferencer, None, &mut output, true, "");
         output
     }
-    
+
     pub fn format_logical_plan_with_stats(
         &self,
         plan: &LogicalPlan,
@@ -83,21 +83,25 @@ impl ExplainFormatter {
         let mut output = String::new();
         output.push_str("=== Logical Plan ===\n");
         let estimator = NaiveEstimator;
-        self.format_logical_node(plan, 0, inferencer, Some((&estimator, stats)), &mut output, true, "");
+        self.format_logical_node(
+            plan,
+            0,
+            inferencer,
+            Some((&estimator, stats)),
+            &mut output,
+            true,
+            "",
+        );
         output
     }
 
-    pub fn format_physical_plan(
-        &self,
-        plan: &PhysicalPlan,
-        cost_model: &dyn CostModel,
-    ) -> String {
+    pub fn format_physical_plan(&self, plan: &PhysicalPlan, cost_model: &dyn CostModel) -> String {
         let mut output = String::new();
         output.push_str("=== Physical Plan ===\n");
         self.format_physical_node(plan, 0, cost_model, None, &mut output, true, "");
         output
     }
-    
+
     pub fn format_physical_plan_with_stats(
         &self,
         plan: &PhysicalPlan,
@@ -107,7 +111,15 @@ impl ExplainFormatter {
         let mut output = String::new();
         output.push_str("=== Physical Plan ===\n");
         let estimator = NaiveEstimator;
-        self.format_physical_node(plan, 0, cost_model, Some((&estimator, stats)), &mut output, true, "");
+        self.format_physical_node(
+            plan,
+            0,
+            cost_model,
+            Some((&estimator, stats)),
+            &mut output,
+            true,
+            "",
+        );
         output
     }
 
@@ -120,11 +132,19 @@ impl ExplainFormatter {
         // Convert physical plan to logical plan for estimation (simplified mapping).
         // This is a basic implementation - in a real system, you'd have more sophisticated mapping.
         match plan {
-            PhysicalPlan::TableScan { table } => {
-                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats)
-            }
+            PhysicalPlan::TableScan { table } => estimator.estimate(
+                &LogicalPlan::Scan {
+                    table: table.clone(),
+                },
+                stats,
+            ),
             PhysicalPlan::IndexScan { table, .. } => {
-                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats) * 0.1
+                estimator.estimate(
+                    &LogicalPlan::Scan {
+                        table: table.clone(),
+                    },
+                    stats,
+                ) * 0.1
             }
             PhysicalPlan::Dml { .. } => 1.0,
             PhysicalPlan::Derived { input, .. }
@@ -163,7 +183,7 @@ impl ExplainFormatter {
     ) {
         let indent = self.get_indent(depth, is_last);
         let node_prefix = format!("{}{}", prefix, indent);
-        
+
         // Get cardinality estimate if available
         let cardinality_str = if self.config.show_cardinality {
             if let Some((estimator, stats)) = estimator_stats {
@@ -175,12 +195,19 @@ impl ExplainFormatter {
         } else {
             String::new()
         };
-        
+
         match plan {
             LogicalPlan::Scan { table } => {
-                output.push_str(&format!("{}LogicalScan: table={}{}\n", node_prefix, table, cardinality_str));
+                output.push_str(&format!(
+                    "{}LogicalScan: table={}{}\n",
+                    node_prefix, table, cardinality_str
+                ));
             }
-            LogicalPlan::IndexScan { table, index, predicate } => {
+            LogicalPlan::IndexScan {
+                table,
+                index,
+                predicate,
+            } => {
                 let pred_str = self.format_expr(predicate);
                 output.push_str(&format!(
                     "{}LogicalIndexScan: table={}, index={}, predicate={}{}\n",
@@ -189,9 +216,16 @@ impl ExplainFormatter {
             }
             LogicalPlan::Dml { sql } => {
                 let sql_preview = self.safe_truncate(sql, 50);
-                output.push_str(&format!("{}LogicalDml: sql={}{}\n", node_prefix, sql_preview, cardinality_str));
+                output.push_str(&format!(
+                    "{}LogicalDml: sql={}{}\n",
+                    node_prefix, sql_preview, cardinality_str
+                ));
             }
-            LogicalPlan::Derived { alias, column_aliases, input } => {
+            LogicalPlan::Derived {
+                alias,
+                column_aliases,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}LogicalDerived: alias={}, columns=[{}]{}\n",
                     node_prefix,
@@ -200,7 +234,15 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             LogicalPlan::Filter { predicate, input } => {
                 let pred_str = self.format_expr(predicate);
@@ -214,7 +256,15 @@ impl ExplainFormatter {
                     node_prefix, pred_str, type_info, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             LogicalPlan::Projection { exprs, input } => {
                 let expr_str = self.format_expr_list(exprs);
@@ -229,19 +279,52 @@ impl ExplainFormatter {
                     node_prefix, expr_str, type_info, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            LogicalPlan::Join { join_type, left, right, on } => {
+            LogicalPlan::Join {
+                join_type,
+                left,
+                right,
+                on,
+            } => {
                 let on_str = self.format_expr(on);
                 output.push_str(&format!(
                     "{}LogicalJoin: type={:?}, on={}{}\n",
                     node_prefix, join_type, on_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(left, depth + 1, inferencer, estimator_stats, output, false, &child_prefix);
-                self.format_logical_node(right, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    left,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    false,
+                    &child_prefix,
+                );
+                self.format_logical_node(
+                    right,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            LogicalPlan::Aggregate { group_exprs, aggr_exprs, input } => {
+            LogicalPlan::Aggregate {
+                group_exprs,
+                aggr_exprs,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}LogicalAggregate: group_by=[{}], aggregates=[{}]{}\n",
                     node_prefix,
@@ -250,14 +333,37 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             LogicalPlan::Distinct { input } => {
-                output.push_str(&format!("{}LogicalDistinct{}\n", node_prefix, cardinality_str));
+                output.push_str(&format!(
+                    "{}LogicalDistinct{}\n",
+                    node_prefix, cardinality_str
+                ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            LogicalPlan::TopN { order_by, limit, input } => {
+            LogicalPlan::TopN {
+                order_by,
+                limit,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}LogicalTopN: order_by=[{}], limit={}{}\n",
                     node_prefix,
@@ -266,7 +372,15 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             LogicalPlan::Sort { order_by, input } => {
                 output.push_str(&format!(
@@ -276,16 +390,38 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            LogicalPlan::Limit { limit, offset, input } => {
-                let offset_str = offset.map(|o| format!(", offset={}", o)).unwrap_or_default();
+            LogicalPlan::Limit {
+                limit,
+                offset,
+                input,
+            } => {
+                let offset_str = offset
+                    .map(|o| format!(", offset={}", o))
+                    .unwrap_or_default();
                 output.push_str(&format!(
                     "{}LogicalLimit: limit={:?}{}{}\n",
                     node_prefix, limit, offset_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_logical_node(input, depth + 1, inferencer, estimator_stats, output, true, &child_prefix);
+                self.format_logical_node(
+                    input,
+                    depth + 1,
+                    inferencer,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
         }
     }
@@ -308,7 +444,7 @@ impl ExplainFormatter {
         } else {
             String::new()
         };
-        
+
         // Get cardinality estimate if available
         let cardinality_str = if self.config.show_cardinality {
             if let Some((estimator, stats)) = estimator_stats {
@@ -322,12 +458,19 @@ impl ExplainFormatter {
         } else {
             String::new()
         };
-        
+
         match plan {
             PhysicalPlan::TableScan { table } => {
-                output.push_str(&format!("{}TableScan: table={}{}{}\n", node_prefix, table, cost_str, cardinality_str));
+                output.push_str(&format!(
+                    "{}TableScan: table={}{}{}\n",
+                    node_prefix, table, cost_str, cardinality_str
+                ));
             }
-            PhysicalPlan::IndexScan { table, index, predicate } => {
+            PhysicalPlan::IndexScan {
+                table,
+                index,
+                predicate,
+            } => {
                 let pred_str = self.format_expr(predicate);
                 output.push_str(&format!(
                     "{}IndexScan: table={}, index={}, predicate={}{}{}\n",
@@ -336,9 +479,16 @@ impl ExplainFormatter {
             }
             PhysicalPlan::Dml { sql } => {
                 let sql_preview = self.safe_truncate(sql, 50);
-                output.push_str(&format!("{}Dml: sql={}{}{}\n", node_prefix, sql_preview, cost_str, cardinality_str));
+                output.push_str(&format!(
+                    "{}Dml: sql={}{}{}\n",
+                    node_prefix, sql_preview, cost_str, cardinality_str
+                ));
             }
-            PhysicalPlan::Derived { alias, column_aliases, input } => {
+            PhysicalPlan::Derived {
+                alias,
+                column_aliases,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}Derived: alias={}, columns=[{}]{}{}\n",
                     node_prefix,
@@ -348,7 +498,15 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             PhysicalPlan::Filter { predicate, input } => {
                 let pred_str = self.format_expr(predicate);
@@ -357,7 +515,15 @@ impl ExplainFormatter {
                     node_prefix, pred_str, cost_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             PhysicalPlan::Projection { exprs, input } => {
                 let expr_str = self.format_expr_list(exprs);
@@ -366,19 +532,53 @@ impl ExplainFormatter {
                     node_prefix, expr_str, cost_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            PhysicalPlan::Join { join_type, algorithm, left, right, on } => {
+            PhysicalPlan::Join {
+                join_type,
+                algorithm,
+                left,
+                right,
+                on,
+            } => {
                 let on_str = self.format_expr(on);
                 output.push_str(&format!(
                     "{}Join: type={:?}, algorithm={:?}, on={}{}{}\n",
                     node_prefix, join_type, algorithm, on_str, cost_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(left, depth + 1, cost_model, estimator_stats, output, false, &child_prefix);
-                self.format_physical_node(right, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    left,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    false,
+                    &child_prefix,
+                );
+                self.format_physical_node(
+                    right,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            PhysicalPlan::Aggregate { group_exprs, aggr_exprs, input } => {
+            PhysicalPlan::Aggregate {
+                group_exprs,
+                aggr_exprs,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}Aggregate: group_by=[{}], aggregates=[{}]{}{}\n",
                     node_prefix,
@@ -388,7 +588,15 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             PhysicalPlan::Sort { order_by, input } => {
                 output.push_str(&format!(
@@ -399,9 +607,21 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            PhysicalPlan::TopN { order_by, limit, input } => {
+            PhysicalPlan::TopN {
+                order_by,
+                limit,
+                input,
+            } => {
                 output.push_str(&format!(
                     "{}TopN: order_by=[{}], limit={}{}{}\n",
                     node_prefix,
@@ -411,23 +631,55 @@ impl ExplainFormatter {
                     cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-            PhysicalPlan::Limit { limit, offset, input } => {
-                let offset_str = offset.map(|o| format!(", offset={}", o)).unwrap_or_default();
+            PhysicalPlan::Limit {
+                limit,
+                offset,
+                input,
+            } => {
+                let offset_str = offset
+                    .map(|o| format!(", offset={}", o))
+                    .unwrap_or_default();
                 output.push_str(&format!(
                     "{}Limit: limit={:?}{}{}{}\n",
                     node_prefix, limit, offset_str, cost_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
             PhysicalPlan::Distinct { input } => {
-                output.push_str(&format!("{}Distinct{}{}\n", node_prefix, cost_str, cardinality_str));
+                output.push_str(&format!(
+                    "{}Distinct{}{}\n",
+                    node_prefix, cost_str, cardinality_str
+                ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
-                self.format_physical_node(input, depth + 1, cost_model, estimator_stats, output, true, &child_prefix);
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
             }
-
         }
     }
 
@@ -500,18 +752,21 @@ impl ExplainFormatter {
         if order_by.is_empty() {
             "[]".to_string()
         } else {
-            let items: Vec<String> = order_by.iter().map(|item| {
-                let dir = if item.asc { "asc" } else { "desc" };
-                let mut rendered = format!("{} {}", self.format_expr(&item.expr), dir);
-                if let Some(nulls_first) = item.nulls_first {
-                    if nulls_first {
-                        rendered.push_str(" nulls first");
-                    } else {
-                        rendered.push_str(" nulls last");
+            let items: Vec<String> = order_by
+                .iter()
+                .map(|item| {
+                    let dir = if item.asc { "asc" } else { "desc" };
+                    let mut rendered = format!("{} {}", self.format_expr(&item.expr), dir);
+                    if let Some(nulls_first) = item.nulls_first {
+                        if nulls_first {
+                            rendered.push_str(" nulls first");
+                        } else {
+                            rendered.push_str(" nulls last");
+                        }
                     }
-                }
-                rendered
-            }).collect();
+                    rendered
+                })
+                .collect();
             if order_by.len() <= 2 || self.config.compact {
                 format!("[{}]", items.join(", "))
             } else {
@@ -532,7 +787,10 @@ pub fn format_simple_logical_plan(plan: &LogicalPlan) -> String {
     formatter.format_logical_plan(plan, &chryso_metadata::type_inference::SimpleTypeInferencer)
 }
 
-pub fn format_logical_plan_with_stats(plan: &LogicalPlan, stats: &chryso_metadata::StatsCache) -> String {
+pub fn format_logical_plan_with_stats(
+    plan: &LogicalPlan,
+    stats: &chryso_metadata::StatsCache,
+) -> String {
     let formatter = ExplainFormatter::new(ExplainConfig {
         show_types: true,
         show_costs: false,
@@ -540,10 +798,18 @@ pub fn format_logical_plan_with_stats(plan: &LogicalPlan, stats: &chryso_metadat
         compact: false,
         max_expr_length: 80,
     });
-    formatter.format_logical_plan_with_stats(plan, &chryso_metadata::type_inference::SimpleTypeInferencer, stats)
+    formatter.format_logical_plan_with_stats(
+        plan,
+        &chryso_metadata::type_inference::SimpleTypeInferencer,
+        stats,
+    )
 }
 
-pub fn format_physical_plan_with_stats(plan: &PhysicalPlan, cost_model: &dyn crate::cost::CostModel, stats: &chryso_metadata::StatsCache) -> String {
+pub fn format_physical_plan_with_stats(
+    plan: &PhysicalPlan,
+    cost_model: &dyn crate::cost::CostModel,
+    stats: &chryso_metadata::StatsCache,
+) -> String {
     let formatter = ExplainFormatter::new(ExplainConfig {
         show_types: false,
         show_costs: true,
@@ -575,8 +841,8 @@ pub fn format_simple_physical_plan(plan: &PhysicalPlan) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chryso_core::ast::{Expr, BinaryOperator};
     use crate::{LogicalPlan, PhysicalPlan};
+    use chryso_core::ast::{BinaryOperator, Expr};
 
     #[test]
     fn test_format_simple_logical_plan() {
@@ -633,8 +899,11 @@ mod tests {
 
         let config = ExplainConfig::default();
         let formatter = ExplainFormatter::new(config);
-        let output = formatter.format_logical_plan(&plan, &chryso_metadata::type_inference::SimpleTypeInferencer);
-        
+        let output = formatter.format_logical_plan(
+            &plan,
+            &chryso_metadata::type_inference::SimpleTypeInferencer,
+        );
+
         // Check for tree structure characters
         assert!(output.contains("└──"));
         assert!(!output.contains("├──")); // Should be only one child
@@ -659,8 +928,12 @@ mod tests {
             max_expr_length: 80,
         };
         let formatter = ExplainFormatter::new(config);
-        let output = formatter.format_logical_plan_with_stats(&plan, &chryso_metadata::type_inference::SimpleTypeInferencer, &stats);
-        
+        let output = formatter.format_logical_plan_with_stats(
+            &plan,
+            &chryso_metadata::type_inference::SimpleTypeInferencer,
+            &stats,
+        );
+
         // Should contain cardinality estimate
         assert!(output.contains("cardinality=5000"));
         assert!(output.contains("LogicalScan"));
@@ -670,27 +943,27 @@ mod tests {
     #[test]
     fn test_utf8_truncation_safety() {
         use chryso_core::ast::Literal;
-        
+
         // Create a long expression with Unicode characters using Unicode escape sequences
         let unicode_expr = Expr::Literal(Literal::String(
             "\u{4e2d}\u{6587}\u{5b57}\u{7b26}\u{4e32}\u{5305}\u{542b}\u{5f88}\u{591a}\u{0048}\u{0065}\u{006c}\u{006c}\u{006f}".to_string()
         ));
-        
+
         // Test with short max length to force truncation
         let config = ExplainConfig {
             show_types: false,
             show_costs: false,
             show_cardinality: false,
             compact: true,
-            max_expr_length: 20,  // Very short to force truncation
+            max_expr_length: 20, // Very short to force truncation
         };
-        
+
         let formatter = ExplainFormatter::new(config);
         let formatted = formatter.format_expr(&unicode_expr);
-        
+
         // Verify it's valid UTF-8
         assert!(std::str::from_utf8(formatted.as_bytes()).is_ok());
-        
+
         // Should be truncated but still valid
         assert!(formatted.ends_with("..."));
         assert!(formatted.len() <= 20);
@@ -701,17 +974,35 @@ mod tests {
         // Test various non-ASCII scenarios using Unicode escape sequences
         let test_cases = vec![
             // Chinese characters
-            ("\u{4e2d}\u{6587}\u{5b57}\u{7b26}\u{4e32}\u{5305}\u{542b}\u{5f88}\u{591a}\u{0048}\u{0065}\u{006c}\u{006c}\u{006f}", 20),
+            (
+                "\u{4e2d}\u{6587}\u{5b57}\u{7b26}\u{4e32}\u{5305}\u{542b}\u{5f88}\u{591a}\u{0048}\u{0065}\u{006c}\u{006c}\u{006f}",
+                20,
+            ),
             // Mixed ASCII and Unicode
-            ("Hello\u{4e16}\u{754c}\u{ff0c}\u{8fd9}\u{662f}\u{4e00}\u{4e2a}mixed\u{5b57}\u{7b26}\u{4e32}with\u{4e2d}\u{6587}", 25),
+            (
+                "Hello\u{4e16}\u{754c}\u{ff0c}\u{8fd9}\u{662f}\u{4e00}\u{4e2a}mixed\u{5b57}\u{7b26}\u{4e32}with\u{4e2d}\u{6587}",
+                25,
+            ),
             // Emoji (4 bytes each)
-            ("Hello \u{1f44b} World \u{1f30d} Test \u{1f600} String \u{1f389}", 30),
+            (
+                "Hello \u{1f44b} World \u{1f30d} Test \u{1f600} String \u{1f389}",
+                30,
+            ),
             // Japanese
-            ("\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}\u{4e16}\u{754c}\u{3001}\u{3053}\u{308c}\u{306f}\u{9577}\u{3044}\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{6587}\u{5b57}\u{5217}\u{3067}\u{3059}", 20),
+            (
+                "\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}\u{4e16}\u{754c}\u{3001}\u{3053}\u{308c}\u{306f}\u{9577}\u{3044}\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{6587}\u{5b57}\u{5217}\u{3067}\u{3059}",
+                20,
+            ),
             // Arabic
-            ("\u{0645}\u{0631}\u{062d}\u{0628}\u{0627} \u{0628}\u{0627}\u{0644}\u{0639}\u{0627}\u{0644}\u{0645}\u{060c} \u{0647}\u{0630}\u{0647} \u{0647}\u{064a} \u{0633}\u{0644}\u{0633}\u{0644}\u{0629} \u{0646}\u{0635}\u{064a}\u{0629} \u{0637}\u{0648}\u{064a}\u{0644}\u{0629}", 20),
+            (
+                "\u{0645}\u{0631}\u{062d}\u{0628}\u{0627} \u{0628}\u{0627}\u{0644}\u{0639}\u{0627}\u{0644}\u{0645}\u{060c} \u{0647}\u{0630}\u{0647} \u{0647}\u{064a} \u{0633}\u{0644}\u{0633}\u{0644}\u{0629} \u{0646}\u{0635}\u{064a}\u{0629} \u{0637}\u{0648}\u{064a}\u{0644}\u{0629}",
+                20,
+            ),
             // Russian
-            ("\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442} \u{043c}\u{0438}\u{0440}, \u{044d}\u{0442}\u{043e} \u{0434}\u{043b}\u{0438}\u{043d}\u{043d}\u{0430}\u{044f} \u{0441}\u{0442}\u{0440}\u{043e}\u{043a}\u{0430} \u{0442}\u{0435}\u{043a}\u{0441}\u{0442}\u{0430}", 20),
+            (
+                "\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442} \u{043c}\u{0438}\u{0440}, \u{044d}\u{0442}\u{043e} \u{0434}\u{043b}\u{0438}\u{043d}\u{043d}\u{0430}\u{044f} \u{0441}\u{0442}\u{0440}\u{043e}\u{043a}\u{0430} \u{0442}\u{0435}\u{043a}\u{0441}\u{0442}\u{0430}",
+                20,
+            ),
             // Edge case: very short truncation
             ("Hello\u{4e16}\u{754c}", 5),
             // Edge case: exactly at boundary
@@ -723,31 +1014,45 @@ mod tests {
 
         for (input, max_len) in test_cases {
             let truncated = formatter.safe_truncate(input, max_len);
-            
+
             // Verify UTF-8 validity
-            assert!(std::str::from_utf8(truncated.as_bytes()).is_ok(), 
-                    "Truncated string must be valid UTF-8");
-            
+            assert!(
+                std::str::from_utf8(truncated.as_bytes()).is_ok(),
+                "Truncated string must be valid UTF-8"
+            );
+
             // Verify length constraint
-            assert!(truncated.len() <= max_len, 
-                    "Truncated string length {} must not exceed max_len {}", truncated.len(), max_len);
-            
+            assert!(
+                truncated.len() <= max_len,
+                "Truncated string length {} must not exceed max_len {}",
+                truncated.len(),
+                max_len
+            );
+
             // Verify it ends with ... if truncated
             if input.len() > max_len && max_len >= 3 {
-                assert!(truncated.ends_with("..."), 
-                        "Truncated string should end with '...'");
-                
+                assert!(
+                    truncated.ends_with("..."),
+                    "Truncated string should end with '...'"
+                );
+
                 // Verify original is longer
-                assert!(input.len() > truncated.len(), 
-                        "Original should be longer than truncated");
+                assert!(
+                    input.len() > truncated.len(),
+                    "Original should be longer than truncated"
+                );
             } else if input.len() > max_len {
                 // For max_len < 3, should use dots pattern
-                assert!(truncated.chars().all(|c| c == '.'), 
-                        "For max_len < 3, should return dots pattern");
+                assert!(
+                    truncated.chars().all(|c| c == '.'),
+                    "For max_len < 3, should return dots pattern"
+                );
             } else {
                 // If not truncated, should be identical
-                assert_eq!(input, truncated, 
-                          "String not exceeding max_len should remain unchanged");
+                assert_eq!(
+                    input, truncated,
+                    "String not exceeding max_len should remain unchanged"
+                );
             }
         }
     }
@@ -756,28 +1061,34 @@ mod tests {
     fn test_safe_truncate_edge_cases() {
         let config = ExplainConfig::default();
         let formatter = ExplainFormatter::new(config);
-        
+
         // Test edge cases for max_len < 3
         let test_cases = vec![
-            (0, ""),           // max_len = 0: empty string
-            (1, "."),          // max_len = 1: single dot
-            (2, ".."),         // max_len = 2: two dots
-            (3, "..."),        // max_len = 3: three dots
+            (0, ""),    // max_len = 0: empty string
+            (1, "."),   // max_len = 1: single dot
+            (2, ".."),  // max_len = 2: two dots
+            (3, "..."), // max_len = 3: three dots
         ];
-        
+
         for (max_len, expected) in test_cases {
             let result = formatter.safe_truncate("Hello\u{4e16}\u{754c}Test", max_len);
-            assert_eq!(result, expected, 
-                      "For max_len={}, expected '{}', got '{}'", max_len, expected, result);
-            assert_eq!(result.len(), max_len, 
-                      "Result length should exactly match max_len");
+            assert_eq!(
+                result, expected,
+                "For max_len={}, expected '{}', got '{}'",
+                max_len, expected, result
+            );
+            assert_eq!(
+                result.len(),
+                max_len,
+                "Result length should exactly match max_len"
+            );
         }
-        
+
         // Test that max_len >= 3 uses ellipsis truncation
         let result = formatter.safe_truncate("Hello\u{4e16}\u{754c}Test", 4);
         assert_eq!(result.len(), 4, "Should respect max_len=4");
         assert!(result.ends_with("..."), "Should end with ellipsis");
-        
+
         // Test boundary case: exactly 3 characters available for content
         let result = formatter.safe_truncate("Hello\u{4e16}\u{754c}Test", 6);
         assert!(result.len() <= 6, "Should respect max_len=6");
@@ -788,11 +1099,11 @@ mod tests {
     fn test_dml_preview_with_non_ascii() {
         // Test DML preview with non-ASCII SQL using Unicode escape sequences
         let long_unicode_sql = "INSERT INTO \u{7528}\u{6237}\u{8868} (\u{59d3}\u{540d}, \u{5e74}\u{9f84}, \u{5730}\u{5740}) VALUES ('\u{5f20}\u{4e09}', 25, '\u{5317}\u{4eac}\u{5e02}\u{671d}\u{9633}\u{533a}'), ('\u{674e}\u{56db}', 30, '\u{4e0a}\u{6d77}\u{5e02}\u{6d66}\u{4e1c}\u{65b0}\u{533a}'), ('\u{738b}\u{4e94}', 35, '\u{5e7f}\u{5dde}\u{5e02}\u{5929}\u{6cb3}\u{533a}')";
-        
+
         let dml_plan = LogicalPlan::Dml {
             sql: long_unicode_sql.to_string(),
         };
-        
+
         // Test with short preview length
         let config = ExplainConfig {
             show_types: false,
@@ -801,22 +1112,26 @@ mod tests {
             compact: true,
             max_expr_length: 80,
         };
-        
+
         let formatter = ExplainFormatter::new(config);
-        let output = formatter.format_logical_plan(&dml_plan, &chryso_metadata::type_inference::SimpleTypeInferencer);
-        
+        let output = formatter.format_logical_plan(
+            &dml_plan,
+            &chryso_metadata::type_inference::SimpleTypeInferencer,
+        );
+
         // Verify output contains truncated DML
         assert!(output.contains("LogicalDml"));
         assert!(output.contains("INSERT INTO"));
-        
+
         // Verify safe truncation (should end with ...)
-        let dml_line = output.lines()
+        let dml_line = output
+            .lines()
             .find(|line| line.contains("LogicalDml"))
             .unwrap();
-        
+
         // The SQL part should be truncated and end with ...
         assert!(dml_line.contains("..."));
-        
+
         // Verify UTF-8 validity of the entire output
         assert!(std::str::from_utf8(output.as_bytes()).is_ok());
     }
@@ -825,35 +1140,39 @@ mod tests {
     fn test_complex_expression_with_emoji_and_unicode() {
         // Test complex expression formatting with emoji and various Unicode using escape sequences
         use chryso_core::ast::Literal;
-        
+
         let complex_expr = Expr::BinaryOp {
             left: Box::new(Expr::FunctionCall {
                 name: "concat".to_string(),
                 args: vec![
                     Expr::Literal(Literal::String("Hello \u{1f44b} ".to_string())),
                     Expr::Identifier("name".to_string()),
-                    Expr::Literal(Literal::String(" \u{1f30d} \u{6b22}\u{8fce}\u{ff01}".to_string())),
+                    Expr::Literal(Literal::String(
+                        " \u{1f30d} \u{6b22}\u{8fce}\u{ff01}".to_string(),
+                    )),
                 ],
             }),
             op: chryso_core::ast::BinaryOperator::Eq,
-            right: Box::new(Expr::Literal(Literal::String("\u{4f60}\u{597d}\u{4e16}\u{754c} \u{1f389}".to_string()))),
+            right: Box::new(Expr::Literal(Literal::String(
+                "\u{4f60}\u{597d}\u{4e16}\u{754c} \u{1f389}".to_string(),
+            ))),
         };
-        
+
         // Test with very short truncation to force Unicode handling
         let config = ExplainConfig {
             show_types: false,
             show_costs: false,
             show_cardinality: false,
             compact: true,
-            max_expr_length: 15,  // Very short to test Unicode boundaries
+            max_expr_length: 15, // Very short to test Unicode boundaries
         };
-        
+
         let formatter = ExplainFormatter::new(config);
         let formatted = formatter.format_expr(&complex_expr);
-        
+
         // Verify UTF-8 validity
         assert!(std::str::from_utf8(formatted.as_bytes()).is_ok());
-        
+
         // Should be truncated
         assert!(formatted.ends_with("..."));
         assert!(formatted.len() <= 15);
@@ -866,7 +1185,7 @@ mod tests {
         // ├── Filter (left subtree, not last)
         // │   └── Scan (users)
         // └── Scan (orders, right subtree, last)
-        
+
         let left_subtree = LogicalPlan::Filter {
             predicate: Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("u.age".to_string())),
@@ -877,11 +1196,11 @@ mod tests {
                 table: "users".to_string(),
             }),
         };
-        
+
         let right_subtree = LogicalPlan::Scan {
             table: "orders".to_string(),
         };
-        
+
         let join_plan = LogicalPlan::Join {
             join_type: chryso_core::ast::JoinType::Inner,
             left: Box::new(left_subtree),
@@ -892,7 +1211,7 @@ mod tests {
                 right: Box::new(Expr::Identifier("o.user_id".to_string())),
             },
         };
-        
+
         let config = ExplainConfig {
             show_types: false,
             show_costs: false,
@@ -900,47 +1219,59 @@ mod tests {
             compact: false,
             max_expr_length: 80,
         };
-        
+
         let formatter = ExplainFormatter::new(config);
-        let output = formatter.format_logical_plan(&join_plan, &chryso_metadata::type_inference::SimpleTypeInferencer);
-        
+        let output = formatter.format_logical_plan(
+            &join_plan,
+            &chryso_metadata::type_inference::SimpleTypeInferencer,
+        );
+
         // Verify tree structure correctness
         assert!(output.contains("LogicalJoin"));
         assert!(output.contains("LogicalFilter"));
         assert!(output.contains("LogicalScan: table=users"));
         assert!(output.contains("LogicalScan: table=orders"));
-        
+
         // Key test: verify │ connection line exists on left subtree path
         // Expected structure:
         // LogicalJoin
         // └── LogicalFilter
         //     └── LogicalScan: table=users
         // └── LogicalScan: table=orders
-        
+
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Find Filter line (should be direct child of Join)
-        let filter_line_idx = lines.iter().position(|line| line.contains("LogicalFilter")).unwrap();
+        let filter_line_idx = lines
+            .iter()
+            .position(|line| line.contains("LogicalFilter"))
+            .unwrap();
         let filter_line = lines[filter_line_idx];
-        
+
         // Find users scan line (child of Filter)
-        let users_scan_line_idx = lines.iter().position(|line| line.contains("users")).unwrap();
+        let users_scan_line_idx = lines
+            .iter()
+            .position(|line| line.contains("users"))
+            .unwrap();
         let users_scan_line = lines[users_scan_line_idx];
-        
+
         // Verify connection lines
         // Filter line should start with ├── (it's the first child of Join, not last)
         assert!(filter_line.starts_with("├── "));
-        
+
         // users scan line should start with │   └── (it's the only child of Filter, with proper indentation)
         assert!(users_scan_line.starts_with("│   └── "));
-        
+
         // Verify depth consistency
         assert!(users_scan_line_idx > filter_line_idx);
-        
+
         // Verify orders scan line (right child of Join, last one)
-        let orders_scan_line_idx = lines.iter().position(|line| line.contains("orders")).unwrap();
+        let orders_scan_line_idx = lines
+            .iter()
+            .position(|line| line.contains("orders"))
+            .unwrap();
         let orders_scan_line = lines[orders_scan_line_idx];
-        
+
         // orders line should start with └── (it's the last child of Join)
         assert!(orders_scan_line.starts_with("└── "));
     }
