@@ -33,6 +33,10 @@ impl CardinalityEstimator for NaiveEstimator {
     }
 }
 
+pub struct ExplainFormatter {
+    config: ExplainConfig,
+}
+
 #[derive(Clone)]
 pub struct ExplainConfig {
     pub show_types: bool,
@@ -52,66 +56,6 @@ impl Default for ExplainConfig {
             max_expr_length: 80,
         }
     }
-}
-
-impl ExplainFormatter {
-    fn estimate_physical_cardinality(
-        &self,
-        plan: &PhysicalPlan,
-        estimator: &dyn CardinalityEstimator,
-        stats: &chryso_metadata::StatsCache,
-    ) -> f64 {
-        // Convert physical plan to logical plan for estimation (simplified mapping)
-        // This is a basic implementation - in a real system, you'd have more sophisticated mapping
-        match plan {
-            PhysicalPlan::TableScan { table } => {
-                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats)
-            }
-            PhysicalPlan::IndexScan { table, .. } => {
-                // Index scans typically return fewer rows
-                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats) * 0.1
-            }
-            PhysicalPlan::Filter { input, .. } => {
-                // Use the input's cardinality with a filter factor
-                let input_estimate = self.estimate_physical_cardinality(input, estimator, stats);
-                input_estimate * 0.25
-            }
-            PhysicalPlan::Join { left, right, .. } => {
-                let left_estimate = self.estimate_physical_cardinality(left, estimator, stats);
-                let right_estimate = self.estimate_physical_cardinality(right, estimator, stats);
-                left_estimate * right_estimate * 0.1
-            }
-            PhysicalPlan::Aggregate { input, .. } => {
-                let input_estimate = self.estimate_physical_cardinality(input, estimator, stats);
-                input_estimate * 0.1
-            }
-            PhysicalPlan::Limit { limit, .. } => {
-                limit.unwrap_or(100) as f64
-            }
-            PhysicalPlan::TopN { limit, .. } => {
-                *limit as f64
-            }
-            PhysicalPlan::Distinct { input } => {
-                let input_estimate = self.estimate_physical_cardinality(input, estimator, stats);
-                input_estimate * 0.1
-            }
-            _ => {
-                // For other nodes, recursively get input estimate
-                match plan {
-                    PhysicalPlan::Derived { input, .. } |
-                    PhysicalPlan::Projection { input, .. } |
-                    PhysicalPlan::Sort { input, .. } => {
-                        self.estimate_physical_cardinality(input, estimator, stats)
-                    }
-                    _ => 1000.0, // Default estimate
-                }
-            }
-        }
-    }
-}
-
-pub struct ExplainFormatter {
-    config: ExplainConfig,
 }
 
 impl ExplainFormatter {
@@ -165,6 +109,46 @@ impl ExplainFormatter {
         let estimator = NaiveEstimator;
         self.format_physical_node(plan, 0, cost_model, Some((&estimator, stats)), &mut output, true, "");
         output
+    }
+
+    fn estimate_physical_cardinality(
+        &self,
+        plan: &PhysicalPlan,
+        estimator: &dyn CardinalityEstimator,
+        stats: &chryso_metadata::StatsCache,
+    ) -> f64 {
+        // Convert physical plan to logical plan for estimation (simplified mapping).
+        // This is a basic implementation - in a real system, you'd have more sophisticated mapping.
+        match plan {
+            PhysicalPlan::TableScan { table } => {
+                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats)
+            }
+            PhysicalPlan::IndexScan { table, .. } => {
+                estimator.estimate(&LogicalPlan::Scan { table: table.clone() }, stats) * 0.1
+            }
+            PhysicalPlan::Dml { .. } => 1.0,
+            PhysicalPlan::Derived { input, .. }
+            | PhysicalPlan::Projection { input, .. }
+            | PhysicalPlan::Sort { input, .. } => {
+                self.estimate_physical_cardinality(input, estimator, stats)
+            }
+            PhysicalPlan::Filter { input, .. } => {
+                self.estimate_physical_cardinality(input, estimator, stats) * 0.25
+            }
+            PhysicalPlan::Join { left, right, .. } => {
+                let left_estimate = self.estimate_physical_cardinality(left, estimator, stats);
+                let right_estimate = self.estimate_physical_cardinality(right, estimator, stats);
+                left_estimate * right_estimate * 0.1
+            }
+            PhysicalPlan::Aggregate { input, .. } => {
+                self.estimate_physical_cardinality(input, estimator, stats) * 0.1
+            }
+            PhysicalPlan::Distinct { input } => {
+                self.estimate_physical_cardinality(input, estimator, stats) * 0.1
+            }
+            PhysicalPlan::Limit { limit, .. } => limit.unwrap_or(100) as f64,
+            PhysicalPlan::TopN { limit, .. } => *limit as f64,
+        }
     }
 
     fn format_logical_node(
