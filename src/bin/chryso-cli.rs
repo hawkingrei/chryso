@@ -455,6 +455,9 @@ struct PipelineRunner {
 }
 
 impl PipelineRunner {
+    const BRIEF_EXPLAIN_MAX_EXPR_LENGTH: usize = 60;
+    const VERBOSE_EXPLAIN_MAX_EXPR_LENGTH: usize = 80;
+
     fn new() -> Self {
         let adapter = DuckDbAdapter::try_new()
             .map(Adapter::Duck)
@@ -494,7 +497,11 @@ impl PipelineRunner {
                     show_costs: true,
                     show_cardinality: state.explain_verbose,  // Only show cardinality in verbose mode
                     compact: !state.explain_verbose,          // Use compact format unless verbose
-                    max_expr_length: if state.explain_verbose { 80 } else { 60 },
+                    max_expr_length: if state.explain_verbose {
+                        Self::VERBOSE_EXPLAIN_MAX_EXPR_LENGTH
+                    } else {
+                        Self::BRIEF_EXPLAIN_MAX_EXPR_LENGTH
+                    },
                 };
                 let formatter = ExplainFormatter::new(config);
                 let logical_output = if state.explain_verbose {

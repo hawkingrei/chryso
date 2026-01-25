@@ -72,7 +72,7 @@ Filter: predicate=id = 1, cost=1.00
 ```
 === Logical Plan ===
 LogicalLimit: limit=Some(10)
-└── LogicalSort: order_by=[[count(*) desc]]
+└── LogicalSort: order_by=[count(*) desc]
     └── LogicalProject: expressions=[u.name, count(*)], types=[Unknown, Int]
         └── LogicalAggregate: group_by=[[u.name]], aggregates=[[u.name, count(*)]]
             └── LogicalFilter: predicate=u.age > 18, type=Bool

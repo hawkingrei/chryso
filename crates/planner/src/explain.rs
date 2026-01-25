@@ -486,32 +486,19 @@ impl ExplainFormatter {
     fn format_expr_list(&self, exprs: &[Expr]) -> String {
         if exprs.is_empty() {
             "[]".to_string()
-        } else if exprs.len() <= 3 || self.config.compact {
-            let expr_strs: Vec<String> = exprs.iter().map(|e| self.format_expr(e)).collect();
-            format!("[{}]", expr_strs.join(", "))
         } else {
             let expr_strs: Vec<String> = exprs.iter().map(|e| self.format_expr(e)).collect();
-            format!("[{}...] ({} items)", expr_strs[..3].join(", "), exprs.len())
+            if exprs.len() <= 3 || self.config.compact {
+                format!("[{}]", expr_strs.join(", "))
+            } else {
+                format!("[{}...] ({} items)", expr_strs[..3].join(", "), exprs.len())
+            }
         }
     }
 
     fn format_order_by_list(&self, order_by: &[chryso_core::ast::OrderByExpr]) -> String {
         if order_by.is_empty() {
             "[]".to_string()
-        } else if order_by.len() <= 2 || self.config.compact {
-            let items: Vec<String> = order_by.iter().map(|item| {
-                let dir = if item.asc { "asc" } else { "desc" };
-                let mut rendered = format!("{} {}", self.format_expr(&item.expr), dir);
-                if let Some(nulls_first) = item.nulls_first {
-                    if nulls_first {
-                        rendered.push_str(" nulls first");
-                    } else {
-                        rendered.push_str(" nulls last");
-                    }
-                }
-                rendered
-            }).collect();
-            format!("[{}]", items.join(", "))
         } else {
             let items: Vec<String> = order_by.iter().map(|item| {
                 let dir = if item.asc { "asc" } else { "desc" };
@@ -525,7 +512,11 @@ impl ExplainFormatter {
                 }
                 rendered
             }).collect();
-            format!("[{}...] ({} items)", items[..2].join(", "), order_by.len())
+            if order_by.len() <= 2 || self.config.compact {
+                format!("[{}]", items.join(", "))
+            } else {
+                format!("[{}...] ({} items)", items[..2].join(", "), order_by.len())
+            }
         }
     }
 }
