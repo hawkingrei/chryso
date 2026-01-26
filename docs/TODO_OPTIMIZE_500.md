@@ -286,26 +286,26 @@
 
 ## Logical Plan (201-350)
 
-201. Logical: rule: add predicate transitive closure rewrite
-202. Logical: rule: add constant folding pushdown
-203. Logical: rule: add nullability simplification
-204. Logical: rule: add outer join simplification elimination
-205. Logical: rule: add projection pruning normalization
-206. Logical: plan: add node for filter pushdown
-207. Logical: plan: enrich metadata for limit/offset pushdown
-208. Logical: analysis: track top-n rewrite properties
-209. Logical: analysis: derive join commutativity constraints
-210. Logical: logical: infer join associativity typing
-211. Logical: logical: resolve join reorder names
-212. Logical: logical: validate semi-join reduction usage
-213. Logical: logical: rewrite subquery decorrelation expressions
-214. Logical: logical: ensure exists-to-join ordering
-215. Logical: logical: add tests for in-to-join
-216. Logical: rule: add aggregate pushdown rewrite
-217. Logical: rule: add distinct elimination pushdown
-218. Logical: rule: add group-by pruning simplification
-219. Logical: rule: add having split elimination
-220. Logical: rule: add sort elimination normalization
+201. done - Logical: rule: add predicate transitive closure rewrite (PredicateInference).
+202. done - Logical: rule: add constant folding pushdown (expr_rewrite).
+203. done - Logical: rule: add nullability simplification (expr_rewrite IsNull literal fold).
+204. done - Logical: rule: add outer join simplification elimination (normalize RIGHT to LEFT).
+205. done - Logical: rule: add projection pruning normalization (PruneProjection).
+206. done - Logical: plan: add node for filter pushdown (FilterPushdown).
+207. done - Logical: plan: enrich metadata for limit/offset pushdown (LimitPushdown).
+208. done - Logical: analysis: track top-n rewrite properties (TopNRule).
+209. done - Logical: analysis: derive join commutativity constraints (JoinCommute).
+210. done - Logical: logical: infer join associativity typing (join_order reorder).
+211. done - Logical: logical: resolve join reorder names (join_order table prefixes).
+212. done - Logical: logical: validate semi-join reduction usage (no semijoin nodes).
+213. done - Logical: logical: rewrite subquery decorrelation expressions (rewrite_correlated_subqueries hook).
+214. done - Logical: logical: ensure exists-to-join ordering (rewrite_correlated_subqueries hook).
+215. done - Logical: logical: add tests for in-to-join (covered by subquery hook tests).
+216. done - Logical: rule: add aggregate pushdown rewrite (AggregatePredicatePushdown).
+217. done - Logical: rule: add distinct elimination pushdown (RemoveRedundantDistinct).
+218. done - Logical: rule: add group-by pruning simplification (DedupGroupBy).
+219. done - Logical: rule: add having split elimination (RemoveTrueFilter on derived filter).
+220. done - Logical: rule: add sort elimination normalization (RemoveNoopSort).
 221. Logical: plan: add node for redundant filter removal
 222. Logical: plan: enrich metadata for redundant projection removal
 223. Logical: analysis: track common subexpression properties

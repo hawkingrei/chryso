@@ -50,7 +50,11 @@ impl Default for RuleSet {
             .with_rule(FilterOrDedup)
             .with_rule(NormalizePredicates)
             .with_rule(JoinCommute)
+            .with_rule(NormalizeOuterJoin)
             .with_rule(AggregatePredicatePushdown)
+            .with_rule(DedupGroupBy)
+            .with_rule(RemoveRedundantDistinct)
+            .with_rule(RemoveNoopSort)
             .with_rule(LimitPushdown)
             .with_rule(TopNRule)
     }
@@ -595,6 +599,35 @@ impl Rule for JoinCommute {
     }
 }
 
+pub struct NormalizeOuterJoin;
+
+impl Rule for NormalizeOuterJoin {
+    fn name(&self) -> &str {
+        "normalize_outer_join"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Join {
+            join_type,
+            left,
+            right,
+            on,
+        } = plan
+        else {
+            return Vec::new();
+        };
+        if !matches!(join_type, chryso_core::ast::JoinType::Right) {
+            return Vec::new();
+        }
+        vec![LogicalPlan::Join {
+            join_type: chryso_core::ast::JoinType::Left,
+            left: right.clone(),
+            right: left.clone(),
+            on: on.clone(),
+        }]
+    }
+}
+
 pub struct FilterOrDedup;
 
 impl Rule for FilterOrDedup {
@@ -664,6 +697,79 @@ impl Rule for LimitPushdown {
     }
 }
 
+pub struct DedupGroupBy;
+
+impl Rule for DedupGroupBy {
+    fn name(&self) -> &str {
+        "dedup_group_by"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Aggregate {
+            group_exprs,
+            aggr_exprs,
+            input,
+        } = plan
+        else {
+            return Vec::new();
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for expr in group_exprs {
+            let key = expr.to_sql();
+            if seen.insert(key) {
+                deduped.push(expr.clone());
+            }
+        }
+        if deduped.len() == group_exprs.len() {
+            return Vec::new();
+        }
+        vec![LogicalPlan::Aggregate {
+            group_exprs: deduped,
+            aggr_exprs: aggr_exprs.clone(),
+            input: input.clone(),
+        }]
+    }
+}
+
+pub struct RemoveRedundantDistinct;
+
+impl Rule for RemoveRedundantDistinct {
+    fn name(&self) -> &str {
+        "remove_redundant_distinct"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Distinct { input } = plan else {
+            return Vec::new();
+        };
+        let LogicalPlan::Distinct { input: inner } = input.as_ref() else {
+            return Vec::new();
+        };
+        vec![LogicalPlan::Distinct {
+            input: inner.clone(),
+        }]
+    }
+}
+
+pub struct RemoveNoopSort;
+
+impl Rule for RemoveNoopSort {
+    fn name(&self) -> &str {
+        "remove_noop_sort"
+    }
+
+    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let LogicalPlan::Sort { order_by, input } = plan else {
+            return Vec::new();
+        };
+        if !order_by.is_empty() {
+            return Vec::new();
+        }
+        vec![*input.clone()]
+    }
+}
+
 pub struct TopNRule;
 
 impl Rule for TopNRule {
@@ -694,8 +800,9 @@ impl Rule for TopNRule {
 #[cfg(test)]
 mod tests {
     use super::{
-        FilterJoinPushdown, FilterOrDedup, FilterPushdown, JoinPredicatePushdown, LimitPushdown,
-        MergeFilters, MergeProjections, NormalizePredicates, PredicateInference, PruneProjection,
+        DedupGroupBy, FilterJoinPushdown, FilterOrDedup, FilterPushdown, JoinPredicatePushdown,
+        LimitPushdown, MergeFilters, MergeProjections, NormalizeOuterJoin, NormalizePredicates,
+        PredicateInference, PruneProjection, RemoveNoopSort, RemoveRedundantDistinct,
         RemoveTrueFilter, Rule, TopNRule,
     };
     use crate::utils::split_conjuncts;
@@ -869,6 +976,89 @@ mod tests {
         let rule = TopNRule;
         let results = rule.apply(&plan);
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn normalize_outer_join_swaps_right_join() {
+        let plan = LogicalPlan::Join {
+            join_type: chryso_core::ast::JoinType::Right,
+            left: Box::new(LogicalPlan::Scan {
+                table: "left".to_string(),
+            }),
+            right: Box::new(LogicalPlan::Scan {
+                table: "right".to_string(),
+            }),
+            on: Expr::Literal(chryso_core::ast::Literal::Bool(true)),
+        };
+        let rule = NormalizeOuterJoin;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Join {
+            join_type,
+            left,
+            right,
+            ..
+        } = &results[0]
+        else {
+            panic!("expected join");
+        };
+        assert!(matches!(join_type, chryso_core::ast::JoinType::Left));
+        assert!(matches!(left.as_ref(), LogicalPlan::Scan { table } if table == "right"));
+        assert!(matches!(right.as_ref(), LogicalPlan::Scan { table } if table == "left"));
+    }
+
+    #[test]
+    fn dedup_group_by_removes_duplicates() {
+        let plan = LogicalPlan::Aggregate {
+            group_exprs: vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Identifier("a".to_string()),
+                Expr::Identifier("b".to_string()),
+            ],
+            aggr_exprs: vec![Expr::Identifier("c".to_string())],
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let rule = DedupGroupBy;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Aggregate { group_exprs, .. } = &results[0] else {
+            panic!("expected aggregate");
+        };
+        assert_eq!(group_exprs.len(), 2);
+    }
+
+    #[test]
+    fn remove_redundant_distinct_flattens_nested() {
+        let plan = LogicalPlan::Distinct {
+            input: Box::new(LogicalPlan::Distinct {
+                input: Box::new(LogicalPlan::Scan {
+                    table: "t".to_string(),
+                }),
+            }),
+        };
+        let rule = RemoveRedundantDistinct;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        let LogicalPlan::Distinct { input } = &results[0] else {
+            panic!("expected distinct");
+        };
+        assert!(matches!(input.as_ref(), LogicalPlan::Scan { .. }));
+    }
+
+    #[test]
+    fn remove_noop_sort_eliminates_empty_order_by() {
+        let plan = LogicalPlan::Sort {
+            order_by: Vec::new(),
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let rule = RemoveNoopSort;
+        let results = rule.apply(&plan);
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0], LogicalPlan::Scan { .. }));
     }
 
     #[test]

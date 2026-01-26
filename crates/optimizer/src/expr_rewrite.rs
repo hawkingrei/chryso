@@ -134,10 +134,20 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
             let right = rewrite_expr(right);
             rewrite_binary(left, *op, right)
         }
-        Expr::IsNull { expr, negated } => Expr::IsNull {
-            expr: Box::new(rewrite_expr(expr)),
-            negated: *negated,
-        },
+        Expr::IsNull { expr, negated } => {
+            let inner = rewrite_expr(expr);
+            match inner {
+                Expr::Literal(Literal::String(_))
+                | Expr::Literal(Literal::Number(_))
+                | Expr::Literal(Literal::Bool(_)) => {
+                    Expr::Literal(Literal::Bool(*negated))
+                }
+                _ => Expr::IsNull {
+                    expr: Box::new(inner),
+                    negated: *negated,
+                },
+            }
+        }
         Expr::FunctionCall { name, args } => Expr::FunctionCall {
             name: name.clone(),
             args: args.iter().map(rewrite_expr).collect(),
