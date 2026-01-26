@@ -11,7 +11,14 @@ pub mod validate;
 
 pub use cost::{Cost, CostModel};
 pub use explain::{
-    ExplainConfig, ExplainFormatter, format_simple_logical_plan, format_simple_physical_plan,
+    CardinalityEstimator,
+    ExplainConfig,
+    ExplainFormatter,
+    NaiveEstimator,
+    format_logical_plan_with_stats,
+    format_physical_plan_with_stats,
+    format_simple_logical_plan,
+    format_simple_physical_plan,
 };
 
 #[derive(Debug, Clone)]

@@ -215,7 +215,7 @@ impl ExplainFormatter {
                 ));
             }
             LogicalPlan::Dml { sql } => {
-                let sql_preview = self.safe_truncate(sql, 50);
+                let sql_preview = self.safe_truncate(sql, self.config.max_expr_length);
                 output.push_str(&format!(
                     "{}LogicalDml: sql={}{}\n",
                     node_prefix, sql_preview, cardinality_str
@@ -478,7 +478,7 @@ impl ExplainFormatter {
                 ));
             }
             PhysicalPlan::Dml { sql } => {
-                let sql_preview = self.safe_truncate(sql, 50);
+                let sql_preview = self.safe_truncate(sql, self.config.max_expr_length);
                 output.push_str(&format!(
                     "{}Dml: sql={}{}{}\n",
                     node_prefix, sql_preview, cost_str, cardinality_str
