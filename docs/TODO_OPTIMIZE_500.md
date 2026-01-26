@@ -13,11 +13,11 @@
 504. Optimizer: add deterministic plan selection tests with fixed stats (no randomness).
 505. Optimizer: add cost regression tests that compare relative ordering of candidate plans.
 506. Optimizer: add plan pattern assertions (e.g., hash join vs nested loop) for key TPCH queries.
-507. Optimizer: add a trace output format that includes alternative plans + costs for debugging.
-508. Optimizer: expose a CLI command to dump memo groups and best plan per group.
-509. Optimizer: add a "cost tuning" harness that runs TPCH queries and logs plan costs.
-510. Optimizer: add a local calibration script to adjust coefficients and re-run regression suite.
-511. Optimizer: add config knobs to disable/enable specific rules for tuning experiments.
+507. Optimizer: add a trace output format that includes alternative plans + costs for debugging. (done)
+508. Optimizer: expose a CLI command to dump memo groups and best plan per group. (done)
+509. Optimizer: add a "cost tuning" harness that runs TPCH queries and logs plan costs. (done)
+510. Optimizer: add a local calibration script to adjust coefficients and re-run regression suite. (done)
+511. Optimizer: add config knobs to disable/enable specific rules for tuning experiments. (done)
 512. Optimizer: add rule impact reporting (plan diff + cost delta).
 513. Optimizer: add a seedable evaluation mode to ensure repeatability.
 514. Optimizer: add a "plan baseline" file format for CI verification.
@@ -42,7 +42,7 @@
 533. Optimizer: add a "cost sanity" test to compare trivial queries.
 534. Optimizer: add an API to inject synthetic stats for unit tests.
 535. Optimizer: add a "memo explosion" guard with threshold logging.
-536. Optimizer: add a "plan search budget" config (max groups, max rewrites).
+536. Optimizer: add a "plan search budget" config (max groups, max rewrites). (done)
 537. Optimizer: add rule application metrics (count, time).
 538. Optimizer: add a "cost cache" for repeated cost evaluation.
 539. Optimizer: add a "plan cache" for equivalent logical plans.

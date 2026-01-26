@@ -22,8 +22,20 @@ fn main() {
     let mut runner = PipelineRunner::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
-        let sql = args.join(" ");
-        if let Err(err) = execute_non_interactive(&sql, &mut runner) {
+        let mut dump_memo = false;
+        let mut memo_best_only = false;
+        let mut sql_parts = Vec::new();
+        for arg in args {
+            match arg.as_str() {
+                "--dump-memo" => dump_memo = true,
+                "--memo-best-only" => memo_best_only = true,
+                _ => sql_parts.push(arg),
+            }
+        }
+        let sql = sql_parts.join(" ");
+        if let Err(err) =
+            execute_non_interactive_with_memo(&sql, &mut runner, dump_memo, memo_best_only)
+        {
             eprintln!("error: {err}");
         }
         return;
@@ -46,14 +58,33 @@ fn main() {
 }
 
 fn execute_non_interactive(sql: &str, runner: &mut PipelineRunner) -> chryso::ChrysoResult<()> {
+    execute_non_interactive_with_memo(sql, runner, false, false)
+}
+
+fn execute_non_interactive_with_memo(
+    sql: &str,
+    runner: &mut PipelineRunner,
+    dump_memo: bool,
+    memo_best_only: bool,
+) -> chryso::ChrysoResult<()> {
     let (statements, tail) = split_sql_with_tail(sql);
     for stmt in statements {
-        for line in runner.execute_line(&stmt)? {
+        let lines = if dump_memo {
+            runner.execute_line_with_memo(&stmt, memo_best_only)?
+        } else {
+            runner.execute_line(&stmt)?
+        };
+        for line in lines {
             println!("{line}");
         }
     }
     if !tail.trim().is_empty() {
-        for line in runner.execute_line(&tail)? {
+        let lines = if dump_memo {
+            runner.execute_line_with_memo(&tail, memo_best_only)?
+        } else {
+            runner.execute_line(&tail)?
+        };
+        for line in lines {
             println!("{line}");
         }
     }
@@ -553,6 +584,32 @@ impl PipelineRunner {
             output.push(format!("time_ms={elapsed}"));
         }
         Ok(output)
+    }
+
+    fn execute_line_with_memo(
+        &mut self,
+        sql: &str,
+        best_only: bool,
+    ) -> chryso::ChrysoResult<Vec<String>> {
+        let statement = self.parser.parse(sql)?;
+        let logical = PlanBuilder::build(statement)?;
+        let (physical, memo) = self
+            .optimizer
+            .optimize_with_memo_trace(&logical, &mut self.stats);
+        let trace = if best_only {
+            memo.format_best_only()
+        } else {
+            memo.format_full()
+        };
+        let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
+        let physical_output = physical.explain_costed(0, &cost_model);
+        let mut lines = Vec::new();
+        lines.extend(trace.lines().map(|line| line.to_string()));
+        if !physical_output.is_empty() {
+            lines.push(String::new());
+            lines.extend(physical_output.lines().map(|line| line.to_string()));
+        }
+        Ok(lines)
     }
 }
 

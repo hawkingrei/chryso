@@ -439,6 +439,7 @@ version = "0.0.1"
 dependencies = [
  "chryso-core",
  "chryso-metadata",
+ "chryso-parser",
  "chryso-planner",
 ]
 
