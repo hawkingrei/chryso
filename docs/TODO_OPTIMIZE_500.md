@@ -83,26 +83,26 @@
 
 ## Parser (1-200)
 
-1. Parser: lexer: add token for CASE
-2. Parser: dialect: support CAST keyword parsing (done)
-3. Parser: expr: parse ILIKE operator precedence
-4. Parser: expr: parse IS NULL expression form
-5. Parser: literal: parse IS NOT NULL literal
-6. Parser: identifier: support BETWEEN quoting rules
-7. Parser: statement: parse NOT BETWEEN statement variant
-8. Parser: select: support IN list clause
-9. Parser: join: support NOT IN list join syntax
-10. Parser: function: parse EXISTS function call
-11. Parser: window: parse ANY/ALL window clause
-12. Parser: predicate: normalize DISTINCT ON in parser
-13. Parser: error: improve QUALIFY diagnostic
-14. Parser: AST: add node for WITH CTE
-15. Parser: AST: normalize RECURSIVE CTE during parse
-16. Parser: parser: enable UNION feature flag
-17. Parser: parser: add tests for UNION ALL
-18. Parser: parser: improve recovery for EXCEPT
-19. Parser: parser: support INTERSECT hints
-20. Parser: parser: handle WINDOW frame comments
+1. done - Parser: lexer: add token for CASE
+2. done - Parser: dialect: support CAST keyword parsing
+3. done - Parser: expr: parse ILIKE operator precedence
+4. done - Parser: expr: parse IS NULL expression form
+5. done - Parser: literal: parse IS NOT NULL literal
+6. done - Parser: identifier: support BETWEEN quoting rules
+7. done - Parser: statement: parse NOT BETWEEN statement variant
+8. done - Parser: select: support IN list clause
+9. done - Parser: join: support NOT IN list join syntax
+10. done - Parser: function: parse EXISTS function call
+11. done - Parser: window: parse ANY/ALL window clause
+12. done - Parser: predicate: normalize DISTINCT ON in parser
+13. done - Parser: error: improve QUALIFY diagnostic
+14. done - Parser: AST: add node for WITH CTE
+15. done - Parser: AST: normalize RECURSIVE CTE during parse
+16. done - Parser: parser: enable UNION feature flag
+17. done - Parser: parser: add tests for UNION ALL
+18. done - Parser: parser: improve recovery for EXCEPT
+19. done - Parser: parser: support INTERSECT hints
+20. done - Parser: parser: handle WINDOW frame comments
 21. Parser: lexer: add token for ROWS
 22. Parser: dialect: support RANGE keyword parsing
 23. Parser: expr: parse GROUPS operator precedence

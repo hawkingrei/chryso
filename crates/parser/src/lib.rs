@@ -92,7 +92,9 @@ enum Keyword {
     Delete,
     Over,
     Partition,
+    Qualify,
     In,
+    Any,
     From,
     Where,
     And,
@@ -318,7 +320,12 @@ impl Parser {
             } else {
                 break;
             };
-            self.expect_keyword(Keyword::Select)?;
+            if !self.consume_keyword(Keyword::Select) {
+                return Err(ChrysoError::new(format!(
+                    "{} expects SELECT",
+                    set_op_label(op)
+                )));
+            }
             let right = self.parse_select()?;
             current = Statement::SetOp {
                 left: Box::new(current),
@@ -580,6 +587,9 @@ impl Parser {
         } else {
             Vec::new()
         };
+        if self.consume_keyword(Keyword::Qualify) {
+            return Err(ChrysoError::new("QUALIFY is not supported"));
+        }
         let limit = if self.consume_keyword(Keyword::Limit) {
             Some(self.parse_limit_value()?)
         } else {
@@ -1008,6 +1018,37 @@ impl Parser {
             let Some(op) = op else {
                 break;
             };
+            let quantifier = if self.consume_keyword(Keyword::Any) {
+                Some("any")
+            } else if self.consume_keyword(Keyword::All) {
+                Some("all")
+            } else {
+                None
+            };
+            if let Some(quantifier) = quantifier {
+                self.expect_token(Token::LParen)?;
+                let arg = if self.consume_keyword(Keyword::Select) {
+                    let select = self.parse_select()?;
+                    self.expect_token(Token::RParen)?;
+                    Expr::Subquery(Box::new(select))
+                } else {
+                    let list = self.parse_expr_list_in_parens()?;
+                    Expr::FunctionCall {
+                        name: "array".to_string(),
+                        args: list,
+                    }
+                };
+                let rhs = Expr::FunctionCall {
+                    name: quantifier.to_string(),
+                    args: vec![arg],
+                };
+                expr = Expr::BinaryOp {
+                    left: Box::new(expr),
+                    op,
+                    right: Box::new(rhs),
+                };
+                continue;
+            }
             let rhs = self.parse_additive()?;
             expr = Expr::BinaryOp {
                 left: Box::new(expr),
@@ -1631,8 +1672,10 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Analyze => "analyze",
         Keyword::Over => "over",
         Keyword::Partition => "partition",
+        Keyword::Qualify => "qualify",
         Keyword::Exists => "exists",
         Keyword::In => "in",
+        Keyword::Any => "any",
         Keyword::True => "true",
         Keyword::False => "false",
         Keyword::Is => "is",
@@ -1661,6 +1704,17 @@ fn keyword_label(keyword: Keyword) -> &'static str {
     }
 }
 
+fn set_op_label(op: chryso_core::ast::SetOperator) -> &'static str {
+    match op {
+        chryso_core::ast::SetOperator::Union => "UNION",
+        chryso_core::ast::SetOperator::UnionAll => "UNION ALL",
+        chryso_core::ast::SetOperator::Intersect => "INTERSECT",
+        chryso_core::ast::SetOperator::IntersectAll => "INTERSECT ALL",
+        chryso_core::ast::SetOperator::Except => "EXCEPT",
+        chryso_core::ast::SetOperator::ExceptAll => "EXCEPT ALL",
+    }
+}
+
 fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = input.trim().chars().collect();
@@ -1669,6 +1723,34 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
         let c = chars[index];
         if c.is_whitespace() {
             index += 1;
+            continue;
+        }
+        if c == '-' && index + 1 < chars.len() && chars[index + 1] == '-' {
+            index += 2;
+            while index < chars.len() && chars[index] != '\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if c == '/' && index + 1 < chars.len() && chars[index + 1] == '*' {
+            let start = index;
+            let mut closed = false;
+            index += 2;
+            while index + 1 < chars.len() {
+                if chars[index] == '*' && chars[index + 1] == '/' {
+                    index += 2;
+                    closed = true;
+                    break;
+                }
+                index += 1;
+            }
+            if !closed {
+                return Err(ChrysoError::with_span(
+                    "unterminated block comment",
+                    chryso_core::error::Span { start, end: index },
+                )
+                .with_code(chryso_core::error::ErrorCode::ParserError));
+            }
             continue;
         }
         if c == ',' {
@@ -1865,6 +1947,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "delete" => Some(Keyword::Delete),
         "over" => Some(Keyword::Over),
         "partition" => Some(Keyword::Partition),
+        "qualify" => Some(Keyword::Qualify),
         "exists" => Some(Keyword::Exists),
         "from" => Some(Keyword::From),
         "where" => Some(Keyword::Where),
@@ -1896,6 +1979,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "recursive" => Some(Keyword::Recursive),
         "returning" => Some(Keyword::Returning),
         "in" => Some(Keyword::In),
+        "any" => Some(Keyword::Any),
         "true" => Some(Keyword::True),
         "false" => Some(Keyword::False),
         "is" => Some(Keyword::Is),
@@ -3651,6 +3735,80 @@ mod tests {
         };
         assert_eq!(name, "ilike");
         assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_any_all_subquery() {
+        let sql = "select * from users where id = any (select id from t)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { right, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        let Expr::FunctionCall { name, args } = right.as_ref() else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "any");
+        assert!(matches!(args.as_slice(), [Expr::Subquery(_)]));
+
+        let sql = "select * from users where id = all (select id from t)";
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { right, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        let Expr::FunctionCall { name, args } = right.as_ref() else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "all");
+        assert!(matches!(args.as_slice(), [Expr::Subquery(_)]));
+    }
+
+    #[test]
+    fn reject_qualify_clause() {
+        let sql = "select id from users qualify id > 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("qualify should be rejected");
+        assert!(err.to_string().contains("QUALIFY is not supported"));
+    }
+
+    #[test]
+    fn set_op_requires_select() {
+        let sql = "select 1 except";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("except should require select");
+        assert!(err.to_string().contains("EXCEPT expects SELECT"));
+    }
+
+    #[test]
+    fn parse_comments_in_select() {
+        let sql = "select 1 -- comment\n from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.from.is_some());
+
+        let sql = "select /* block comment */ id from users";
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.from.is_some());
     }
 
     #[test]
