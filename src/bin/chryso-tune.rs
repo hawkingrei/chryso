@@ -1,4 +1,5 @@
 use chryso::optimizer::cost::StatsCostModel;
+use chryso::planner::CostModel;
 use chryso::{
     CascadesOptimizer, Dialect, OptimizerConfig, ParserConfig, PlanBuilder, SqlParser,
     metadata::StatsCache, parser::SimpleParser,
