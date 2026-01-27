@@ -208,6 +208,25 @@ mod tests {
         let plan = CascadesOptimizer::new(config).optimize(&logical, &mut StatsCache::new());
         assert!(matches!(plan, PhysicalPlan::TableScan { .. }));
     }
+
+    #[test]
+    fn optimize_with_memo_trace_collects_candidates() {
+        let sql = "select * from t";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let (physical, trace) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_memo_trace(&logical, &mut StatsCache::new());
+        assert!(matches!(physical, PhysicalPlan::TableScan { .. }));
+        assert!(!trace.groups.is_empty());
+        let first = &trace.groups[0];
+        assert!(!first.candidates.is_empty());
+        let formatted = trace.format_best_only();
+        assert!(formatted.contains("group="));
+        assert!(formatted.contains("cost="));
+    }
 }
 
 impl Default for OptimizerConfig {
