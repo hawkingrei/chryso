@@ -19,3 +19,7 @@ path = "../planner"
 [dependencies.chryso-metadata]
 version = "0.0.1"
 path = "../metadata"
+
+[dev-dependencies.chryso-parser]
+version = "0.0.1"
+path = "../parser"

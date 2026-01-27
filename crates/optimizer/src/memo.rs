@@ -1,4 +1,6 @@
 use crate::cost::{Cost, CostModel};
+use crate::physical_rules::PhysicalRuleSet;
+use crate::{MemoTrace, MemoTraceCandidate, MemoTraceGroup, RuleConfig, SearchBudget};
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,21 +39,87 @@ impl Memo {
         best.map(|(_, plan)| plan)
     }
 
-    pub fn explore(&mut self, rules: &crate::rules::RuleSet) {
+    pub fn trace(&self, physical_rules: &PhysicalRuleSet, cost_model: &dyn CostModel) -> MemoTrace {
+        let mut groups = Vec::with_capacity(self.groups.len());
+        for (group_id, group) in self.groups.iter().enumerate() {
+            let mut candidates = Vec::new();
+            for expr in &group.expressions {
+                let MemoOperator::Logical(logical) = &expr.operator else {
+                    continue;
+                };
+                let mut inputs = Vec::new();
+                let mut missing_input = false;
+                for child in &expr.children {
+                    if let Some(best) = self.best_physical(*child, cost_model) {
+                        inputs.push(best);
+                    } else {
+                        missing_input = true;
+                        break;
+                    }
+                }
+                if missing_input {
+                    continue;
+                }
+                for physical in physical_rules.apply_all(logical, &inputs) {
+                    let cost = cost_model.cost(&physical).0;
+                    let plan = physical.explain_costed(0, cost_model);
+                    candidates.push(MemoTraceCandidate { cost, plan });
+                }
+            }
+            candidates.sort_by(|left, right| {
+                left.cost
+                    .partial_cmp(&right.cost)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.plan.cmp(&right.plan))
+            });
+            groups.push(MemoTraceGroup {
+                id: group_id,
+                candidates,
+            });
+        }
+        MemoTrace { groups }
+    }
+
+    pub fn explore(
+        &mut self,
+        rules: &crate::rules::RuleSet,
+        rule_config: &RuleConfig,
+        budget: &SearchBudget,
+    ) {
+        let max_rewrites = budget.max_rewrites.unwrap_or(usize::MAX);
         let mut new_exprs = Vec::new();
+        let mut rewrites = 0usize;
         for group in &self.groups {
             for expr in &group.expressions {
                 if let MemoOperator::Logical(plan) = &expr.operator {
-                    for rewritten in rules.apply_all(plan) {
-                        new_exprs.push(GroupExpr {
-                            operator: MemoOperator::Logical(rewritten),
-                            children: expr.children.clone(),
-                        });
+                    for rule in rules.iter() {
+                        if rewrites >= max_rewrites {
+                            break;
+                        }
+                        if !rule_config.is_enabled(rule.name()) {
+                            continue;
+                        }
+                        for rewritten in rule.apply(plan) {
+                            if rewrites >= max_rewrites {
+                                break;
+                            }
+                            new_exprs.push(GroupExpr {
+                                operator: MemoOperator::Logical(rewritten),
+                                children: expr.children.clone(),
+                            });
+                            rewrites += 1;
+                        }
                     }
                 }
             }
+            if rewrites >= max_rewrites {
+                break;
+            }
         }
         for expr in new_exprs {
+            if self.groups.len() >= budget.max_groups.unwrap_or(usize::MAX) {
+                break;
+            }
             self.groups.push(Group {
                 expressions: vec![expr],
             });
@@ -255,6 +323,8 @@ fn logical_to_physical(logical: &LogicalPlan, memo: &Memo) -> PhysicalPlan {
 #[cfg(test)]
 mod tests {
     use super::Memo;
+    use crate::rules::{RemoveTrueFilter, RuleSet};
+    use crate::{RuleConfig, SearchBudget};
     use chryso_planner::LogicalPlan;
 
     #[test]
@@ -268,5 +338,45 @@ mod tests {
         let mut memo = Memo::new();
         memo.insert(&plan);
         assert!(memo.group_count() >= 2);
+    }
+
+    #[test]
+    fn memo_respects_max_rewrites_budget() {
+        let plan = LogicalPlan::Filter {
+            predicate: chryso_core::ast::Expr::Literal(chryso_core::ast::Literal::Bool(true)),
+            input: Box::new(LogicalPlan::Scan {
+                table: "users".to_string(),
+            }),
+        };
+        let rules = RuleSet::new().with_rule(RemoveTrueFilter);
+        let mut memo = Memo::new();
+        memo.insert(&plan);
+        let initial_groups = memo.group_count();
+        let budget = SearchBudget {
+            max_groups: None,
+            max_rewrites: Some(0),
+        };
+        memo.explore(&rules, &RuleConfig::default(), &budget);
+        assert_eq!(memo.group_count(), initial_groups);
+    }
+
+    #[test]
+    fn memo_respects_max_groups_budget() {
+        let plan = LogicalPlan::Filter {
+            predicate: chryso_core::ast::Expr::Literal(chryso_core::ast::Literal::Bool(true)),
+            input: Box::new(LogicalPlan::Scan {
+                table: "users".to_string(),
+            }),
+        };
+        let rules = RuleSet::new().with_rule(RemoveTrueFilter);
+        let mut memo = Memo::new();
+        memo.insert(&plan);
+        let initial_groups = memo.group_count();
+        let budget = SearchBudget {
+            max_groups: Some(initial_groups),
+            max_rewrites: None,
+        };
+        memo.explore(&rules, &RuleConfig::default(), &budget);
+        assert_eq!(memo.group_count(), initial_groups);
     }
 }

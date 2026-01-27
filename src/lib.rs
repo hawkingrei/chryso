@@ -32,6 +32,7 @@ pub mod serde {
 pub mod sql_format {
     pub use chryso_core::sql_format::*;
 }
+pub mod sql_utils;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;
 
