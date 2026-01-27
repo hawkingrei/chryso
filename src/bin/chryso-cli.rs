@@ -3,6 +3,7 @@ use chryso::planner::{ExplainConfig, ExplainFormatter};
 use chryso::{
     CascadesOptimizer, Dialect, DuckDbAdapter, MockAdapter, OptimizerConfig, ParserConfig,
     PlanBuilder, SqlParser, Statement, metadata::StatsCache, parser::SimpleParser,
+    sql_utils::split_sql_with_tail,
 };
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -69,24 +70,27 @@ fn execute_non_interactive_with_memo(
 ) -> chryso::ChrysoResult<()> {
     let (statements, tail) = split_sql_with_tail(sql);
     for stmt in statements {
-        let lines = if dump_memo {
-            runner.execute_line_with_memo(&stmt, memo_best_only)?
-        } else {
-            runner.execute_line(&stmt)?
-        };
-        for line in lines {
-            println!("{line}");
-        }
+        print_statement_output(&stmt, runner, dump_memo, memo_best_only)?;
     }
     if !tail.trim().is_empty() {
-        let lines = if dump_memo {
-            runner.execute_line_with_memo(&tail, memo_best_only)?
-        } else {
-            runner.execute_line(&tail)?
-        };
-        for line in lines {
-            println!("{line}");
-        }
+        print_statement_output(&tail, runner, dump_memo, memo_best_only)?;
+    }
+    Ok(())
+}
+
+fn print_statement_output(
+    sql: &str,
+    runner: &mut PipelineRunner,
+    dump_memo: bool,
+    memo_best_only: bool,
+) -> chryso::ChrysoResult<()> {
+    let lines = if dump_memo {
+        runner.execute_line_with_memo(sql, memo_best_only)?
+    } else {
+        runner.execute_line(sql)?
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
@@ -680,82 +684,6 @@ fn csv_escape(value: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn split_sql_with_tail(input: &str) -> (Vec<String>, String) {
-    let mut statements = Vec::new();
-    let mut current = String::new();
-    let mut chars = input.chars().peekable();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
-
-    while let Some(ch) = chars.next() {
-        if in_line_comment {
-            if ch == '\n' {
-                in_line_comment = false;
-                current.push(ch);
-            }
-            continue;
-        }
-        if in_block_comment {
-            if ch == '*' && matches!(chars.peek(), Some('/')) {
-                chars.next();
-                in_block_comment = false;
-            }
-            continue;
-        }
-        if !in_single && !in_double {
-            if ch == '-' && matches!(chars.peek(), Some('-')) {
-                chars.next();
-                in_line_comment = true;
-                continue;
-            }
-            if ch == '#' {
-                in_line_comment = true;
-                continue;
-            }
-            if ch == '/' && matches!(chars.peek(), Some('*')) {
-                chars.next();
-                in_block_comment = true;
-                continue;
-            }
-        }
-        if ch == '\'' && !in_double {
-            if in_single && matches!(chars.peek(), Some('\'')) {
-                current.push(ch);
-                current.push('\'');
-                chars.next();
-                continue;
-            }
-            in_single = !in_single;
-            current.push(ch);
-            continue;
-        }
-        if ch == '"' && !in_single {
-            if in_double && matches!(chars.peek(), Some('"')) {
-                current.push(ch);
-                current.push('"');
-                chars.next();
-                continue;
-            }
-            in_double = !in_double;
-            current.push(ch);
-            continue;
-        }
-        if ch == ';' && !in_single && !in_double {
-            let stmt = current.trim();
-            if !stmt.is_empty() {
-                statements.push(stmt.to_string());
-            }
-            current.clear();
-            continue;
-        }
-        current.push(ch);
-    }
-
-    (statements, current.trim().to_string())
 }
 
 fn help_lines() -> Vec<String> {

@@ -2,7 +2,7 @@ use chryso::optimizer::cost::StatsCostModel;
 use chryso::planner::CostModel;
 use chryso::{
     CascadesOptimizer, Dialect, OptimizerConfig, ParserConfig, PlanBuilder, SqlParser,
-    metadata::StatsCache, parser::SimpleParser,
+    metadata::StatsCache, parser::SimpleParser, sql_utils::split_sql_with_tail,
 };
 use std::fs;
 use std::io::{self, Write};
@@ -131,71 +131,4 @@ impl TuneRunner {
         let cost_model = StatsCostModel::new(&self.stats);
         Ok(cost_model.cost(&physical).0)
     }
-}
-
-fn split_sql_with_tail(input: &str) -> (Vec<String>, String) {
-    let mut statements = Vec::new();
-    let mut current = String::new();
-    let mut chars = input.chars().peekable();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
-
-    while let Some(ch) = chars.next() {
-        if in_line_comment {
-            if ch == '\n' {
-                in_line_comment = false;
-            }
-            current.push(ch);
-            continue;
-        }
-        if in_block_comment {
-            if ch == '*' && chars.peek() == Some(&'/') {
-                current.push(ch);
-                current.push('/');
-                chars.next();
-                in_block_comment = false;
-                continue;
-            }
-            current.push(ch);
-            continue;
-        }
-        if !in_single && !in_double {
-            if ch == '-' && chars.peek() == Some(&'-') {
-                current.push(ch);
-                current.push('-');
-                chars.next();
-                in_line_comment = true;
-                continue;
-            }
-            if ch == '/' && chars.peek() == Some(&'*') {
-                current.push(ch);
-                current.push('*');
-                chars.next();
-                in_block_comment = true;
-                continue;
-            }
-        }
-
-        match ch {
-            '\'' if !in_double => {
-                in_single = !in_single;
-                current.push(ch);
-            }
-            '"' if !in_single => {
-                in_double = !in_double;
-                current.push(ch);
-            }
-            ';' if !in_single && !in_double => {
-                let trimmed = current.trim();
-                if !trimmed.is_empty() {
-                    statements.push(trimmed.to_string());
-                }
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-    (statements, current)
 }

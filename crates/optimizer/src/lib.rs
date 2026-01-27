@@ -53,43 +53,44 @@ pub struct MemoTraceCandidate {
 
 impl MemoTrace {
     pub fn format_full(&self) -> String {
-        let mut output = String::new();
-        for group in &self.groups {
-            output.push_str(&format!(
-                "group={} candidates={}\n",
-                group.id,
-                group.candidates.len()
-            ));
-            for candidate in &group.candidates {
-                output.push_str(&format!("  cost={:.3}\n", candidate.cost));
-                for line in candidate.plan.lines() {
-                    output.push_str("    ");
-                    output.push_str(line);
-                    output.push('\n');
-                }
-            }
-        }
-        output
+        format_memo_trace(self, false)
     }
 
     pub fn format_best_only(&self) -> String {
-        let mut output = String::new();
-        for group in &self.groups {
-            output.push_str(&format!(
-                "group={} candidates={}\n",
-                group.id,
-                group.candidates.len()
-            ));
+        format_memo_trace(self, true)
+    }
+}
+
+fn format_memo_trace(trace: &MemoTrace, best_only: bool) -> String {
+    use std::fmt::Write;
+
+    let mut output = String::new();
+    for group in &trace.groups {
+        let _ = writeln!(
+            &mut output,
+            "group={} candidates={}",
+            group.id,
+            group.candidates.len()
+        );
+        if best_only {
             if let Some(best) = group.candidates.first() {
-                output.push_str(&format!("  cost={:.3}\n", best.cost));
-                for line in best.plan.lines() {
-                    output.push_str("    ");
-                    output.push_str(line);
-                    output.push('\n');
-                }
+                write_candidate(&mut output, best);
             }
+            continue;
         }
-        output
+        for candidate in &group.candidates {
+            write_candidate(&mut output, candidate);
+        }
+    }
+    output
+}
+
+fn write_candidate(output: &mut String, candidate: &MemoTraceCandidate) {
+    use std::fmt::Write;
+
+    let _ = writeln!(output, "  cost={:.3}", candidate.cost);
+    for line in candidate.plan.lines() {
+        let _ = writeln!(output, "    {line}");
     }
 }
 
