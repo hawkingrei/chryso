@@ -113,7 +113,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja ccache m4
+          brew install m4
           echo "/opt/homebrew/opt/m4/bin" >> "$GITHUB_PATH"
           python3 - <<'PY'
           from pathlib import Path
@@ -126,9 +126,16 @@ jobs:
               raise SystemExit("OS_CXXFLAGS line not found")
           path.write_text(text.replace(old, new, 1))
           PY
+          export INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps-install"
+          export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
           export OS_CXXFLAGS=""
-          ./ffi/velox/velox/scripts/setup-macos.sh
-          ./ffi/velox/velox/scripts/setup-macos.sh install_glog
+          source ffi/velox/velox/scripts/setup-macos.sh
+          install_build_prerequisites
+          install_velox_deps_from_brew
+          install_faiss_deps
+          install_double_conversion
+          install_glog
+          echo "${INSTALL_PREFIX}/bin" >> "$GITHUB_PATH"
       - name: Save velox deps cache
         if: ${{ always() }}
         uses: actions/cache/save@v4
