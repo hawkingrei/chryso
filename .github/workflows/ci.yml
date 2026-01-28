@@ -68,6 +68,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+    env:
+      CMAKE_PREFIX_PATH: /opt/homebrew/opt/gflags;/opt/homebrew/opt/glog
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
@@ -103,7 +105,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja ccache
+          brew install cmake ninja ccache gflags glog
           ./ffi/velox/velox/scripts/setup-macos.sh
       - name: Build Velox FFI (submodule + Arrow)
         run: |
