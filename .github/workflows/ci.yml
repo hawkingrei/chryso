@@ -104,6 +104,7 @@ jobs:
         run: |
           brew update
           brew install cmake ninja ccache
+          export OS_CXXFLAGS=""
           ./ffi/velox/velox/scripts/setup-macos.sh
           ./ffi/velox/velox/scripts/setup-macos.sh install_glog
       - name: Build Velox FFI (submodule + Arrow)
@@ -116,6 +117,7 @@ jobs:
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
           CMAKE_IGNORE_PREFIX_PATH: /opt/homebrew
+          OS_CXXFLAGS: ""
       - name: Build velox adapter
         env:
           CHRYSO_VELOX_FFI_DIR: ffi/velox/build
