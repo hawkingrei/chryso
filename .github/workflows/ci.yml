@@ -63,7 +63,11 @@ jobs:
         run: cargo test -p chryso-adapter-velox --features velox-ffi
 
   velox-full:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
@@ -73,11 +77,18 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly-2026-01-19
-      - name: Install Velox dependencies
+      - name: Install Velox dependencies (linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build build-essential ccache
           ./ffi/velox/velox/scripts/setup-ubuntu.sh
+      - name: Install Velox dependencies (macos)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja ccache
+          ./ffi/velox/velox/scripts/setup-macos.sh
       - name: Build Velox FFI (submodule + Arrow)
         run: |
           cmake -S ffi/velox -B ffi/velox/build \
@@ -89,8 +100,15 @@ jobs:
         env:
           CHRYSO_VELOX_FFI_DIR: ffi/velox/build
         run: cargo build -p chryso-adapter-velox --features velox-ffi
-      - name: Run velox demo
+      - name: Run velox demo (linux)
+        if: runner.os == 'Linux'
         env:
           CHRYSO_VELOX_FFI_DIR: ffi/velox/build
           LD_LIBRARY_PATH: ffi/velox/build
+        run: cargo run --example velox_demo --features velox
+      - name: Run velox demo (macos)
+        if: runner.os == 'macOS'
+        env:
+          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+          DYLD_LIBRARY_PATH: ffi/velox/build
         run: cargo run --example velox_demo --features velox
