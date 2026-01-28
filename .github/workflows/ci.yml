@@ -105,6 +105,17 @@ jobs:
           brew update
           brew install cmake ninja ccache m4
           echo "/opt/homebrew/opt/m4/bin" >> "$GITHUB_PATH"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("ffi/velox/velox/scripts/setup-macos.sh")
+          text = path.read_text()
+          old = 'OS_CXXFLAGS=" -isystem $(brew --prefix)/include "'
+          new = 'OS_CXXFLAGS=${OS_CXXFLAGS-" -isystem $(brew --prefix)/include "}'
+          if old not in text:
+              raise SystemExit("OS_CXXFLAGS line not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
           export OS_CXXFLAGS=""
           ./ffi/velox/velox/scripts/setup-macos.sh
           ./ffi/velox/velox/scripts/setup-macos.sh install_glog
