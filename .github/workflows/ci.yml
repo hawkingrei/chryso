@@ -134,6 +134,7 @@ jobs:
           install_velox_deps_from_brew
           install_faiss_deps
           install_double_conversion
+          install_arrow
           install_glog
           echo "${INSTALL_PREFIX}/bin" >> "$GITHUB_PATH"
       - name: Save velox deps cache
