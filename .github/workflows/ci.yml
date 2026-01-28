@@ -103,7 +103,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja ccache
+          brew install cmake ninja ccache m4
+          echo "/opt/homebrew/opt/m4/bin" >> "$GITHUB_PATH"
           export OS_CXXFLAGS=""
           ./ffi/velox/velox/scripts/setup-macos.sh
           ./ffi/velox/velox/scripts/setup-macos.sh install_glog
