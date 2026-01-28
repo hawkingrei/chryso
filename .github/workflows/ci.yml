@@ -36,3 +36,61 @@ jobs:
         run: cargo build --examples --features duckdb
       - name: Test (duckdb)
         run: cargo test --features duckdb
+
+  velox-ffi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+          components: rustfmt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build Velox FFI stub (no submodule, no Arrow)
+        run: |
+          cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=OFF -DCHRYSO_VELOX_USE_ARROW=OFF
+          cmake --build ffi/velox/build -j
+      - name: Build velox adapter
+        env:
+          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+        run: cargo build -p chryso-adapter-velox --features velox-ffi
+      - name: Test velox adapter
+        env:
+          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+        run: cargo test -p chryso-adapter-velox --features velox-ffi
+
+  velox-full:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+      - name: Install Velox dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential ccache
+          ./ffi/velox/velox/scripts/setup-ubuntu.sh
+      - name: Build Velox FFI (submodule + Arrow)
+        run: |
+          cmake -S ffi/velox -B ffi/velox/build \
+            -DCHRYSO_VELOX_USE_SUBMODULE=ON \
+            -DCHRYSO_VELOX_USE_ARROW=ON \
+            -DCHRYSO_ARROW_STRICT_VERSION=OFF
+          cmake --build ffi/velox/build -j
+      - name: Build velox adapter
+        env:
+          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+        run: cargo build -p chryso-adapter-velox --features velox-ffi
+      - name: Run velox demo
+        env:
+          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+          LD_LIBRARY_PATH: ffi/velox/build
+        run: cargo run --example velox_demo --features velox
