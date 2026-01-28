@@ -93,6 +93,16 @@ jobs:
           key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-velox-build-
+      - name: Restore velox deps cache
+        id: velox-deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps-install
+            deps-download
+          key: ${{ runner.os }}-velox-deps-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-velox-deps-
       - name: Install Velox dependencies (linux)
         if: runner.os == 'Linux'
         run: |
@@ -119,6 +129,14 @@ jobs:
           export OS_CXXFLAGS=""
           ./ffi/velox/velox/scripts/setup-macos.sh
           ./ffi/velox/velox/scripts/setup-macos.sh install_glog
+      - name: Save velox deps cache
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            deps-install
+            deps-download
+          key: ${{ runner.os }}-velox-deps-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
       - name: Build Velox FFI (submodule + Arrow)
         run: |
           cmake -S ffi/velox -B ffi/velox/build \
