@@ -77,6 +77,22 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly-2026-01-19
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-velox-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-velox-
+      - name: Cache velox build dir
+        uses: actions/cache@v4
+        with:
+          path: ffi/velox/build
+          key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-velox-build-
       - name: Install Velox dependencies (linux)
         if: runner.os == 'Linux'
         run: |
