@@ -2,6 +2,10 @@ pub mod config;
 pub mod adapter {
     pub use chryso_adapter::*;
 }
+#[cfg(feature = "velox")]
+pub mod adapter_velox {
+    pub use chryso_adapter_velox::*;
+}
 pub mod ast {
     pub use chryso_core::ast::*;
 }
@@ -39,6 +43,8 @@ pub mod test_support;
 pub use adapter::{
     AdapterCapabilities, DuckDbAdapter, ExecutorAdapter, MockAdapter, ParamValue, QueryResult,
 };
+#[cfg(feature = "velox")]
+pub use adapter_velox::VeloxAdapter;
 pub use ast::{Expr, Statement};
 pub use error::{ChrysoError, ChrysoResult};
 pub use optimizer::{CascadesOptimizer, OptimizerConfig};

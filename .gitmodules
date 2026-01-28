@@ -1,0 +1,3 @@
+[submodule "ffi/velox/velox"]
+	path = ffi/velox/velox
+	url = https://github.com/facebookincubator/velox.git

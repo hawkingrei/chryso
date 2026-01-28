@@ -1,4 +1,6 @@
 /target
+velox_demo.arrow
+ffi/velox/build/
 .DS_Store
 .idea/
 .vscode/

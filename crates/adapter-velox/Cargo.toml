@@ -1,0 +1,26 @@
+[package]
+name = "chryso-adapter-velox"
+version = "0.0.1"
+edition = "2024"
+description = "Velox adapter for Chryso."
+license = "Apache-2.0"
+repository = "https://github.com/hawkingrei/chryso"
+homepage = "https://github.com/hawkingrei/chryso"
+documentation = "https://docs.rs/chryso-adapter-velox"
+build = "build.rs"
+
+[features]
+default = []
+velox-ffi = []
+
+[dependencies.chryso-adapter]
+version = "0.0.1"
+path = "../adapter"
+
+[dependencies.chryso-core]
+version = "0.0.1"
+path = "../core"
+
+[dependencies.chryso-planner]
+version = "0.0.1"
+path = "../planner"
