@@ -35,15 +35,26 @@ pub fn execute_plan(plan_ir: &str) -> ChrysoResult<QueryResult> {
     use std::ffi::{CStr, CString};
     use std::ptr;
 
+    struct SessionGuard(*mut sys::VxSession);
+
+    impl Drop for SessionGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { sys::vx_session_free(self.0) };
+            }
+        }
+    }
+
     let plan = CString::new(plan_ir).map_err(|err| ChrysoError::new(err.to_string()))?;
     unsafe {
         let session = sys::vx_session_new();
         if session.is_null() {
             return Err(ChrysoError::new("velox session init failed"));
         }
+        let _session_guard = SessionGuard(session);
         let mut out = ptr::null_mut();
         let rc = sys::vx_plan_execute(session, plan.as_ptr(), &mut out);
-        let result = if rc == 0 && !out.is_null() {
+        if rc == 0 && !out.is_null() {
             let payload = CStr::from_ptr(out).to_string_lossy().into_owned();
             sys::vx_string_free(out);
             parse_result(&payload)
@@ -55,9 +66,7 @@ pub fn execute_plan(plan_ir: &str) -> ChrysoResult<QueryResult> {
                 CStr::from_ptr(err).to_string_lossy().into_owned()
             };
             Err(ChrysoError::new(msg))
-        };
-        sys::vx_session_free(session);
-        result
+        }
     }
 }
 
@@ -66,16 +75,27 @@ pub fn execute_plan_arrow(plan_ir: &str) -> ChrysoResult<Vec<u8>> {
     use std::ffi::{CStr, CString};
     use std::ptr;
 
+    struct SessionGuard(*mut sys::VxSession);
+
+    impl Drop for SessionGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { sys::vx_session_free(self.0) };
+            }
+        }
+    }
+
     let plan = CString::new(plan_ir).map_err(|err| ChrysoError::new(err.to_string()))?;
     unsafe {
         let session = sys::vx_session_new();
         if session.is_null() {
             return Err(ChrysoError::new("velox session init failed"));
         }
+        let _session_guard = SessionGuard(session);
         let mut out = ptr::null_mut();
         let mut len: u64 = 0;
         let rc = sys::vx_plan_execute_arrow(session, plan.as_ptr(), &mut out, &mut len);
-        let result = if rc == 0 && !out.is_null() && len > 0 {
+        if rc == 0 && !out.is_null() && len > 0 {
             let slice = std::slice::from_raw_parts(out as *const u8, len as usize);
             let buffer = slice.to_vec();
             sys::vx_bytes_free(out);
@@ -88,9 +108,7 @@ pub fn execute_plan_arrow(plan_ir: &str) -> ChrysoResult<Vec<u8>> {
                 CStr::from_ptr(err).to_string_lossy().into_owned()
             };
             Err(ChrysoError::new(msg))
-        };
-        sys::vx_session_free(session);
-        result
+        }
     }
 }
 
@@ -109,15 +127,12 @@ pub fn execute_plan_arrow(_plan_ir: &str) -> ChrysoResult<Vec<u8>> {
 #[cfg(feature = "velox-ffi")]
 fn parse_result(payload: &str) -> ChrysoResult<QueryResult> {
     let mut lines = payload.lines();
-    let header = lines.next().unwrap_or_default();
-    let columns = if header.is_empty() {
-        Vec::new()
-    } else {
-        header.split('\t').map(|value| value.to_string()).collect()
-    };
-    let mut rows = Vec::new();
-    for line in lines {
-        rows.push(line.split('\t').map(|value| value.to_string()).collect());
-    }
+    let columns = lines
+        .next()
+        .map(|header| header.split('\t').map(String::from).collect())
+        .unwrap_or_default();
+    let rows = lines
+        .map(|line| line.split('\t').map(String::from).collect())
+        .collect();
     Ok(QueryResult { columns, rows })
 }

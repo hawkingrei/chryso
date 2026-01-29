@@ -32,7 +32,7 @@ impl VeloxAdapter {
         let plan_ir = plan::plan_to_ir(plan);
         #[cfg(feature = "velox-ffi")]
         {
-            return ffi::execute_plan_arrow(&plan_ir);
+            ffi::execute_plan_arrow(&plan_ir)
         }
         #[cfg(not(feature = "velox-ffi"))]
         {
@@ -50,7 +50,7 @@ impl ExecutorAdapter for VeloxAdapter {
         let plan_ir = plan::plan_to_ir(plan);
         #[cfg(feature = "velox-ffi")]
         {
-            return ffi::execute_plan(&plan_ir);
+            ffi::execute_plan(&plan_ir)
         }
         #[cfg(not(feature = "velox-ffi"))]
         {
