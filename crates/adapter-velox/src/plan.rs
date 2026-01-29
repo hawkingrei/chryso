@@ -1,5 +1,5 @@
 use chryso_planner::PhysicalPlan;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn plan_to_ir(plan: &PhysicalPlan) -> String {
     plan_to_json(plan).to_string()
@@ -67,10 +67,8 @@ fn plan_to_json(plan: &PhysicalPlan) -> Value {
             aggr_exprs,
             input,
         } => {
-            let group_sql: Vec<String> =
-                group_exprs.iter().map(|expr| expr.to_sql()).collect();
-            let aggr_sql: Vec<String> =
-                aggr_exprs.iter().map(|expr| expr.to_sql()).collect();
+            let group_sql: Vec<String> = group_exprs.iter().map(|expr| expr.to_sql()).collect();
+            let aggr_sql: Vec<String> = aggr_exprs.iter().map(|expr| expr.to_sql()).collect();
             json!({
                 "type": "Aggregate",
                 "group_exprs": group_sql,

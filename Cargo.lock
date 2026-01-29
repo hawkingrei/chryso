@@ -423,6 +423,7 @@ dependencies = [
  "chryso-adapter",
  "chryso-core",
  "chryso-planner",
+ "serde_json",
 ]
 
 [[package]]
