@@ -26,4 +26,4 @@ version = "0.0.1"
 path = "../planner"
 
 [dependencies.serde_json]
-workspace = true
+version = "1"
