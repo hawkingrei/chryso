@@ -32,7 +32,7 @@ members = [
 [features]
 default = []
 duckdb = [ "chryso-adapter/duckdb",]
-velox = [ "chryso-adapter-velox/velox-ffi",]
+velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
 
 [dependencies.chryso-adapter]

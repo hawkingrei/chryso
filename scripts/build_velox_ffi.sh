@@ -16,4 +16,8 @@ cmake -S ffi/velox -B "$build_dir" \
   -DCHRYSO_VELOX_USE_ARROW="$use_arrow" \
   -DCHRYSO_ARROW_STRICT_VERSION="$strict_arrow"
 
-cmake --build "$build_dir" -j
+if [[ -n "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]]; then
+  cmake --build "$build_dir" --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
+else
+  cmake --build "$build_dir" --parallel
+fi

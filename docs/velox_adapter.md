@@ -19,7 +19,6 @@ This document describes how to wire Chryso to Velox using a C ABI bridge.
 From repo root:
 
 ```bash
-git submodule add https://github.com/facebookincubator/velox.git ffi/velox/velox
 git submodule update --init --recursive
 ```
 
@@ -27,7 +26,7 @@ git submodule update --init --recursive
 
 ```bash
 cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=ON
-cmake --build ffi/velox/build -j
+cmake --build ffi/velox/build --parallel
 ```
 
 This builds `libchryso_velox_ffi` which must be discoverable by the Rust build.
@@ -61,8 +60,8 @@ cargo run --example velox_demo --features velox
 Expected output (demo stub):
 
 ```
-["table"]
-["demo_table"]
+[["table"]]
+[["demo_table"]]
 ```
 
 Arrow IPC output is written to `velox_demo.arrow` in the repo root.
@@ -97,8 +96,10 @@ install_name_tool -add_rpath "$(pwd)/ffi/velox/build" target/debug/examples/velo
 VxSession* vx_session_new();
 void vx_session_free(VxSession* session);
 int vx_plan_execute(VxSession* session, const char* plan_json, char** result_out);
+int vx_plan_execute_arrow(VxSession* session, const char* plan_json, unsigned char** data_out, unsigned long long* len_out);
 const char* vx_last_error();
 void vx_string_free(char* value);
+void vx_bytes_free(unsigned char* value);
 ```
 
 ### Return codes
@@ -106,6 +107,8 @@ void vx_string_free(char* value);
 - `0`: success, `result_out` contains a TSV payload (`header\nrow1\nrow2...`).
 - `1`: invalid argument.
 - `2`: execution error; `vx_last_error()` provides a message.
+
+Arrow IPC output (`vx_plan_execute_arrow`) returns a stream formatted payload. The caller owns the returned buffer and must free it with `vx_bytes_free`.
 
 ## Plan IR (MVP)
 

@@ -38,7 +38,7 @@ impl VeloxAdapter {
         {
             let _ = plan_ir;
             Err(ChrysoError::new(
-                "velox adapter requires feature \"velox\" at the workspace level",
+                "velox adapter requires feature \"velox-ffi\" (or workspace feature \"velox\")",
             ))
         }
     }
@@ -56,7 +56,7 @@ impl ExecutorAdapter for VeloxAdapter {
         {
             let _ = plan_ir;
             Err(ChrysoError::new(
-                "velox adapter requires feature \"velox\" at the workspace level",
+                "velox adapter requires feature \"velox-ffi\" (or workspace feature \"velox\")",
             ))
         }
     }
