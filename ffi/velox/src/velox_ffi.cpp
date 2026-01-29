@@ -1,6 +1,7 @@
 #include "velox_ffi.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -162,9 +163,20 @@ int vx_plan_execute_arrow(
     return 2;
   }
   std::shared_ptr<arrow::io::BufferOutputStream> sink = *sink_result;
-  auto write_status = arrow::ipc::SerializeRecordBatch(*batch, arrow::ipc::IpcWriteOptions::Defaults(), sink.get());
-  if (!write_status.ok()) {
-    set_last_error(write_status.ToString());
+  auto writer_result = arrow::ipc::MakeStreamWriter(sink, schema);
+  if (!writer_result.ok()) {
+    set_last_error(writer_result.status().ToString());
+    return 2;
+  }
+  std::shared_ptr<arrow::ipc::RecordBatchWriter> writer = *writer_result;
+  status = writer->WriteRecordBatch(*batch);
+  if (!status.ok()) {
+    set_last_error(status.ToString());
+    return 2;
+  }
+  status = writer->Close();
+  if (!status.ok()) {
+    set_last_error(status.ToString());
     return 2;
   }
   auto finish_result = sink->Finish();
@@ -189,7 +201,9 @@ int vx_plan_execute_arrow(
 
 const char* vx_last_error() {
   std::lock_guard<std::mutex> guard(g_error_mutex);
-  return g_last_error.c_str();
+  static thread_local std::string tls_last_error;
+  tls_last_error = g_last_error;
+  return tls_last_error.c_str();
 }
 
 void vx_string_free(char* value) {

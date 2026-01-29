@@ -69,15 +69,39 @@ impl ExecutorAdapter for VeloxAdapter {
 #[cfg(test)]
 mod tests {
     use super::plan::plan_to_ir;
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use chryso_planner::PhysicalPlan;
+    use serde_json::Value;
 
     #[test]
     fn plan_to_ir_renders_table_scan() {
         let plan = PhysicalPlan::TableScan {
-            table: "t".to_string(),
+            table: "t\"\\name".to_string(),
         };
         let ir = plan_to_ir(&plan);
-        assert!(ir.contains("TableScan"));
-        assert!(ir.contains("\"table\":\"t\""));
+        let parsed: Value = serde_json::from_str(&ir).expect("ir should be valid JSON");
+        assert_eq!(parsed["type"], "TableScan");
+        assert_eq!(parsed["table"], "t\"\\name");
+    }
+
+    #[test]
+    fn plan_to_ir_handles_nested_plan_and_escaping() {
+        let predicate = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("col\"a".to_string())),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Literal(Literal::String("v\\\"".to_string()))),
+        };
+        let plan = PhysicalPlan::Filter {
+            predicate,
+            input: Box::new(PhysicalPlan::TableScan {
+                table: "tab\"le".to_string(),
+            }),
+        };
+        let ir = plan_to_ir(&plan);
+        let parsed: Value = serde_json::from_str(&ir).expect("ir should be valid JSON");
+        assert_eq!(parsed["type"], "Filter");
+        assert_eq!(parsed["input"]["type"], "TableScan");
+        assert_eq!(parsed["input"]["table"], "tab\"le");
+        assert!(parsed["predicate"].as_str().unwrap().contains("col\"a"));
     }
 }

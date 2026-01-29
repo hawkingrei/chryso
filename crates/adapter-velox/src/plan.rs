@@ -1,114 +1,119 @@
 use chryso_planner::PhysicalPlan;
+use serde_json::{json, Value};
 
 pub fn plan_to_ir(plan: &PhysicalPlan) -> String {
+    plan_to_json(plan).to_string()
+}
+
+fn plan_to_json(plan: &PhysicalPlan) -> Value {
     match plan {
-        PhysicalPlan::TableScan { table } => {
-            format!(r#"{{"type":"TableScan","table":"{table}"}}"#)
-        }
+        PhysicalPlan::TableScan { table } => json!({
+            "type": "TableScan",
+            "table": table,
+        }),
         PhysicalPlan::IndexScan {
             table,
             index,
             predicate,
-        } => format!(
-            r#"{{"type":"IndexScan","table":"{table}","index":"{index}","predicate":"{}"}}"#,
-            predicate.to_sql()
-        ),
-        PhysicalPlan::Dml { sql } => format!(r#"{{"type":"Dml","sql":"{sql}"}}"#),
+        } => json!({
+            "type": "IndexScan",
+            "table": table,
+            "index": index,
+            "predicate": predicate.to_sql(),
+        }),
+        PhysicalPlan::Dml { sql } => json!({
+            "type": "Dml",
+            "sql": sql,
+        }),
         PhysicalPlan::Derived {
             input,
             alias,
             column_aliases,
-        } => format!(
-            r#"{{"type":"Derived","alias":"{alias}","columns":[{}],"input":{}}}"#,
-            quote_list(column_aliases),
-            plan_to_ir(input)
-        ),
-        PhysicalPlan::Filter { predicate, input } => format!(
-            r#"{{"type":"Filter","predicate":"{}","input":{}}}"#,
-            predicate.to_sql(),
-            plan_to_ir(input)
-        ),
-        PhysicalPlan::Projection { exprs, input } => format!(
-            r#"{{"type":"Projection","exprs":[{}],"input":{}}}"#,
-            exprs
-                .iter()
-                .map(|expr| format!("\"{}\"", expr.to_sql()))
-                .collect::<Vec<_>>()
-                .join(","),
-            plan_to_ir(input)
-        ),
+        } => json!({
+            "type": "Derived",
+            "alias": alias,
+            "columns": column_aliases,
+            "input": plan_to_json(input),
+        }),
+        PhysicalPlan::Filter { predicate, input } => json!({
+            "type": "Filter",
+            "predicate": predicate.to_sql(),
+            "input": plan_to_json(input),
+        }),
+        PhysicalPlan::Projection { exprs, input } => {
+            let exprs_sql: Vec<String> = exprs.iter().map(|expr| expr.to_sql()).collect();
+            json!({
+                "type": "Projection",
+                "exprs": exprs_sql,
+                "input": plan_to_json(input),
+            })
+        }
         PhysicalPlan::Join {
             join_type,
             algorithm,
             left,
             right,
             on,
-        } => format!(
-            r#"{{"type":"Join","join_type":"{join_type:?}","algorithm":"{algorithm:?}","on":"{}","left":{},"right":{}}}"#,
-            on.to_sql(),
-            plan_to_ir(left),
-            plan_to_ir(right)
-        ),
+        } => json!({
+            "type": "Join",
+            "join_type": format!("{join_type:?}"),
+            "algorithm": format!("{algorithm:?}"),
+            "on": on.to_sql(),
+            "left": plan_to_json(left),
+            "right": plan_to_json(right),
+        }),
         PhysicalPlan::Aggregate {
             group_exprs,
             aggr_exprs,
             input,
-        } => format!(
-            r#"{{"type":"Aggregate","group_exprs":[{}],"aggr_exprs":[{}],"input":{}}}"#,
-            expr_list(group_exprs),
-            expr_list(aggr_exprs),
-            plan_to_ir(input)
-        ),
-        PhysicalPlan::Distinct { input } => {
-            format!(r#"{{"type":"Distinct","input":{}}}"#, plan_to_ir(input))
+        } => {
+            let group_sql: Vec<String> =
+                group_exprs.iter().map(|expr| expr.to_sql()).collect();
+            let aggr_sql: Vec<String> =
+                aggr_exprs.iter().map(|expr| expr.to_sql()).collect();
+            json!({
+                "type": "Aggregate",
+                "group_exprs": group_sql,
+                "aggr_exprs": aggr_sql,
+                "input": plan_to_json(input),
+            })
         }
+        PhysicalPlan::Distinct { input } => json!({
+            "type": "Distinct",
+            "input": plan_to_json(input),
+        }),
         PhysicalPlan::TopN {
             order_by,
             limit,
             input,
-        } => format!(
-            r#"{{"type":"TopN","limit":{limit},"order_by":[{}],"input":{}}}"#,
-            order_by
-                .iter()
-                .map(|item| format!("\"{}\"", item.expr.to_sql()))
-                .collect::<Vec<_>>()
-                .join(","),
-            plan_to_ir(input)
-        ),
-        PhysicalPlan::Sort { order_by, input } => format!(
-            r#"{{"type":"Sort","order_by":[{}],"input":{}}}"#,
-            order_by
-                .iter()
-                .map(|item| format!("\"{}\"", item.expr.to_sql()))
-                .collect::<Vec<_>>()
-                .join(","),
-            plan_to_ir(input)
-        ),
+        } => {
+            let order_by_sql: Vec<String> =
+                order_by.iter().map(|item| item.expr.to_sql()).collect();
+            json!({
+                "type": "TopN",
+                "limit": limit,
+                "order_by": order_by_sql,
+                "input": plan_to_json(input),
+            })
+        }
+        PhysicalPlan::Sort { order_by, input } => {
+            let order_by_sql: Vec<String> =
+                order_by.iter().map(|item| item.expr.to_sql()).collect();
+            json!({
+                "type": "Sort",
+                "order_by": order_by_sql,
+                "input": plan_to_json(input),
+            })
+        }
         PhysicalPlan::Limit {
             limit,
             offset,
             input,
-        } => format!(
-            r#"{{"type":"Limit","limit":{},"offset":{},"input":{}}}"#,
-            limit.map_or("null".to_string(), |value| value.to_string()),
-            offset.map_or("null".to_string(), |value| value.to_string()),
-            plan_to_ir(input)
-        ),
+        } => json!({
+            "type": "Limit",
+            "limit": limit,
+            "offset": offset,
+            "input": plan_to_json(input),
+        }),
     }
-}
-
-fn expr_list(exprs: &[chryso_core::ast::Expr]) -> String {
-    exprs
-        .iter()
-        .map(|expr| format!("\"{}\"", expr.to_sql()))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn quote_list(values: &[String]) -> String {
-    values
-        .iter()
-        .map(|value| format!("\"{value}\""))
-        .collect::<Vec<_>>()
-        .join(",")
 }
