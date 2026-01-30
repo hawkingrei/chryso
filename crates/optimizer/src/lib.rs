@@ -7,17 +7,23 @@ use std::collections::HashSet;
 
 pub mod column_prune;
 pub mod cost;
+pub mod cost_profile;
 pub mod enforcer;
 pub mod estimation;
 pub mod expr_rewrite;
 pub mod join_order;
 pub mod memo;
 pub mod physical_rules;
+pub mod plan_fingerprint;
 pub mod properties;
 pub mod rules;
 pub mod stats_collect;
 pub mod subquery;
 pub mod utils;
+
+pub use cost::CostModelConfig;
+pub use cost_profile::CostProfile;
+pub use plan_fingerprint::{logical_fingerprint, physical_fingerprint};
 
 #[derive(Debug)]
 pub struct OptimizerTrace {
@@ -105,6 +111,7 @@ pub struct OptimizerConfig {
     pub trace: bool,
     pub debug_rules: bool,
     pub stats_provider: Option<std::sync::Arc<dyn chryso_metadata::StatsProvider>>,
+    pub cost_config: Option<CostModelConfig>,
 }
 
 impl std::fmt::Debug for OptimizerConfig {
@@ -118,6 +125,7 @@ impl std::fmt::Debug for OptimizerConfig {
             .field("trace", &self.trace)
             .field("debug_rules", &self.debug_rules)
             .field("stats_provider", &self.stats_provider.is_some())
+            .field("cost_config", &self.cost_config.is_some())
             .finish()
     }
 }
@@ -157,7 +165,7 @@ mod tests {
     use super::cost::UnitCostModel;
     use super::{CascadesOptimizer, OptimizerConfig};
     use chryso_core::ast::{BinaryOperator, Expr, Literal};
-    use chryso_metadata::{StatsCache, type_inference::SimpleTypeInferencer};
+    use chryso_metadata::{StatsCache, StatsSnapshot, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
     use std::collections::HashSet;
@@ -277,6 +285,26 @@ mod tests {
             trace.conflicting_literals
         );
     }
+
+    #[test]
+    fn optimizer_uses_stats_snapshot() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/testdata/stats/tpch_scale1.json");
+        let snapshot = StatsSnapshot::load_json(root).expect("snapshot");
+        let mut stats = snapshot.to_cache();
+        let sql = "select * from orders";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let (physical, _) =
+            CascadesOptimizer::new(OptimizerConfig::default()).optimize_with_trace(
+                &logical,
+                &mut stats,
+            );
+        assert!(matches!(physical, PhysicalPlan::TableScan { .. }));
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -290,6 +318,7 @@ impl Default for OptimizerConfig {
             trace: false,
             debug_rules: false,
             stats_provider: None,
+            cost_config: None,
         }
     }
 }
@@ -375,7 +404,11 @@ fn optimize_with_cascades(
     let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
         Box::new(UnitCostModel)
     } else {
-        Box::new(cost::StatsCostModel::new(_stats))
+        let model = match &config.cost_config {
+            Some(config) => cost::StatsCostModel::with_config(_stats, config.clone()),
+            None => cost::StatsCostModel::new(_stats),
+        };
+        Box::new(model)
     };
     let mut best = memo
         .best_physical(root, cost_model.as_ref())
@@ -409,7 +442,11 @@ fn optimize_with_cascades_memo(
     let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
         Box::new(UnitCostModel)
     } else {
-        Box::new(cost::StatsCostModel::new(_stats))
+        let model = match &config.cost_config {
+            Some(config) => cost::StatsCostModel::with_config(_stats, config.clone()),
+            None => cost::StatsCostModel::new(_stats),
+        };
+        Box::new(model)
     };
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());

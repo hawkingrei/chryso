@@ -124,15 +124,68 @@ impl Default for StatsCache {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TableStats {
     pub row_count: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColumnStats {
     pub distinct_count: f64,
     pub null_fraction: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StatsSnapshot {
+    pub tables: Vec<(String, TableStats)>,
+    pub columns: Vec<(String, String, ColumnStats)>,
+}
+
+impl StatsSnapshot {
+    pub fn to_cache(&self) -> StatsCache {
+        let mut cache = StatsCache::new_with_capacity(self.tables.len(), self.columns.len());
+        for (table, stats) in &self.tables {
+            cache.insert_table_stats(table.clone(), stats.clone());
+        }
+        for (table, column, stats) in &self.columns {
+            cache.insert_column_stats(table.clone(), column.clone(), stats.clone());
+        }
+        cache
+    }
+
+    pub fn from_cache(cache: &StatsCache) -> Self {
+        let tables = cache
+            .table_stats
+            .iter()
+            .map(|(name, stats)| (name.clone(), stats.clone()))
+            .collect();
+        let columns = cache
+            .column_stats
+            .iter()
+            .map(|((table, column), stats)| (table.clone(), column.clone(), stats.clone()))
+            .collect();
+        Self { tables, columns }
+    }
+
+    pub fn load_json(path: impl AsRef<std::path::Path>) -> chryso_core::error::ChrysoResult<Self> {
+        let content = std::fs::read_to_string(path.as_ref()).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("read stats snapshot failed: {err}"))
+        })?;
+        let snapshot = serde_json::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse stats snapshot failed: {err}"))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn write_json(&self, path: impl AsRef<std::path::Path>) -> chryso_core::error::ChrysoResult<()> {
+        let content = serde_json::to_string_pretty(self).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("serialize stats snapshot failed: {err}"))
+        })?;
+        std::fs::write(path.as_ref(), format!("{content}\n")).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("write stats snapshot failed: {err}"))
+        })?;
+        Ok(())
+    }
 }
 
 pub trait StatsProvider {

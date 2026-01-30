@@ -1,12 +1,94 @@
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 pub use chryso_planner::cost::{Cost, CostModel};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CostModelConfig {
+    pub scan: f64,
+    pub filter: f64,
+    pub join: f64,
+    pub sort: f64,
+    pub aggregate: f64,
+    pub join_hash_multiplier: f64,
+    pub join_nested_multiplier: f64,
+    pub max_cost: f64,
+}
+
+impl Default for CostModelConfig {
+    fn default() -> Self {
+        Self {
+            scan: 1.0,
+            filter: 0.5,
+            join: 5.0,
+            sort: 3.0,
+            aggregate: 4.0,
+            join_hash_multiplier: 1.0,
+            join_nested_multiplier: 5.0,
+            max_cost: 1.0e18,
+        }
+    }
+}
+
+impl CostModelConfig {
+    pub fn load_from_path(path: impl AsRef<Path>) -> chryso_core::error::ChrysoResult<Self> {
+        let content = fs::read_to_string(path.as_ref()).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("read cost config failed: {err}"))
+        })?;
+        let value: CostModelConfig = if path
+            .as_ref()
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("toml"))
+            .unwrap_or(false)
+        {
+            toml::from_str(&content).map_err(|err| {
+                chryso_core::error::ChrysoError::new(format!("parse toml cost config failed: {err}"))
+            })?
+        } else {
+            serde_json::from_str(&content).map_err(|err| {
+                chryso_core::error::ChrysoError::new(format!("parse json cost config failed: {err}"))
+            })?
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn validate(&self) -> chryso_core::error::ChrysoResult<()> {
+        let mut invalid = Vec::new();
+        for (name, value) in [
+            ("scan", self.scan),
+            ("filter", self.filter),
+            ("join", self.join),
+            ("sort", self.sort),
+            ("aggregate", self.aggregate),
+            ("join_hash_multiplier", self.join_hash_multiplier),
+            ("join_nested_multiplier", self.join_nested_multiplier),
+            ("max_cost", self.max_cost),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                invalid.push(name);
+            }
+        }
+        if invalid.is_empty() {
+            Ok(())
+        } else {
+            Err(chryso_core::error::ChrysoError::new(format!(
+                "invalid cost config fields: {}",
+                invalid.join(", ")
+            )))
+        }
+    }
+}
 
 pub struct UnitCostModel;
 
 impl CostModel for UnitCostModel {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        Cost(plan.node_count() as f64 + join_penalty(plan))
+        let default = CostModelConfig::default();
+        Cost(plan.node_count() as f64 + join_penalty(plan, &default))
     }
 }
 
@@ -18,17 +100,30 @@ impl std::fmt::Debug for UnitCostModel {
 
 pub struct StatsCostModel<'a> {
     stats: &'a StatsCache,
+    config: CostModelConfig,
 }
 
 impl<'a> StatsCostModel<'a> {
     pub fn new(stats: &'a StatsCache) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            config: CostModelConfig::default(),
+        }
+    }
+
+    pub fn with_config(stats: &'a StatsCache, config: CostModelConfig) -> Self {
+        Self { stats, config }
     }
 }
 
 impl CostModel for StatsCostModel<'_> {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        Cost(estimate_rows(plan, self.stats) + join_penalty(plan))
+        let mut cost = estimate_rows(plan, self.stats) * node_weight(plan, &self.config);
+        cost += join_penalty(plan, &self.config);
+        if !cost.is_finite() || cost > self.config.max_cost {
+            cost = self.config.max_cost;
+        }
+        Cost(cost)
     }
 }
 
@@ -40,7 +135,7 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostModel, StatsCache, StatsCostModel, UnitCostModel};
+    use super::{CostModel, CostModelConfig, StatsCache, StatsCostModel, UnitCostModel};
     use chryso_metadata::ColumnStats;
     use chryso_planner::PhysicalPlan;
 
@@ -112,15 +207,41 @@ mod tests {
         let cost = model.cost(&plan);
         assert!(cost.0 < 5.0);
     }
+
+    #[test]
+    fn config_validation_rejects_non_positive() {
+        let mut config = CostModelConfig::default();
+        config.join = 0.0;
+        let err = config.validate().expect_err("invalid config");
+        assert!(err.to_string().contains("join"));
+    }
 }
 
-fn join_penalty(plan: &PhysicalPlan) -> f64 {
+fn join_penalty(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
     match plan {
         PhysicalPlan::Join { algorithm, .. } => match algorithm {
-            chryso_planner::JoinAlgorithm::Hash => 1.0,
-            chryso_planner::JoinAlgorithm::NestedLoop => 5.0,
+            chryso_planner::JoinAlgorithm::Hash => config.join * config.join_hash_multiplier,
+            chryso_planner::JoinAlgorithm::NestedLoop => {
+                config.join * config.join_nested_multiplier
+            }
         },
         _ => 0.0,
+    }
+}
+
+fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+    match plan {
+        PhysicalPlan::TableScan { .. } | PhysicalPlan::IndexScan { .. } => config.scan,
+        PhysicalPlan::Filter { .. } => config.filter,
+        PhysicalPlan::Projection { .. } => 0.1,
+        PhysicalPlan::Join { .. } => config.join,
+        PhysicalPlan::Aggregate { .. } => config.aggregate,
+        PhysicalPlan::Distinct { .. } => config.aggregate,
+        PhysicalPlan::TopN { .. } => config.sort,
+        PhysicalPlan::Sort { .. } => config.sort,
+        PhysicalPlan::Limit { .. } => 0.05,
+        PhysicalPlan::Derived { .. } => 0.1,
+        PhysicalPlan::Dml { .. } => 1.0,
     }
 }
 

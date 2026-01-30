@@ -1,17 +1,17 @@
-# Parser, Logical Plan, Physical Plan TODOs (500)
+# Parser, Logical Plan, Physical Plan Roadmap (500)
 
 ## Notes
 - Keep dual parser tracks (yacc + handcrafted); benchmark and keep handcrafted path faster.
 - Defer planner support for WITH/SET ops until parser coverage stabilizes.
 - Orca-inspired testing: focus on deterministic plan selection and cost regression before adding parallel optimization.
 
-## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
+## Orca-Inspired Optimization Roadmap (Cost/Testing/Concurrency)
 
-501. Optimizer: add a cost model config struct with tunable coefficients (scan, filter, join, sort, agg).
-502. Optimizer: load cost config from `toml` or `json` with defaults when missing.
-503. Optimizer: add a `CostProfile` snapshot format for offline tuning inputs.
-504. Optimizer: add deterministic plan selection tests with fixed stats (no randomness).
-505. Optimizer: add cost regression tests that compare relative ordering of candidate plans.
+501. Optimizer: add a cost model config struct with tunable coefficients (scan, filter, join, sort, agg). (done)
+502. Optimizer: load cost config from `toml` or `json` with defaults when missing. (done)
+503. Optimizer: add a `CostProfile` snapshot format for offline tuning inputs. (done)
+504. Optimizer: add deterministic plan selection tests with fixed stats (no randomness). (done)
+505. Optimizer: add cost regression tests that compare relative ordering of candidate plans. (done)
 506. Optimizer: add plan pattern assertions (e.g., hash join vs nested loop) for key TPCH queries.
 507. Optimizer: add a trace output format that includes alternative plans + costs for debugging. (done)
 508. Optimizer: expose a CLI command to dump memo groups and best plan per group. (done)
@@ -20,10 +20,10 @@
 511. Optimizer: add config knobs to disable/enable specific rules for tuning experiments. (done)
 512. Optimizer: add rule impact reporting (plan diff + cost delta).
 513. Optimizer: add a seedable evaluation mode to ensure repeatability.
-514. Optimizer: add a "plan baseline" file format for CI verification.
-515. Optimizer: add a stats snapshot loader to simulate catalogs for tests.
+514. Optimizer: add a "plan baseline" file format for CI verification. (done)
+515. Optimizer: add a stats snapshot loader to simulate catalogs for tests. (done)
 516. Optimizer: add multi-scenario tests (different stats distributions for same query).
-517. Optimizer: add guardrails for overflow/NaN cost values.
+517. Optimizer: add guardrails for overflow/NaN cost values. (done)
 518. Optimizer: document cost model assumptions and coefficient semantics in `docs/`.
 519. Optimizer: add optional "explain cost breakdown" by operator.
 520. Optimizer: add a cost sensitivity report (delta per coefficient).
@@ -32,13 +32,13 @@
 523. Optimizer: add a CLI option to lock rule ordering for reproducibility.
 524. Optimizer: add a `--no-reorder` mode for rule isolation tests.
 525. Optimizer: add benchmarks that run optimizer only (no execution).
-526. Optimizer: add a stable plan fingerprint for regression comparisons.
+526. Optimizer: add a stable plan fingerprint for regression comparisons. (done)
 527. Optimizer: add a "plan equivalence" checker to avoid false regressions.
 528. Optimizer: add support for per-query cost overrides.
-529. Optimizer: add a validation step for cost config ranges.
+529. Optimizer: add a validation step for cost config ranges. (done)
 530. Optimizer: add doc examples for tuning workflow (TPCH-specific).
-531. Optimizer: add CI job to run optimizer regression suite.
-532. Optimizer: add fixture-based golden plans for key TPCH queries.
+531. Optimizer: add CI job to run optimizer regression suite. (partial: new tests run under existing CI)
+532. Optimizer: add fixture-based golden plans for key TPCH queries. (partial: added snapshot + stats fixture)
 533. Optimizer: add a "cost sanity" test to compare trivial queries.
 534. Optimizer: add an API to inject synthetic stats for unit tests.
 535. Optimizer: add a "memo explosion" guard with threshold logging.
@@ -77,8 +77,8 @@
 568. Optimizer: add documentation for how to generate stats snapshots.
 569. Optimizer: add optional JSON schema for cost config.
 570. Optimizer: add an opt-in concurrency plan for later (documented, disabled).
-571. Optimizer: add a TODO list for parallel optimizer search design (memo group parallelism).
-572. Optimizer: add a TODO list for safe deterministic concurrency constraints.
+571. Optimizer: add a roadmap for parallel optimizer search design (memo group parallelism).
+572. Optimizer: add a roadmap for safe deterministic concurrency constraints.
 573. Optimizer: add tests that enforce deterministic output under concurrency flags (disabled by default).
 
 ## Parser (1-200)

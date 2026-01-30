@@ -26,6 +26,11 @@ struct PlanTestOutput {
     physical_explain: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct PlanBaseline {
+    cases: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 #[test]
 fn snapshot_plan_explain() {
     let base = std::path::Path::new("tests/testdata/plan");
@@ -93,6 +98,70 @@ fn snapshot_plan_explain() {
         }
     }
     assert!(found, "no plan test cases found");
+}
+
+#[test]
+fn snapshot_plan_baseline() {
+    let base = std::path::Path::new("tests/testdata/plan_baseline");
+    if !base.exists() {
+        return;
+    }
+    let mut found = false;
+    for entry in std::fs::read_dir(base).expect("read baseline dir") {
+        let entry = entry.expect("read entry");
+        if !entry.file_type().expect("file type").is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        let in_path = dir.join("in.json");
+        let out_path = dir.join("out.json");
+        if !in_path.exists() {
+            continue;
+        }
+        found = true;
+        let input = load_json::<PlanTestSuite>(&in_path);
+        let expected = if should_record() {
+            PlanBaseline {
+                cases: std::collections::BTreeMap::new(),
+            }
+        } else {
+            load_json::<PlanBaseline>(&out_path)
+        };
+        let mut actual = PlanBaseline {
+            cases: std::collections::BTreeMap::new(),
+        };
+
+        for case in input.cases {
+            let dialect = match case.dialect.as_str() {
+                "postgres" => Dialect::Postgres,
+                "mysql" => Dialect::MySql,
+                other => panic!("unknown dialect: {other}"),
+            };
+            let parser = SimpleParser::new(ParserConfig { dialect });
+            let stmt = parser.parse(&case.sql).expect("parse");
+            let logical = PlanBuilder::build(stmt).expect("plan");
+            let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
+            let mut stats = StatsCache::new();
+            let physical = optimizer.optimize(&logical, &mut stats);
+            let fingerprint = chryso::optimizer::physical_fingerprint(&physical);
+            actual.cases.insert(case.name, fingerprint.lines().map(|line| line.to_string()).collect());
+        }
+
+        if should_record() {
+            write_json(&out_path, &actual);
+            continue;
+        }
+
+        assert_eq!(actual.cases.len(), expected.cases.len());
+        for (name, expected_lines) in &expected.cases {
+            let actual_lines = actual
+                .cases
+                .get(name)
+                .unwrap_or_else(|| panic!("missing case {name}"));
+            assert_eq!(actual_lines, expected_lines);
+        }
+    }
+    assert!(found, "no baseline plan test cases found");
 }
 
 fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> T {

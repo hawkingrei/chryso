@@ -1,0 +1,8 @@
+{
+  "cases": {
+    "baseline_topn": [
+      "TopN order_by=id asc limit=3",
+      "  TableScan table=users"
+    ]
+  }
+}
