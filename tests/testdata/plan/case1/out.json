@@ -2,12 +2,11 @@
   "cases": {
     "agg_limit": {
       "logical_explain": [
-        "LogicalLimit limit=Some(10) offset=None",
-        "  LogicalSort order_by=id asc",
-        "    LogicalProject exprs=id, sum(amount)",
-        "      LogicalAggregate group=id aggr=id, sum(amount)",
-        "        LogicalFilter predicate=region = 'us'",
-        "          LogicalScan table=sales"
+        "LogicalTopN order_by=id asc limit=10",
+        "  LogicalProject exprs=id, sum(amount)",
+        "    LogicalAggregate group=id aggr=id, sum(amount)",
+        "      LogicalFilter predicate=region = 'us'",
+        "        LogicalScan table=sales"
       ],
       "physical_explain": [
         "TopN order_by=id asc limit=10",
