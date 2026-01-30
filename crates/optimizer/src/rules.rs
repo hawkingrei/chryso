@@ -1334,11 +1334,8 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
                 if let Some(existing) = literal_bindings.get(ident) {
                     if !literal_eq(existing, literal) {
                         literal_conflicts.insert(ident.clone());
-                        let left = format!(
-                            "{} = {}",
-                            ident,
-                            Expr::Literal(existing.clone()).to_sql()
-                        );
+                        let left =
+                            format!("{} = {}", ident, Expr::Literal(existing.clone()).to_sql());
                         let right =
                             format!("{} = {}", ident, Expr::Literal(literal.clone()).to_sql());
                         conflict_pairs.insert((left, right));

@@ -1,9 +1,9 @@
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
+pub use chryso_planner::cost::{Cost, CostModel};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-pub use chryso_planner::cost::{Cost, CostModel};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostModelConfig {
@@ -45,11 +45,15 @@ impl CostModelConfig {
             .unwrap_or(false)
         {
             toml::from_str(&content).map_err(|err| {
-                chryso_core::error::ChrysoError::new(format!("parse toml cost config failed: {err}"))
+                chryso_core::error::ChrysoError::new(format!(
+                    "parse toml cost config failed: {err}"
+                ))
             })?
         } else {
             serde_json::from_str(&content).map_err(|err| {
-                chryso_core::error::ChrysoError::new(format!("parse json cost config failed: {err}"))
+                chryso_core::error::ChrysoError::new(format!(
+                    "parse json cost config failed: {err}"
+                ))
             })?
         };
         value.validate()?;

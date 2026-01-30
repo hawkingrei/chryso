@@ -177,7 +177,10 @@ impl StatsSnapshot {
         Ok(snapshot)
     }
 
-    pub fn write_json(&self, path: impl AsRef<std::path::Path>) -> chryso_core::error::ChrysoResult<()> {
+    pub fn write_json(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> chryso_core::error::ChrysoResult<()> {
         let content = serde_json::to_string_pretty(self).map_err(|err| {
             chryso_core::error::ChrysoError::new(format!("serialize stats snapshot failed: {err}"))
         })?;

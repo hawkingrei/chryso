@@ -271,11 +271,8 @@ mod tests {
                 table: "t".to_string(),
             }),
         };
-        let (_, trace) =
-            CascadesOptimizer::new(OptimizerConfig::default()).optimize_with_trace(
-                &logical,
-                &mut StatsCache::new(),
-            );
+        let (_, trace) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut StatsCache::new());
         assert!(
             trace
                 .conflicting_literals
@@ -298,11 +295,8 @@ mod tests {
         });
         let stmt = parser.parse(sql).expect("parse");
         let logical = PlanBuilder::build(stmt).expect("plan");
-        let (physical, _) =
-            CascadesOptimizer::new(OptimizerConfig::default()).optimize_with_trace(
-                &logical,
-                &mut stats,
-            );
+        let (physical, _) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut stats);
         assert!(matches!(physical, PhysicalPlan::TableScan { .. }));
     }
 }

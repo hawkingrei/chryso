@@ -144,7 +144,10 @@ fn snapshot_plan_baseline() {
             let mut stats = StatsCache::new();
             let physical = optimizer.optimize(&logical, &mut stats);
             let fingerprint = chryso::optimizer::physical_fingerprint(&physical);
-            actual.cases.insert(case.name, fingerprint.lines().map(|line| line.to_string()).collect());
+            actual.cases.insert(
+                case.name,
+                fingerprint.lines().map(|line| line.to_string()).collect(),
+            );
         }
 
         if should_record() {
