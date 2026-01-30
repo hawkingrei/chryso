@@ -13,9 +13,15 @@ fn main() {
     println!("{:?}", result.columns);
     println!("{:?}", result.rows);
 
-    let arrow = adapter.execute_arrow(&plan).expect("execute_arrow");
-    fs::write("velox_demo.arrow", &arrow).expect("write arrow");
-    println!("arrow_bytes={}", arrow.len());
+    match adapter.execute_arrow(&plan) {
+        Ok(arrow) => {
+            fs::write("velox_demo.arrow", &arrow).expect("write arrow");
+            println!("arrow_bytes={}", arrow.len());
+        }
+        Err(err) => {
+            eprintln!("arrow output skipped: {err}");
+        }
+    }
 }
 
 #[cfg(not(feature = "velox"))]

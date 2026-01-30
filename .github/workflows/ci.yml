@@ -51,8 +51,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build Velox FFI stub (no submodule, no Arrow)
         run: |
-          cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=OFF -DCHRYSO_VELOX_USE_ARROW=OFF
+          cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=OFF -DCHRYSO_VELOX_USE_ARROW=OFF -DCHRYSO_VELOX_BUILD_TESTS=ON
           cmake --build ffi/velox/build -j
+      - name: Test Velox FFI (C++)
+        run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter
         env:
           CHRYSO_VELOX_FFI_DIR: ffi/velox/build
@@ -150,12 +152,15 @@ jobs:
           cmake -S ffi/velox -B ffi/velox/build \
             -DCHRYSO_VELOX_USE_SUBMODULE=ON \
             -DCHRYSO_VELOX_USE_ARROW=ON \
-            -DCHRYSO_ARROW_STRICT_VERSION=OFF
+            -DCHRYSO_ARROW_STRICT_VERSION=OFF \
+            -DCHRYSO_VELOX_BUILD_TESTS=ON
           cmake --build ffi/velox/build -j 2
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
           CMAKE_IGNORE_PREFIX_PATH: /opt/homebrew
           OS_CXXFLAGS: ""
+      - name: Test Velox FFI (C++)
+        run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter
         env:
           CHRYSO_VELOX_FFI_DIR: ffi/velox/build

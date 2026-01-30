@@ -101,6 +101,9 @@ pub fn execute_plan_arrow(plan_ir: &str) -> ChrysoResult<Vec<u8>> {
             sys::vx_bytes_free(out);
             Ok(buffer)
         } else {
+            if !out.is_null() {
+                sys::vx_bytes_free(out);
+            }
             let err = sys::vx_last_error();
             let msg = if err.is_null() {
                 "velox arrow execution failed".to_string()

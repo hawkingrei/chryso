@@ -1,6 +1,7 @@
 #include "velox_ffi.h"
 
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -19,31 +20,69 @@ struct Session {
   int reserved = 0;
 };
 
+std::string parse_json_string(const char* data, size_t* cursor) {
+  std::string out;
+  bool escape = false;
+  for (; data[*cursor] != '\0'; ++(*cursor)) {
+    char ch = data[*cursor];
+    if (escape) {
+      out.push_back(ch);
+      escape = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escape = true;
+      continue;
+    }
+    if (ch == '"') {
+      ++(*cursor);
+      break;
+    }
+    out.push_back(ch);
+  }
+  return out;
+}
+
 std::string extract_field(const char* json, const char* key) {
   if (json == nullptr || key == nullptr) {
     return {};
   }
-  std::string input(json);
-  std::string needle = std::string("\"") + key + "\":\"";
-  auto pos = input.find(needle);
-  if (pos == std::string::npos) {
-    return {};
+  std::string needle = std::string("\"") + key + "\"";
+  const char* cursor = json;
+  while (*cursor != '\0') {
+    const char* found = std::strstr(cursor, needle.c_str());
+    if (found == nullptr) {
+      return {};
+    }
+    size_t pos = static_cast<size_t>(found - json);
+    pos += needle.size();
+    while (json[pos] != '\0' && std::isspace(static_cast<unsigned char>(json[pos]))) {
+      ++pos;
+    }
+    if (json[pos] != ':') {
+      cursor = found + needle.size();
+      continue;
+    }
+    ++pos;
+    while (json[pos] != '\0' && std::isspace(static_cast<unsigned char>(json[pos]))) {
+      ++pos;
+    }
+    if (json[pos] != '"') {
+      cursor = found + needle.size();
+      continue;
+    }
+    ++pos;
+    return parse_json_string(json, &pos);
   }
-  pos += needle.size();
-  auto end = input.find('"', pos);
-  if (end == std::string::npos || end <= pos) {
-    return {};
-  }
-  return input.substr(pos, end - pos);
+  return {};
 }
 
 bool has_type(const char* json, const char* type) {
-  if (json == nullptr || type == nullptr) {
+  if (type == nullptr) {
     return false;
   }
-  std::string input(json);
-  std::string needle = std::string("\"type\":\"") + type + "\"";
-  return input.find(needle) != std::string::npos;
+  std::string value = extract_field(json, "type");
+  return !value.empty() && value == type;
 }
 
 std::mutex g_error_mutex;

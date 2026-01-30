@@ -7,6 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(CHRYSO_VELOX_USE_SUBMODULE "Use vendored Velox submodule" ON)
 option(CHRYSO_VELOX_USE_ARROW "Enable Arrow IPC output" ON)
 option(CHRYSO_ARROW_STRICT_VERSION "Require Arrow C++ 15.x" OFF)
+option(CHRYSO_VELOX_BUILD_TESTS "Build Chryso Velox FFI tests" OFF)
 
 if(CHRYSO_VELOX_USE_SUBMODULE)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/velox/CMakeLists.txt")
@@ -42,4 +43,13 @@ endif()
 if(CHRYSO_VELOX_USE_ARROW)
   target_link_libraries(chryso_velox_ffi PRIVATE Arrow::arrow_shared)
   target_compile_definitions(chryso_velox_ffi PRIVATE CHRYSO_VELOX_ARROW=1)
+endif()
+
+if(CHRYSO_VELOX_BUILD_TESTS)
+  enable_testing()
+  add_executable(chryso_velox_ffi_escape_test
+    tests/velox_ffi_escape_test.cpp
+  )
+  target_link_libraries(chryso_velox_ffi_escape_test PRIVATE chryso_velox_ffi)
+  add_test(NAME chryso_velox_ffi_escape_test COMMAND chryso_velox_ffi_escape_test)
 endif()
