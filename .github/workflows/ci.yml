@@ -61,8 +61,8 @@ jobs:
         run: cargo build -p chryso-adapter-velox --features velox-ffi
       - name: Test velox adapter
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
-          LD_LIBRARY_PATH: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
+          LD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
         run: cargo test -p chryso-adapter-velox --features velox-ffi
 
   velox-full:
@@ -169,8 +169,8 @@ jobs:
       - name: Test velox adapter (macos)
         if: runner.os == 'macOS'
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
-          DYLD_LIBRARY_PATH: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
         run: cargo test -p chryso-adapter-velox --features velox-ffi
       - name: Run velox demo (linux)
         if: runner.os == 'Linux'
