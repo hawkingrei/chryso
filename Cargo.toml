@@ -17,17 +17,33 @@ crossterm = "0.28"
 serde_json = "1"
 
 [workspace]
-members = [ "crates/adapter", "crates/core", "crates/metadata", "crates/optimizer", "crates/parser", "crates/parser_yacc", "crates/planner", "ffi",]
+members = [
+  "crates/adapter",
+  "crates/adapter-velox",
+  "crates/core",
+  "crates/metadata",
+  "crates/optimizer",
+  "crates/parser",
+  "crates/parser_yacc",
+  "crates/planner",
+  "ffi",
+]
 
 [features]
 default = []
 duckdb = [ "chryso-adapter/duckdb",]
+velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
 
 [dependencies.chryso-adapter]
 version = "0.0.1"
 path = "crates/adapter"
 default-features = false
+
+[dependencies.chryso-adapter-velox]
+version = "0.0.1"
+path = "crates/adapter-velox"
+optional = true
 
 [dependencies.chryso-core]
 version = "0.0.1"
