@@ -375,8 +375,8 @@ impl Parser {
     }
 
     fn parse_type_name(&mut self) -> ChrysoResult<String> {
-        // TODO: Replace this heuristic with a grammar-backed type parser.
-        // TODO: Implement a dedicated type parser for complex type syntax.
+        // Heuristic type parser for now; handles common parameterized types and
+        // falls back to token stitching for other cases.
         let Some(first) = self.next() else {
             return Ok(String::new());
         };

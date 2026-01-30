@@ -23,6 +23,7 @@ pub mod utils;
 pub struct OptimizerTrace {
     pub applied_rules: Vec<String>,
     pub stats_loaded: Vec<String>,
+    pub conflicting_literals: Vec<(String, String)>,
 }
 
 impl OptimizerTrace {
@@ -30,6 +31,7 @@ impl OptimizerTrace {
         Self {
             applied_rules: Vec::new(),
             stats_loaded: Vec::new(),
+            conflicting_literals: Vec::new(),
         }
     }
 }
@@ -154,7 +156,7 @@ pub struct SearchBudget {
 mod tests {
     use super::cost::UnitCostModel;
     use super::{CascadesOptimizer, OptimizerConfig};
-    use chryso_core::ast::{Expr, Literal};
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use chryso_metadata::{StatsCache, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
@@ -239,6 +241,41 @@ mod tests {
         let (physical, _) = CascadesOptimizer::new(OptimizerConfig::default())
             .optimize_with_trace(&logical, &mut StatsCache::new());
         assert!(!matches!(physical, PhysicalPlan::Sort { .. }));
+    }
+
+    #[test]
+    fn trace_records_literal_conflicts() {
+        let logical = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("a".to_string())),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::Literal(Literal::Number(1.0))),
+                }),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("a".to_string())),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::Literal(Literal::Number(2.0))),
+                }),
+            },
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let (_, trace) =
+            CascadesOptimizer::new(OptimizerConfig::default()).optimize_with_trace(
+                &logical,
+                &mut StatsCache::new(),
+            );
+        assert!(
+            trace
+                .conflicting_literals
+                .iter()
+                .any(|(left, right)| left.contains("a = 1") && right.contains("a = 2")),
+            "expected conflict pair, got {:?}",
+            trace.conflicting_literals
+        );
     }
 }
 
@@ -326,6 +363,9 @@ fn optimize_with_cascades(
         &mut trace,
         config.debug_rules,
     );
+    trace
+        .conflicting_literals
+        .extend(crate::rules::take_literal_conflicts());
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
@@ -359,6 +399,7 @@ fn optimize_with_cascades_memo(
         &mut OptimizerTrace::new(),
         config.debug_rules,
     );
+    let _ = crate::rules::take_literal_conflicts();
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);

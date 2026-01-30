@@ -3,6 +3,17 @@ use crate::utils::{
 };
 use chryso_core::ast::{BinaryOperator, Expr, Literal};
 use chryso_planner::LogicalPlan;
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::thread_local;
+
+thread_local! {
+    static LITERAL_CONFLICTS: RefCell<VecDeque<(String, String)>> = RefCell::new(VecDeque::new());
+}
+
+pub fn take_literal_conflicts() -> Vec<(String, String)> {
+    LITERAL_CONFLICTS.with(|conflicts| conflicts.borrow_mut().drain(..).collect())
+}
 
 pub trait Rule {
     fn name(&self) -> &str;
@@ -1304,6 +1315,7 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
     let mut uf = UnionFind::new();
     let mut literal_bindings = std::collections::HashMap::<String, Literal>::new();
     let mut literal_conflicts = std::collections::HashSet::<String>::new();
+    let mut conflict_pairs = std::collections::HashSet::<(String, String)>::new();
 
     for conjunct in &conjuncts {
         let Expr::BinaryOp { left, op, right } = conjunct else {
@@ -1322,6 +1334,14 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
                 if let Some(existing) = literal_bindings.get(ident) {
                     if !literal_eq(existing, literal) {
                         literal_conflicts.insert(ident.clone());
+                        let left = format!(
+                            "{} = {}",
+                            ident,
+                            Expr::Literal(existing.clone()).to_sql()
+                        );
+                        let right =
+                            format!("{} = {}", ident, Expr::Literal(literal.clone()).to_sql());
+                        conflict_pairs.insert((left, right));
                     }
                 } else {
                     literal_bindings.insert(ident.clone(), literal.clone());
@@ -1333,7 +1353,9 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
 
     let mut class_literals = std::collections::HashMap::<String, Option<Literal>>::new();
     if !literal_conflicts.is_empty() {
-        // TODO: surface conflicting literal bindings in optimizer trace.
+        LITERAL_CONFLICTS.with(|conflicts| {
+            conflicts.borrow_mut().extend(conflict_pairs.into_iter());
+        });
     }
     for ident in &literal_conflicts {
         let root = uf.find(ident);
