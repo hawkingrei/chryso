@@ -89,8 +89,9 @@ jobs:
           key: ${{ runner.os }}-ccache-velox-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-ccache-velox-
-      - name: Cache velox build dir
-        uses: actions/cache@v4
+      - name: Restore velox build dir
+        id: velox-build-cache
+        uses: actions/cache/restore@v4
         with:
           path: ffi/velox/build
           key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
@@ -160,6 +161,12 @@ jobs:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
           CMAKE_IGNORE_PREFIX_PATH: /opt/homebrew
           OS_CXXFLAGS: ""
+      - name: Save velox build dir
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: ffi/velox/build
+          key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
       - name: Test Velox FFI (C++)
         run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter
