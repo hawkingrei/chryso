@@ -391,10 +391,7 @@ impl Parser {
             }
         };
         let first_lower = first_part.to_ascii_lowercase();
-        if matches!(
-            first_lower.as_str(),
-            "decimal" | "numeric" | "varchar"
-        ) {
+        if matches!(first_lower.as_str(), "decimal" | "numeric" | "varchar") {
             let mut output = first_lower;
             if self.consume_token(&Token::LParen) {
                 let mut parts = Vec::new();
