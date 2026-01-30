@@ -49,15 +49,29 @@ jobs:
           components: rustfmt
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+      - name: Restore velox build dir
+        id: velox-ffi-build-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ffi/velox/build
+          key: ${{ runner.os }}-velox-ffi-build-${{ hashFiles('ffi/velox/CMakeLists.txt', 'ffi/velox/src/**', 'ffi/velox/include/**', 'ffi/velox/tests/**') }}
+          restore-keys: |
+            ${{ runner.os }}-velox-ffi-build-
       - name: Build Velox FFI stub (no submodule, no Arrow)
         run: |
           cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=OFF -DCHRYSO_VELOX_USE_ARROW=OFF -DCHRYSO_VELOX_BUILD_TESTS=ON
           cmake --build ffi/velox/build -j
+      - name: Save velox build dir
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: ffi/velox/build
+          key: ${{ runner.os }}-velox-ffi-build-${{ hashFiles('ffi/velox/CMakeLists.txt', 'ffi/velox/src/**', 'ffi/velox/include/**', 'ffi/velox/tests/**') }}
       - name: Test Velox FFI (C++)
         run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
         run: cargo build -p chryso-adapter-velox --features velox-ffi
       - name: Test velox adapter
         env:
@@ -171,7 +185,7 @@ jobs:
         run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
         run: cargo build -p chryso-adapter-velox --features velox-ffi
       - name: Test velox adapter (macos)
         if: runner.os == 'macOS'
@@ -182,12 +196,12 @@ jobs:
       - name: Run velox demo (linux)
         if: runner.os == 'Linux'
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
-          LD_LIBRARY_PATH: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
+          LD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
         run: cargo run --example velox_demo --features velox
       - name: Run velox demo (macos)
         if: runner.os == 'macOS'
         env:
-          CHRYSO_VELOX_FFI_DIR: ffi/velox/build
-          DYLD_LIBRARY_PATH: ffi/velox/build
+          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
         run: cargo run --example velox_demo --features velox
