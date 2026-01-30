@@ -227,6 +227,19 @@ mod tests {
         assert!(formatted.contains("group="));
         assert!(formatted.contains("cost="));
     }
+
+    #[test]
+    fn rules_reach_fixpoint_for_projection_limit_topn() {
+        let sql = "select id from t order by id limit 5";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let (physical, _) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut StatsCache::new());
+        assert!(!matches!(physical, PhysicalPlan::Sort { .. }));
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -306,7 +319,7 @@ fn optimize_with_cascades(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
-    let logical = apply_rules_recursive(
+    let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
@@ -339,7 +352,7 @@ fn optimize_with_cascades_memo(
     config: &OptimizerConfig,
     _stats: &StatsCache,
 ) -> (PhysicalPlan, MemoTrace) {
-    let logical = apply_rules_recursive(
+    let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
@@ -555,6 +568,31 @@ fn apply_rules_recursive(
         }
     }
     final_plan
+}
+
+fn apply_rules_fixpoint(
+    plan: &LogicalPlan,
+    rules: &RuleSet,
+    rule_config: &RuleConfig,
+    trace: &mut OptimizerTrace,
+    debug_rules: bool,
+) -> LogicalPlan {
+    const MAX_RULE_PASSES: usize = 8;
+    let mut current = plan.clone();
+    for _ in 0..MAX_RULE_PASSES {
+        let before = logical_plan_fingerprint(&current);
+        let next = apply_rules_recursive(&current, rules, rule_config, trace, debug_rules);
+        let after = logical_plan_fingerprint(&next);
+        if before == after {
+            return current;
+        }
+        current = next;
+    }
+    current
+}
+
+fn logical_plan_fingerprint(plan: &LogicalPlan) -> String {
+    plan.explain(0)
 }
 
 fn logical_to_physical(logical: &LogicalPlan) -> PhysicalPlan {

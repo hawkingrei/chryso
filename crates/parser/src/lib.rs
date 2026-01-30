@@ -377,7 +377,54 @@ impl Parser {
     fn parse_type_name(&mut self) -> ChrysoResult<String> {
         // TODO: Replace this heuristic with a grammar-backed type parser.
         // TODO: Implement a dedicated type parser for complex type syntax.
-        let mut output = String::new();
+        let Some(first) = self.next() else {
+            return Ok(String::new());
+        };
+        let first_part = match first {
+            Token::Ident(name) => name,
+            Token::Keyword(keyword) => keyword_label(keyword).to_string(),
+            other => {
+                return Err(ChrysoError::new(format!(
+                    "unexpected token in type: {}",
+                    token_label(&other)
+                )));
+            }
+        };
+        let first_lower = first_part.to_ascii_lowercase();
+        if matches!(first_lower.as_str(), "decimal" | "numeric" | "varchar") {
+            let mut output = first_lower;
+            if self.consume_token(&Token::LParen) {
+                let mut parts = Vec::new();
+                loop {
+                    let part = match self.next() {
+                        Some(Token::Number(value)) => value,
+                        Some(Token::Ident(value)) => value,
+                        Some(Token::Keyword(keyword)) => keyword_label(keyword).to_string(),
+                        other => {
+                            return Err(ChrysoError::new(format!(
+                                "unexpected token in type parameters: {}",
+                                other
+                                    .as_ref()
+                                    .map(token_label)
+                                    .unwrap_or_else(|| "end of input".to_string())
+                            )));
+                        }
+                    };
+                    parts.push(part);
+                    if self.consume_token(&Token::Comma) {
+                        continue;
+                    }
+                    self.expect_token(Token::RParen)?;
+                    break;
+                }
+                output.push('(');
+                output.push_str(&parts.join(","));
+                output.push(')');
+            }
+            return Ok(output);
+        }
+
+        let mut output = first_part;
         let mut depth = 0usize;
         loop {
             let token = match self.peek().cloned() {
@@ -3264,6 +3311,21 @@ mod tests {
         assert_eq!(create.columns[0].data_type, "decimal(10,2)");
         assert_eq!(create.columns[1].data_type, "timestamp with time zone");
         assert_eq!(create.columns[2].data_type, "pg_catalog.int4");
+    }
+
+    #[test]
+    fn parse_create_table_with_numeric_spacing() {
+        let sql = "create table metrics (price numeric ( 10 , 2 ), name varchar ( 20 ))";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::CreateTable(create) = stmt else {
+            panic!("expected create table");
+        };
+        assert_eq!(create.columns.len(), 2);
+        assert_eq!(create.columns[0].data_type, "numeric(10,2)");
+        assert_eq!(create.columns[1].data_type, "varchar(20)");
     }
 
     #[test]

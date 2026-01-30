@@ -208,12 +208,23 @@ fn build_select(select: SelectStatement) -> ChrysoResult<LogicalPlan> {
         };
     }
     if !select.order_by.is_empty() {
-        plan = LogicalPlan::Sort {
-            order_by: select.order_by,
-            input: Box::new(plan),
-        };
+        if let (Some(limit), None) = (select.limit, select.offset) {
+            plan = LogicalPlan::TopN {
+                order_by: select.order_by,
+                limit,
+                input: Box::new(plan),
+            };
+        } else {
+            plan = LogicalPlan::Sort {
+                order_by: select.order_by,
+                input: Box::new(plan),
+            };
+        }
     }
     if select.limit.is_some() || select.offset.is_some() {
+        if matches!(plan, LogicalPlan::TopN { .. }) {
+            return Ok(plan);
+        }
         plan = LogicalPlan::Limit {
             limit: select.limit,
             offset: select.offset,
@@ -755,6 +766,17 @@ mod tests {
         let stmt = parser.parse(sql).expect("parse");
         let logical = PlanBuilder::build(stmt).expect("plan");
         assert!(matches!(logical, LogicalPlan::Scan { .. }));
+    }
+
+    #[test]
+    fn planner_builds_topn_for_ordered_limit() {
+        let sql = "select * from t order by id limit 5";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        assert!(matches!(logical, LogicalPlan::TopN { .. }));
     }
 }
 
