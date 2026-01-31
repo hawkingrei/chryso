@@ -55,9 +55,13 @@ mod tests {
         config.cost_config = Some(chryso::optimizer::CostModelConfig {
             scan: 1.0,
             filter: 1.0,
+            projection: 0.1,
             join: 10.0,
             sort: 0.2,
             aggregate: 1.0,
+            limit: 0.05,
+            derived: 0.1,
+            dml: 1.0,
             join_hash_multiplier: 1.0,
             join_nested_multiplier: 3.0,
             max_cost: 1.0e9,

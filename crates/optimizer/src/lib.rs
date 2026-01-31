@@ -395,15 +395,7 @@ fn optimize_with_cascades(
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
-        Box::new(UnitCostModel)
-    } else {
-        let model = match &config.cost_config {
-            Some(config) => cost::StatsCostModel::with_config(_stats, config.clone()),
-            None => cost::StatsCostModel::new(_stats),
-        };
-        Box::new(model)
-    };
+    let cost_model = build_cost_model(_stats, config);
     let mut best = memo
         .best_physical(root, cost_model.as_ref())
         .unwrap_or_else(|| logical_to_physical(&logical));
@@ -433,15 +425,7 @@ fn optimize_with_cascades_memo(
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
-        Box::new(UnitCostModel)
-    } else {
-        let model = match &config.cost_config {
-            Some(config) => cost::StatsCostModel::with_config(_stats, config.clone()),
-            None => cost::StatsCostModel::new(_stats),
-        };
-        Box::new(model)
-    };
+    let cost_model = build_cost_model(_stats, config);
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());
     let mut best = memo
@@ -452,6 +436,21 @@ fn optimize_with_cascades_memo(
         best = crate::enforcer::enforce(best, &required);
     }
     (best, trace)
+}
+
+fn build_cost_model<'a>(
+    stats: &'a StatsCache,
+    config: &'a OptimizerConfig,
+) -> Box<dyn CostModel + 'a> {
+    if stats.is_empty() {
+        Box::new(UnitCostModel)
+    } else {
+        let model = match &config.cost_config {
+            Some(config) => cost::StatsCostModel::with_config(stats, config.clone()),
+            None => cost::StatsCostModel::new(stats),
+        };
+        Box::new(model)
+    }
 }
 
 fn ensure_stats(
