@@ -27,7 +27,9 @@ impl SqlParser for YaccParser {
             return Err(ChrysoError::new(rendered.join("\n")));
         }
         if result.is_none() {
-            return Err(ChrysoError::new("yacc parser failed to produce a statement"));
+            return Err(ChrysoError::new(
+                "yacc parser failed to produce a statement",
+            ));
         }
         let parser = SimpleParser::new(self.config.clone());
         parser.parse(sql)
