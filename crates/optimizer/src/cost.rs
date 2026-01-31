@@ -117,42 +117,31 @@ impl CostModelConfig {
         tenant: Option<&str>,
     ) -> Self {
         let mut updated = self.clone();
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_SCAN) {
-            updated.scan = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_FILTER) {
-            updated.filter = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_PROJECTION) {
-            updated.projection = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN) {
-            updated.join = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_SORT) {
-            updated.sort = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_AGGREGATE) {
-            updated.aggregate = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_LIMIT) {
-            updated.limit = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_DERIVED) {
-            updated.derived = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_DML) {
-            updated.dml = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN_HASH_MULTIPLIER) {
-            updated.join_hash_multiplier = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN_NESTED_MULTIPLIER) {
-            updated.join_nested_multiplier = value;
-        }
-        if let Some(value) = registry.get_f64(tenant, Self::PARAM_MAX_COST) {
-            updated.max_cost = value;
-        }
+        let apply = |key: &str, target: &mut f64| {
+            if let Some(value) = registry.get_f64(tenant, key) {
+                if value.is_finite() && value > 0.0 {
+                    *target = value;
+                }
+            }
+        };
+        apply(Self::PARAM_SCAN, &mut updated.scan);
+        apply(Self::PARAM_FILTER, &mut updated.filter);
+        apply(Self::PARAM_PROJECTION, &mut updated.projection);
+        apply(Self::PARAM_JOIN, &mut updated.join);
+        apply(Self::PARAM_SORT, &mut updated.sort);
+        apply(Self::PARAM_AGGREGATE, &mut updated.aggregate);
+        apply(Self::PARAM_LIMIT, &mut updated.limit);
+        apply(Self::PARAM_DERIVED, &mut updated.derived);
+        apply(Self::PARAM_DML, &mut updated.dml);
+        apply(
+            Self::PARAM_JOIN_HASH_MULTIPLIER,
+            &mut updated.join_hash_multiplier,
+        );
+        apply(
+            Self::PARAM_JOIN_NESTED_MULTIPLIER,
+            &mut updated.join_nested_multiplier,
+        );
+        apply(Self::PARAM_MAX_COST, &mut updated.max_cost);
         updated
     }
 }
@@ -169,6 +158,22 @@ impl CostModel for UnitCostModel {
 impl std::fmt::Debug for UnitCostModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("UnitCostModel")
+    }
+}
+
+pub struct UnitCostModelWithConfig {
+    config: CostModelConfig,
+}
+
+impl UnitCostModelWithConfig {
+    pub fn new(config: CostModelConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl CostModel for UnitCostModelWithConfig {
+    fn cost(&self, plan: &PhysicalPlan) -> Cost {
+        Cost(plan.node_count() as f64 + join_penalty(plan, &self.config))
     }
 }
 
@@ -298,6 +303,15 @@ mod tests {
         let config = CostModelConfig::default();
         let updated = config.apply_system_params(&registry, Some("tenant"));
         assert_eq!(updated.filter, 0.9);
+    }
+
+    #[test]
+    fn system_params_ignore_invalid_values() {
+        let registry = SystemParamRegistry::new();
+        registry.set_default_param(CostModelConfig::PARAM_SORT, SystemParamValue::Float(0.0));
+        let config = CostModelConfig::default();
+        let updated = config.apply_system_params(&registry, Some("tenant"));
+        assert_eq!(updated.sort, config.sort);
     }
 }
 

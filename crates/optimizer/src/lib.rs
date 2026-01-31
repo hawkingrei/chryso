@@ -466,17 +466,17 @@ fn build_cost_model<'a>(
     stats: &'a StatsCache,
     config: &'a OptimizerConfig,
 ) -> Box<dyn CostModel + 'a> {
+    let base = config.cost_config.clone().unwrap_or_default();
+    let model_config = match &config.system_params {
+        Some(registry) => {
+            let tenant = config.tenant_id.as_deref();
+            base.apply_system_params(registry, tenant)
+        }
+        None => base,
+    };
     if stats.is_empty() {
-        Box::new(UnitCostModel)
+        Box::new(cost::UnitCostModelWithConfig::new(model_config))
     } else {
-        let base = config.cost_config.clone().unwrap_or_default();
-        let model_config = match &config.system_params {
-            Some(registry) => {
-                let tenant = config.tenant_id.as_deref();
-                base.apply_system_params(registry, tenant)
-            }
-            None => base,
-        };
         Box::new(cost::StatsCostModel::with_config(stats, model_config))
     }
 }
