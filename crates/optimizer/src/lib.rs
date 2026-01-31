@@ -112,6 +112,8 @@ pub struct OptimizerConfig {
     pub debug_rules: bool,
     pub stats_provider: Option<std::sync::Arc<dyn chryso_metadata::StatsProvider>>,
     pub cost_config: Option<CostModelConfig>,
+    pub system_params: Option<std::sync::Arc<chryso_core::system_params::SystemParamRegistry>>,
+    pub tenant_id: Option<String>,
 }
 
 impl std::fmt::Debug for OptimizerConfig {
@@ -126,6 +128,8 @@ impl std::fmt::Debug for OptimizerConfig {
             .field("debug_rules", &self.debug_rules)
             .field("stats_provider", &self.stats_provider.is_some())
             .field("cost_config", &self.cost_config.is_some())
+            .field("system_params", &self.system_params.is_some())
+            .field("tenant_id", &self.tenant_id)
             .finish()
     }
 }
@@ -164,6 +168,7 @@ pub struct SearchBudget {
 mod tests {
     use super::cost::UnitCostModel;
     use super::{CascadesOptimizer, OptimizerConfig};
+    use crate::CostModelConfig;
     use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use chryso_metadata::{StatsCache, StatsSnapshot, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
@@ -299,6 +304,23 @@ mod tests {
             .optimize_with_trace(&logical, &mut stats);
         assert!(matches!(physical, PhysicalPlan::TableScan { .. }));
     }
+
+    #[test]
+    fn optimizer_uses_system_param_override() {
+        let registry = chryso_core::system_params::SystemParamRegistry::new();
+        registry.set_default_param(
+            CostModelConfig::PARAM_FILTER,
+            chryso_core::system_params::SystemParamValue::Float(9.0),
+        );
+        let mut config = OptimizerConfig::default();
+        config.system_params = Some(std::sync::Arc::new(registry));
+        let base = CostModelConfig::default();
+        let updated = base.apply_system_params(
+            config.system_params.as_ref().unwrap(),
+            config.tenant_id.as_deref(),
+        );
+        assert_eq!(updated.filter, 9.0);
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -313,6 +335,8 @@ impl Default for OptimizerConfig {
             debug_rules: false,
             stats_provider: None,
             cost_config: None,
+            system_params: None,
+            tenant_id: None,
         }
     }
 }
@@ -445,11 +469,15 @@ fn build_cost_model<'a>(
     if stats.is_empty() {
         Box::new(UnitCostModel)
     } else {
-        let model = match &config.cost_config {
-            Some(config) => cost::StatsCostModel::with_config(stats, config.clone()),
-            None => cost::StatsCostModel::new(stats),
+        let base = config.cost_config.clone().unwrap_or_default();
+        let model_config = match &config.system_params {
+            Some(registry) => {
+                let tenant = config.tenant_id.as_deref();
+                base.apply_system_params(registry, tenant)
+            }
+            None => base,
         };
-        Box::new(model)
+        Box::new(cost::StatsCostModel::with_config(stats, model_config))
     }
 }
 

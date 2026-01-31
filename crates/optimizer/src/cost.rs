@@ -41,6 +41,19 @@ impl Default for CostModelConfig {
 }
 
 impl CostModelConfig {
+    pub const PARAM_SCAN: &'static str = "optimizer.cost.scan";
+    pub const PARAM_FILTER: &'static str = "optimizer.cost.filter";
+    pub const PARAM_PROJECTION: &'static str = "optimizer.cost.projection";
+    pub const PARAM_JOIN: &'static str = "optimizer.cost.join";
+    pub const PARAM_SORT: &'static str = "optimizer.cost.sort";
+    pub const PARAM_AGGREGATE: &'static str = "optimizer.cost.aggregate";
+    pub const PARAM_LIMIT: &'static str = "optimizer.cost.limit";
+    pub const PARAM_DERIVED: &'static str = "optimizer.cost.derived";
+    pub const PARAM_DML: &'static str = "optimizer.cost.dml";
+    pub const PARAM_JOIN_HASH_MULTIPLIER: &'static str = "optimizer.cost.join_hash_multiplier";
+    pub const PARAM_JOIN_NESTED_MULTIPLIER: &'static str = "optimizer.cost.join_nested_multiplier";
+    pub const PARAM_MAX_COST: &'static str = "optimizer.cost.max_cost";
+
     pub fn load_from_path(path: impl AsRef<Path>) -> chryso_core::error::ChrysoResult<Self> {
         let content = fs::read_to_string(path.as_ref()).map_err(|err| {
             chryso_core::error::ChrysoError::new(format!("read cost config failed: {err}"))
@@ -97,6 +110,51 @@ impl CostModelConfig {
             )))
         }
     }
+
+    pub fn apply_system_params(
+        &self,
+        registry: &chryso_core::system_params::SystemParamRegistry,
+        tenant: Option<&str>,
+    ) -> Self {
+        let mut updated = self.clone();
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_SCAN) {
+            updated.scan = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_FILTER) {
+            updated.filter = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_PROJECTION) {
+            updated.projection = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN) {
+            updated.join = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_SORT) {
+            updated.sort = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_AGGREGATE) {
+            updated.aggregate = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_LIMIT) {
+            updated.limit = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_DERIVED) {
+            updated.derived = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_DML) {
+            updated.dml = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN_HASH_MULTIPLIER) {
+            updated.join_hash_multiplier = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_JOIN_NESTED_MULTIPLIER) {
+            updated.join_nested_multiplier = value;
+        }
+        if let Some(value) = registry.get_f64(tenant, Self::PARAM_MAX_COST) {
+            updated.max_cost = value;
+        }
+        updated
+    }
 }
 
 pub struct UnitCostModel;
@@ -152,6 +210,7 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 #[cfg(test)]
 mod tests {
     use super::{CostModel, CostModelConfig, StatsCache, StatsCostModel, UnitCostModel};
+    use chryso_core::system_params::{SystemParamRegistry, SystemParamValue};
     use chryso_metadata::ColumnStats;
     use chryso_planner::PhysicalPlan;
 
@@ -230,6 +289,18 @@ mod tests {
         config.join = 0.0;
         let err = config.validate().expect_err("invalid config");
         assert!(err.to_string().contains("join"));
+    }
+
+    #[test]
+    fn system_params_override_cost_config() {
+        let registry = SystemParamRegistry::new();
+        registry.set_default_param(
+            CostModelConfig::PARAM_FILTER,
+            SystemParamValue::Float(0.9),
+        );
+        let config = CostModelConfig::default();
+        let updated = config.apply_system_params(&registry, Some("tenant"));
+        assert_eq!(updated.filter, 0.9);
     }
 }
 
