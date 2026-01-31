@@ -154,16 +154,18 @@ impl StatsSnapshot {
     }
 
     pub fn from_cache(cache: &StatsCache) -> Self {
-        let tables = cache
+        let mut tables = cache
             .table_stats
             .iter()
             .map(|(name, stats)| (name.clone(), stats.clone()))
-            .collect();
-        let columns = cache
+            .collect::<Vec<_>>();
+        let mut columns = cache
             .column_stats
             .iter()
             .map(|((table, column), stats)| (table.clone(), column.clone(), stats.clone()))
-            .collect();
+            .collect::<Vec<_>>();
+        tables.sort_by(|(a, _), (b, _)| a.cmp(b));
+        columns.sort_by(|(ta, ca, _), (tb, cb, _)| (ta, ca).cmp(&(tb, cb)));
         Self { tables, columns }
     }
 
@@ -212,7 +214,7 @@ mod catalog_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnStats, StatsCache, TableStats};
+    use super::{ColumnStats, StatsCache, StatsSnapshot, TableStats};
 
     #[test]
     fn stats_cache_roundtrip() {
@@ -259,5 +261,51 @@ mod tests {
         let c1 = cache.column_stats("t1", "c1").is_some();
         let c2 = cache.column_stats("t1", "c2").is_some();
         assert!(c1 ^ c2);
+    }
+
+    #[test]
+    fn stats_snapshot_is_sorted() {
+        let mut cache = StatsCache::new();
+        cache.insert_table_stats("b", TableStats { row_count: 2.0 });
+        cache.insert_table_stats("a", TableStats { row_count: 1.0 });
+        cache.insert_column_stats(
+            "b",
+            "y",
+            ColumnStats {
+                distinct_count: 2.0,
+                null_fraction: 0.0,
+            },
+        );
+        cache.insert_column_stats(
+            "a",
+            "z",
+            ColumnStats {
+                distinct_count: 3.0,
+                null_fraction: 0.0,
+            },
+        );
+        cache.insert_column_stats(
+            "a",
+            "b",
+            ColumnStats {
+                distinct_count: 4.0,
+                null_fraction: 0.0,
+            },
+        );
+
+        let snapshot = StatsSnapshot::from_cache(&cache);
+        let tables = snapshot
+            .tables
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        let columns = snapshot
+            .columns
+            .iter()
+            .map(|(table, column, _)| (table.as_str(), column.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(tables, vec!["a", "b"]);
+        assert_eq!(columns, vec![("a", "b"), ("a", "z"), ("b", "y")]);
     }
 }
