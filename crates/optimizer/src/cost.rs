@@ -294,10 +294,7 @@ mod tests {
     #[test]
     fn system_params_override_cost_config() {
         let registry = SystemParamRegistry::new();
-        registry.set_default_param(
-            CostModelConfig::PARAM_FILTER,
-            SystemParamValue::Float(0.9),
-        );
+        registry.set_default_param(CostModelConfig::PARAM_FILTER, SystemParamValue::Float(0.9));
         let config = CostModelConfig::default();
         let updated = config.apply_system_params(&registry, Some("tenant"));
         assert_eq!(updated.filter, 0.9);
