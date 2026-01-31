@@ -474,6 +474,11 @@ fn build_cost_model<'a>(
         }
         None => base,
     };
+    let model_config = if model_config.validate().is_ok() {
+        model_config
+    } else {
+        CostModelConfig::default()
+    };
     if stats.is_empty() {
         Box::new(cost::UnitCostModelWithConfig::new(model_config))
     } else {

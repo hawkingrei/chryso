@@ -1315,7 +1315,7 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
     let mut uf = UnionFind::new();
     let mut literal_bindings = std::collections::HashMap::<String, Literal>::new();
     let mut literal_conflicts = std::collections::HashSet::<String>::new();
-    let mut conflict_pairs = std::collections::HashSet::<(String, String)>::new();
+    let mut conflict_pairs = std::collections::BTreeSet::<(String, String)>::new();
 
     for conjunct in &conjuncts {
         let Expr::BinaryOp { left, op, right } = conjunct else {

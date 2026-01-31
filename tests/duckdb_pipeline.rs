@@ -37,22 +37,14 @@ mod tests {
 
     #[test]
     fn cost_config_allows_deterministic_preference() {
-        let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
-        adapter
-            .execute_sql("create table t (id integer, v integer)")
-            .expect("create table");
-        adapter
-            .execute_sql("insert into t values (1, 10), (2, 20)")
-            .expect("insert");
-
-        let sql = "select id from t order by id limit 1";
+        let sql = "select t1.id from t1 join t2 on t1.id = t2.id";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
         let stmt = parser.parse(sql).expect("parse");
         let logical = PlanBuilder::build(stmt).expect("plan");
-        let mut config = OptimizerConfig::default();
-        config.cost_config = Some(chryso::optimizer::CostModelConfig {
+        let mut prefer_hash = OptimizerConfig::default();
+        prefer_hash.cost_config = Some(chryso::optimizer::CostModelConfig {
             scan: 1.0,
             filter: 1.0,
             projection: 0.1,
@@ -63,14 +55,33 @@ mod tests {
             derived: 0.1,
             dml: 1.0,
             join_hash_multiplier: 1.0,
-            join_nested_multiplier: 3.0,
+            join_nested_multiplier: 10.0,
             max_cost: 1.0e9,
         });
-        let optimizer = CascadesOptimizer::new(config);
+        let optimizer = CascadesOptimizer::new(prefer_hash);
         let mut stats = StatsCache::new();
         let physical = optimizer.optimize(&logical, &mut stats);
-        let result = adapter.execute(&physical).expect("execute");
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], "1");
+        let explain = physical.explain(0);
+        assert!(explain.contains("algorithm=Hash"));
+
+        let mut prefer_nested = OptimizerConfig::default();
+        prefer_nested.cost_config = Some(chryso::optimizer::CostModelConfig {
+            scan: 1.0,
+            filter: 1.0,
+            projection: 0.1,
+            join: 10.0,
+            sort: 0.2,
+            aggregate: 1.0,
+            limit: 0.05,
+            derived: 0.1,
+            dml: 1.0,
+            join_hash_multiplier: 10.0,
+            join_nested_multiplier: 1.0,
+            max_cost: 1.0e9,
+        });
+        let optimizer = CascadesOptimizer::new(prefer_nested);
+        let physical = optimizer.optimize(&logical, &mut stats);
+        let explain = physical.explain(0);
+        assert!(explain.contains("algorithm=NestedLoop"));
     }
 }

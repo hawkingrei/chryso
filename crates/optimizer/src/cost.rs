@@ -1,11 +1,12 @@
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
 pub use chryso_planner::cost::{Cost, CostModel};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CostModelConfig {
     pub scan: f64,
     pub filter: f64,
@@ -55,28 +56,7 @@ impl CostModelConfig {
     pub const PARAM_MAX_COST: &'static str = "optimizer.cost.max_cost";
 
     pub fn load_from_path(path: impl AsRef<Path>) -> chryso_core::error::ChrysoResult<Self> {
-        let content = fs::read_to_string(path.as_ref()).map_err(|err| {
-            chryso_core::error::ChrysoError::new(format!("read cost config failed: {err}"))
-        })?;
-        let value: CostModelConfig = if path
-            .as_ref()
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("toml"))
-            .unwrap_or(false)
-        {
-            toml::from_str(&content).map_err(|err| {
-                chryso_core::error::ChrysoError::new(format!(
-                    "parse toml cost config failed: {err}"
-                ))
-            })?
-        } else {
-            serde_json::from_str(&content).map_err(|err| {
-                chryso_core::error::ChrysoError::new(format!(
-                    "parse json cost config failed: {err}"
-                ))
-            })?
-        };
+        let value: CostModelConfig = load_config_from_path(path, "cost config")?;
         value.validate()?;
         Ok(value)
     }
@@ -151,7 +131,7 @@ pub struct UnitCostModel;
 impl CostModel for UnitCostModel {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
         let default = CostModelConfig::default();
-        Cost(plan.node_count() as f64 + join_penalty(plan, &default))
+        Cost(total_weight(plan, &default))
     }
 }
 
@@ -173,7 +153,7 @@ impl UnitCostModelWithConfig {
 
 impl CostModel for UnitCostModelWithConfig {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        Cost(plan.node_count() as f64 + join_penalty(plan, &self.config))
+        Cost(total_weight(plan, &self.config))
     }
 }
 
@@ -191,7 +171,15 @@ impl<'a> StatsCostModel<'a> {
     }
 
     pub fn with_config(stats: &'a StatsCache, config: CostModelConfig) -> Self {
-        Self { stats, config }
+        let validated = if config.validate().is_ok() {
+            config
+        } else {
+            CostModelConfig::default()
+        };
+        Self {
+            stats,
+            config: validated,
+        }
     }
 }
 
@@ -228,7 +216,7 @@ mod tests {
             }),
         };
         let cost = UnitCostModel.cost(&plan);
-        assert_eq!(cost.0, 2.0);
+        assert_eq!(cost.0, 1.5);
     }
 
     #[test]
@@ -315,15 +303,57 @@ mod tests {
     }
 }
 
+pub(crate) fn load_config_from_path<T: DeserializeOwned>(
+    path: impl AsRef<Path>,
+    label: &str,
+) -> chryso_core::error::ChrysoResult<T> {
+    let content = fs::read_to_string(path.as_ref()).map_err(|err| {
+        chryso_core::error::ChrysoError::new(format!("read {label} failed: {err}"))
+    })?;
+    if path
+        .as_ref()
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false)
+    {
+        toml::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse toml {label} failed: {err}"))
+        })
+    } else {
+        serde_json::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse json {label} failed: {err}"))
+        })
+    }
+}
+
 fn join_penalty(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
     match plan {
-        PhysicalPlan::Join { algorithm, .. } => match algorithm {
-            chryso_planner::JoinAlgorithm::Hash => config.join * config.join_hash_multiplier,
-            chryso_planner::JoinAlgorithm::NestedLoop => {
-                config.join * config.join_nested_multiplier
-            }
-        },
-        _ => 0.0,
+        PhysicalPlan::Join {
+            algorithm,
+            left,
+            right,
+            ..
+        } => {
+            let current = match algorithm {
+                chryso_planner::JoinAlgorithm::Hash => config.join * config.join_hash_multiplier,
+                chryso_planner::JoinAlgorithm::NestedLoop => {
+                    config.join * config.join_nested_multiplier
+                }
+            };
+            current + join_penalty(left, config) + join_penalty(right, config)
+        }
+        PhysicalPlan::Filter { input, .. }
+        | PhysicalPlan::Projection { input, .. }
+        | PhysicalPlan::Aggregate { input, .. }
+        | PhysicalPlan::Distinct { input }
+        | PhysicalPlan::TopN { input, .. }
+        | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => join_penalty(input, config),
+        PhysicalPlan::TableScan { .. }
+        | PhysicalPlan::IndexScan { .. }
+        | PhysicalPlan::Dml { .. } => 0.0,
     }
 }
 
@@ -341,6 +371,27 @@ fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
         PhysicalPlan::Derived { .. } => config.derived,
         PhysicalPlan::Dml { .. } => config.dml,
     }
+}
+
+fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+    let base = node_weight(plan, config);
+    let children = match plan {
+        PhysicalPlan::Join { left, right, .. } => {
+            total_weight(left, config) + total_weight(right, config)
+        }
+        PhysicalPlan::Filter { input, .. }
+        | PhysicalPlan::Projection { input, .. }
+        | PhysicalPlan::Aggregate { input, .. }
+        | PhysicalPlan::Distinct { input }
+        | PhysicalPlan::TopN { input, .. }
+        | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => total_weight(input, config),
+        PhysicalPlan::TableScan { .. }
+        | PhysicalPlan::IndexScan { .. }
+        | PhysicalPlan::Dml { .. } => 0.0,
+    };
+    base + children + join_penalty(plan, config)
 }
 
 fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {

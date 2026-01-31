@@ -19,14 +19,7 @@ impl SqlParser for YaccParser {
         let lexerdef = sql_l::lexerdef();
         let lexer = lexerdef.lexer(sql);
         let (result, errors) = sql_y::parse(&lexer);
-        if !errors.is_empty() {
-            let mut rendered = Vec::new();
-            for error in errors {
-                rendered.push(error.pp(&lexer, &sql_y::token_epp).to_string());
-            }
-            return Err(ChrysoError::new(rendered.join("\n")));
-        }
-        if result.is_none() {
+        if errors.is_empty() && result.is_none() {
             return Err(ChrysoError::new(
                 "yacc parser failed to produce a statement",
             ));
