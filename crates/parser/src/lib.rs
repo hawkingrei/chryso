@@ -122,6 +122,12 @@ enum Keyword {
     With,
     Recursive,
     Returning,
+    Fetch,
+    First,
+    Next,
+    Only,
+    Top,
+    Qualify,
     True,
     False,
     Is,
@@ -136,7 +142,6 @@ enum Keyword {
     Else,
     End,
     Nulls,
-    First,
     Last,
     Escape,
     Cast,
@@ -147,6 +152,14 @@ enum Keyword {
     Regexp,
     Similar,
     To,
+    Rows,
+    Row,
+    Range,
+    Groups,
+    Current,
+    Unbounded,
+    Preceding,
+    Following,
 }
 
 struct Parser {
@@ -590,6 +603,11 @@ impl Parser {
     }
 
     fn parse_select(&mut self) -> ChrysoResult<SelectStatement> {
+        let top = if self.consume_keyword(Keyword::Top) {
+            Some(self.parse_top_value()?)
+        } else {
+            None
+        };
         let distinct = self.consume_keyword(Keyword::Distinct);
         let distinct_on = if distinct && self.consume_keyword(Keyword::On) {
             self.expect_token(Token::LParen)?;
@@ -621,13 +639,18 @@ impl Parser {
         } else {
             None
         };
+        let qualify = if self.consume_keyword(Keyword::Qualify) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let order_by = if self.consume_keyword(Keyword::Order) {
             self.expect_keyword(Keyword::By)?;
             self.parse_order_by_list()?
         } else {
             Vec::new()
         };
-        let limit = if self.consume_keyword(Keyword::Limit) {
+        let mut limit = if self.consume_keyword(Keyword::Limit) {
             Some(self.parse_limit_value()?)
         } else {
             None
@@ -637,6 +660,32 @@ impl Parser {
         } else {
             None
         };
+        if self.consume_keyword(Keyword::Fetch) {
+            let _ = if self.consume_keyword(Keyword::First) {
+                true
+            } else if self.consume_keyword(Keyword::Next) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
+            };
+            let fetch_value = self.parse_limit_value()?;
+            let _ = if self.consume_keyword(Keyword::Row) {
+                true
+            } else if self.consume_keyword(Keyword::Rows) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
+            };
+            let _ = self.consume_keyword(Keyword::Only);
+            if limit.is_none() {
+                limit = Some(fetch_value);
+            }
+        }
+        if let Some(top_value) = top {
+            if limit.is_none() {
+                limit = Some(top_value);
+            }
+        }
         Ok(SelectStatement {
             distinct,
             distinct_on,
@@ -645,6 +694,7 @@ impl Parser {
             selection,
             group_by,
             having,
+            qualify,
             order_by,
             limit,
             offset,
@@ -873,6 +923,16 @@ impl Parser {
                 .map_err(|_| ChrysoError::new("invalid LIMIT value"))
         } else {
             Err(ChrysoError::new("LIMIT expects a number"))
+        }
+    }
+
+    fn parse_top_value(&mut self) -> ChrysoResult<u64> {
+        if self.consume_token(&Token::LParen) {
+            let value = self.parse_limit_value()?;
+            self.expect_token(Token::RParen)?;
+            Ok(value)
+        } else {
+            self.parse_limit_value()
         }
     }
 
@@ -1379,6 +1439,7 @@ impl Parser {
         self.expect_token(Token::LParen)?;
         let mut partition_by = Vec::new();
         let mut order_by = Vec::new();
+        let mut frame = None;
         if self.consume_keyword(Keyword::Partition) {
             self.expect_keyword(Keyword::By)?;
             partition_by = self.parse_expr_list()?;
@@ -1387,11 +1448,72 @@ impl Parser {
             self.expect_keyword(Keyword::By)?;
             order_by = self.parse_order_by_list()?;
         }
+        if self.consume_keyword(Keyword::Rows) {
+            frame = Some(self.parse_window_frame(chryso_core::ast::WindowFrameKind::Rows)?);
+        } else if self.consume_keyword(Keyword::Range) {
+            frame = Some(self.parse_window_frame(chryso_core::ast::WindowFrameKind::Range)?);
+        } else if self.consume_keyword(Keyword::Groups) {
+            frame = Some(self.parse_window_frame(chryso_core::ast::WindowFrameKind::Groups)?);
+        }
         self.expect_token(Token::RParen)?;
         Ok(chryso_core::ast::WindowSpec {
             partition_by,
             order_by,
+            frame,
         })
+    }
+
+    fn parse_window_frame(
+        &mut self,
+        kind: chryso_core::ast::WindowFrameKind,
+    ) -> ChrysoResult<chryso_core::ast::WindowFrame> {
+        if self.consume_keyword(Keyword::Between) {
+            let start = self.parse_window_frame_bound()?;
+            self.expect_keyword(Keyword::And)?;
+            let end = self.parse_window_frame_bound()?;
+            Ok(chryso_core::ast::WindowFrame {
+                kind,
+                start,
+                end: Some(end),
+            })
+        } else {
+            let start = self.parse_window_frame_bound()?;
+            Ok(chryso_core::ast::WindowFrame {
+                kind,
+                start,
+                end: None,
+            })
+        }
+    }
+
+    fn parse_window_frame_bound(&mut self) -> ChrysoResult<chryso_core::ast::WindowFrameBound> {
+        if self.consume_keyword(Keyword::Unbounded) {
+            if self.consume_keyword(Keyword::Preceding) {
+                return Ok(chryso_core::ast::WindowFrameBound::UnboundedPreceding);
+            }
+            if self.consume_keyword(Keyword::Following) {
+                return Ok(chryso_core::ast::WindowFrameBound::UnboundedFollowing);
+            }
+            return Err(ChrysoError::new("UNBOUNDED expects PRECEDING or FOLLOWING"));
+        }
+        if self.consume_keyword(Keyword::Current) {
+            self.expect_keyword(Keyword::Row)?;
+            return Ok(chryso_core::ast::WindowFrameBound::CurrentRow);
+        }
+        let expr = self.parse_additive()?;
+        if self.consume_keyword(Keyword::Preceding) {
+            return Ok(chryso_core::ast::WindowFrameBound::Preceding(Box::new(
+                expr,
+            )));
+        }
+        if self.consume_keyword(Keyword::Following) {
+            return Ok(chryso_core::ast::WindowFrameBound::Following(Box::new(
+                expr,
+            )));
+        }
+        Err(ChrysoError::new(
+            "window frame bound expects PRECEDING or FOLLOWING",
+        ))
     }
 
     fn parse_identifier_list(&mut self) -> ChrysoResult<Vec<String>> {
@@ -1491,9 +1613,11 @@ impl Parser {
                     | Keyword::Where
                     | Keyword::Group
                     | Keyword::Having
+                    | Keyword::Qualify
                     | Keyword::Order
                     | Keyword::Offset
                     | Keyword::Limit
+                    | Keyword::Fetch
                     | Keyword::Join
                     | Keyword::Left
                     | Keyword::Cross
@@ -1517,9 +1641,11 @@ impl Parser {
                     | Keyword::Where
                     | Keyword::Group
                     | Keyword::Having
+                    | Keyword::Qualify
                     | Keyword::Order
                     | Keyword::Offset
                     | Keyword::Limit
+                    | Keyword::Fetch
             )) | Some(Token::Comma)
         )
     }
@@ -1675,6 +1801,12 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::With => "with",
         Keyword::Recursive => "recursive",
         Keyword::Returning => "returning",
+        Keyword::Fetch => "fetch",
+        Keyword::First => "first",
+        Keyword::Next => "next",
+        Keyword::Only => "only",
+        Keyword::Top => "top",
+        Keyword::Qualify => "qualify",
         Keyword::Analyze => "analyze",
         Keyword::Over => "over",
         Keyword::Partition => "partition",
@@ -1694,7 +1826,6 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Else => "else",
         Keyword::End => "end",
         Keyword::Nulls => "nulls",
-        Keyword::First => "first",
         Keyword::Last => "last",
         Keyword::Escape => "escape",
         Keyword::Cast => "cast",
@@ -1705,6 +1836,14 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Regexp => "regexp",
         Keyword::Similar => "similar",
         Keyword::To => "to",
+        Keyword::Rows => "rows",
+        Keyword::Row => "row",
+        Keyword::Range => "range",
+        Keyword::Groups => "groups",
+        Keyword::Current => "current",
+        Keyword::Unbounded => "unbounded",
+        Keyword::Preceding => "preceding",
+        Keyword::Following => "following",
     }
 }
 
@@ -1942,6 +2081,12 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "with" => Some(Keyword::With),
         "recursive" => Some(Keyword::Recursive),
         "returning" => Some(Keyword::Returning),
+        "fetch" => Some(Keyword::Fetch),
+        "first" => Some(Keyword::First),
+        "next" => Some(Keyword::Next),
+        "only" => Some(Keyword::Only),
+        "top" => Some(Keyword::Top),
+        "qualify" => Some(Keyword::Qualify),
         "in" => Some(Keyword::In),
         "true" => Some(Keyword::True),
         "false" => Some(Keyword::False),
@@ -1957,7 +2102,6 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "else" => Some(Keyword::Else),
         "end" => Some(Keyword::End),
         "nulls" => Some(Keyword::Nulls),
-        "first" => Some(Keyword::First),
         "last" => Some(Keyword::Last),
         "escape" => Some(Keyword::Escape),
         "cast" => Some(Keyword::Cast),
@@ -1968,6 +2112,14 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "regexp" => Some(Keyword::Regexp),
         "similar" => Some(Keyword::Similar),
         "to" => Some(Keyword::To),
+        "rows" => Some(Keyword::Rows),
+        "row" => Some(Keyword::Row),
+        "range" => Some(Keyword::Range),
+        "groups" => Some(Keyword::Groups),
+        "current" => Some(Keyword::Current),
+        "unbounded" => Some(Keyword::Unbounded),
+        "preceding" => Some(Keyword::Preceding),
+        "following" => Some(Keyword::Following),
         _ => None,
     }
 }
@@ -3456,6 +3608,74 @@ mod tests {
             Expr::WindowFunction { .. } => {}
             _ => panic!("expected window function"),
         }
+    }
+
+    #[test]
+    fn parse_window_frame_rows_between() {
+        let sql = "select sum(amount) over (partition by id order by ts rows between 1 preceding and current row) from sales";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let first = select.projection.first().expect("projection");
+        let Expr::WindowFunction { spec, .. } = &first.expr else {
+            panic!("expected window function");
+        };
+        let frame = spec.frame.as_ref().expect("frame");
+        assert!(matches!(
+            frame.kind,
+            chryso_core::ast::WindowFrameKind::Rows
+        ));
+        assert!(matches!(
+            frame.start,
+            chryso_core::ast::WindowFrameBound::Preceding(_)
+        ));
+        assert!(matches!(
+            frame.end,
+            Some(chryso_core::ast::WindowFrameBound::CurrentRow)
+        ));
+    }
+
+    #[test]
+    fn parse_qualify_clause() {
+        let sql = "select id from sales qualify id > 10";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.qualify.is_some());
+    }
+
+    #[test]
+    fn parse_top_clause() {
+        let sql = "select top 5 id from sales";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.limit, Some(5));
+    }
+
+    #[test]
+    fn parse_fetch_first_clause() {
+        let sql = "select id from sales order by id fetch first 3 rows only";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.limit, Some(3));
     }
 
     #[test]

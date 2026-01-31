@@ -1,5 +1,8 @@
-use chryso_core::ChrysoResult;
+use chryso_core::{ChrysoError, ChrysoResult};
 use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
+
+lrlex::lrlex_mod!("sql.l");
+lrpar::lrpar_mod!("sql.y");
 
 pub struct YaccParser {
     config: ParserConfig,
@@ -13,6 +16,19 @@ impl YaccParser {
 
 impl SqlParser for YaccParser {
     fn parse(&self, sql: &str) -> ChrysoResult<chryso_core::ast::Statement> {
+        let lexerdef = sql_l::lexerdef();
+        let lexer = lexerdef.lexer(sql);
+        let (result, errors) = sql_y::parse(&lexer);
+        if !errors.is_empty() {
+            let mut rendered = Vec::new();
+            for error in errors {
+                rendered.push(error.pp(&lexer, &sql_y::token_epp).to_string());
+            }
+            return Err(ChrysoError::new(rendered.join("\n")));
+        }
+        if result.is_none() {
+            return Err(ChrysoError::new("yacc parser failed to produce a statement"));
+        }
         let parser = SimpleParser::new(self.config.clone());
         parser.parse(sql)
     }
@@ -33,5 +49,14 @@ mod tests {
             chryso_core::ast::Statement::Select(_) => {}
             _ => panic!("expected select"),
         }
+    }
+
+    #[test]
+    fn yacc_parser_rejects_invalid_sql() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse("select from").unwrap_err();
+        assert!(!err.to_string().is_empty());
     }
 }

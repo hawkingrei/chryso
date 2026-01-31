@@ -91,6 +91,7 @@ pub struct SelectStatement {
     pub selection: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub having: Option<Expr>,
+    pub qualify: Option<Expr>,
     pub order_by: Vec<OrderByExpr>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
@@ -234,6 +235,30 @@ pub enum UnaryOperator {
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderByExpr>,
+    pub frame: Option<WindowFrame>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowFrameKind {
+    Rows,
+    Range,
+    Groups,
+}
+
+#[derive(Debug, Clone)]
+pub enum WindowFrameBound {
+    UnboundedPreceding,
+    Preceding(Box<Expr>),
+    CurrentRow,
+    Following(Box<Expr>),
+    UnboundedFollowing,
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowFrame {
+    pub kind: WindowFrameKind,
+    pub start: WindowFrameBound,
+    pub end: Option<WindowFrameBound>,
 }
 
 impl Expr {
@@ -311,6 +336,9 @@ impl Expr {
                         .collect::<Vec<_>>()
                         .join(", ");
                     clauses.push(format!("order by {order}"));
+                }
+                if let Some(frame) = &spec.frame {
+                    clauses.push(frame_to_sql(frame));
                 }
                 format!("{} over ({})", function.to_sql(), clauses.join(" "))
             }
@@ -444,6 +472,7 @@ impl Expr {
                                 && left.nulls_first == right.nulls_first
                                 && left.expr.structural_eq(&right.expr)
                         })
+                    && window_frame_eq(&left_spec.frame, &right_spec.frame)
             }
             (Expr::Subquery(left), Expr::Subquery(right)) => {
                 select_to_sql(left) == select_to_sql(right)
@@ -545,7 +574,27 @@ impl Expr {
             },
             Expr::WindowFunction { function, spec } => Expr::WindowFunction {
                 function: Box::new(function.normalize()),
-                spec: spec.clone(),
+                spec: WindowSpec {
+                    partition_by: spec
+                        .partition_by
+                        .iter()
+                        .map(|expr| expr.normalize())
+                        .collect(),
+                    order_by: spec
+                        .order_by
+                        .iter()
+                        .map(|order| OrderByExpr {
+                            expr: order.expr.normalize(),
+                            asc: order.asc,
+                            nulls_first: order.nulls_first,
+                        })
+                        .collect(),
+                    frame: spec.frame.as_ref().map(|frame| WindowFrame {
+                        kind: frame.kind,
+                        start: normalize_frame_bound(&frame.start),
+                        end: frame.end.as_ref().map(normalize_frame_bound),
+                    }),
+                },
             },
             Expr::Exists(select) => Expr::Exists(Box::new(normalize_select_inner(select))),
             Expr::InSubquery { expr, subquery } => Expr::InSubquery {
@@ -903,6 +952,7 @@ fn normalize_select(select: &SelectStatement) -> SelectStatement {
             .map(|expr| expr.normalize())
             .collect(),
         having: select.having.as_ref().map(|expr| expr.normalize()),
+        qualify: select.qualify.as_ref().map(|expr| expr.normalize()),
         order_by: select
             .order_by
             .iter()
@@ -988,6 +1038,10 @@ fn select_to_sql(select: &SelectStatement) -> String {
         output.push_str(" having ");
         output.push_str(&having.to_sql());
     }
+    if let Some(qualify) = &select.qualify {
+        output.push_str(" qualify ");
+        output.push_str(&qualify.to_sql());
+    }
     if !select.order_by.is_empty() {
         let order_by = select
             .order_by
@@ -1016,6 +1070,71 @@ fn select_to_sql(select: &SelectStatement) -> String {
         output.push_str(&offset.to_string());
     }
     output
+}
+
+fn frame_to_sql(frame: &WindowFrame) -> String {
+    let kind = match frame.kind {
+        WindowFrameKind::Rows => "rows",
+        WindowFrameKind::Range => "range",
+        WindowFrameKind::Groups => "groups",
+    };
+    let start = frame_bound_to_sql(&frame.start);
+    if let Some(end) = &frame.end {
+        format!("{kind} between {start} and {}", frame_bound_to_sql(end))
+    } else {
+        format!("{kind} {start}")
+    }
+}
+
+fn frame_bound_to_sql(bound: &WindowFrameBound) -> String {
+    match bound {
+        WindowFrameBound::UnboundedPreceding => "unbounded preceding".to_string(),
+        WindowFrameBound::Preceding(expr) => format!("{} preceding", expr.to_sql()),
+        WindowFrameBound::CurrentRow => "current row".to_string(),
+        WindowFrameBound::Following(expr) => format!("{} following", expr.to_sql()),
+        WindowFrameBound::UnboundedFollowing => "unbounded following".to_string(),
+    }
+}
+
+fn normalize_frame_bound(bound: &WindowFrameBound) -> WindowFrameBound {
+    match bound {
+        WindowFrameBound::UnboundedPreceding => WindowFrameBound::UnboundedPreceding,
+        WindowFrameBound::Preceding(expr) => {
+            WindowFrameBound::Preceding(Box::new(expr.normalize()))
+        }
+        WindowFrameBound::CurrentRow => WindowFrameBound::CurrentRow,
+        WindowFrameBound::Following(expr) => {
+            WindowFrameBound::Following(Box::new(expr.normalize()))
+        }
+        WindowFrameBound::UnboundedFollowing => WindowFrameBound::UnboundedFollowing,
+    }
+}
+
+fn window_frame_eq(left: &Option<WindowFrame>, right: &Option<WindowFrame>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.kind == right.kind
+                && frame_bound_eq(&left.start, &right.start)
+                && match (&left.end, &right.end) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => frame_bound_eq(a, b),
+                    _ => false,
+                }
+        }
+        _ => false,
+    }
+}
+
+fn frame_bound_eq(left: &WindowFrameBound, right: &WindowFrameBound) -> bool {
+    match (left, right) {
+        (WindowFrameBound::UnboundedPreceding, WindowFrameBound::UnboundedPreceding) => true,
+        (WindowFrameBound::CurrentRow, WindowFrameBound::CurrentRow) => true,
+        (WindowFrameBound::UnboundedFollowing, WindowFrameBound::UnboundedFollowing) => true,
+        (WindowFrameBound::Preceding(a), WindowFrameBound::Preceding(b)) => a.structural_eq(b),
+        (WindowFrameBound::Following(a), WindowFrameBound::Following(b)) => a.structural_eq(b),
+        _ => false,
+    }
 }
 
 fn table_ref_to_sql(table: &TableRef) -> String {

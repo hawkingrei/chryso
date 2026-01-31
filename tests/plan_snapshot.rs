@@ -26,7 +26,7 @@ struct PlanTestOutput {
     physical_explain: Vec<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 struct PlanBaseline {
     cases: std::collections::BTreeMap<String, Vec<String>>,
 }
