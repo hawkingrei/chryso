@@ -1,7 +1,7 @@
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
 pub use chryso_planner::cost::{Cost, CostModel};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fs;
 use std::path::Path;
 

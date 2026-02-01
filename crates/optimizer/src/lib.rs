@@ -702,7 +702,8 @@ fn apply_rules_fixpoint(
     let mut current = plan.clone();
     for _ in 0..MAX_RULE_PASSES {
         let before = logical_plan_fingerprint(&current);
-        let next = apply_rules_recursive(&current, rules, rule_config, trace, rule_ctx, debug_rules);
+        let next =
+            apply_rules_recursive(&current, rules, rule_config, trace, rule_ctx, debug_rules);
         let after = logical_plan_fingerprint(&next);
         if before == after {
             return current;

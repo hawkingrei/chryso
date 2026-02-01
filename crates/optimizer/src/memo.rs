@@ -39,7 +39,8 @@ impl Memo {
                     let mut inputs = Vec::new();
                     let mut missing_input = false;
                     for child in &expr.children {
-                        if let Some(best_child) = self.best_physical(*child, physical_rules, cost_model)
+                        if let Some(best_child) =
+                            self.best_physical(*child, physical_rules, cost_model)
                         {
                             inputs.push(best_child);
                         } else {

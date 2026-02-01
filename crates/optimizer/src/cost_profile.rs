@@ -1,4 +1,4 @@
-use crate::cost::{load_config_from_path, CostModelConfig};
+use crate::cost::{CostModelConfig, load_config_from_path};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
