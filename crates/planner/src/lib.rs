@@ -132,26 +132,27 @@ pub struct PlanBuilder;
 impl PlanBuilder {
     pub fn build(statement: Statement) -> ChrysoResult<LogicalPlan> {
         let statement = chryso_core::ast::normalize_statement(&statement);
+        let formatted_sql = chryso_core::sql_format::format_statement(&statement);
         let plan = match statement {
             Statement::With(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::Select(select) => build_select(select),
             Statement::SetOp { .. } => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::Explain(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::CreateTable(_)
             | Statement::DropTable(_)
             | Statement::Truncate(_)
             | Statement::Analyze(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) => {
                 Ok(LogicalPlan::Dml {
-                    sql: chryso_core::sql_format::format_statement(&statement),
+                    sql: formatted_sql.clone(),
                 })
             }
         }?;

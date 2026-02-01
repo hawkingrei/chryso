@@ -337,33 +337,17 @@ pub(crate) fn load_config_from_path<T: DeserializeOwned>(
     }
 }
 
-fn join_penalty(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+fn local_join_penalty(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
     match plan {
-        PhysicalPlan::Join {
-            algorithm,
-            left,
-            right,
-            ..
-        } => {
-            let current = match algorithm {
-                chryso_planner::JoinAlgorithm::Hash => config.join * config.join_hash_multiplier,
-                chryso_planner::JoinAlgorithm::NestedLoop => {
-                    config.join * config.join_nested_multiplier
-                }
-            };
-            current + join_penalty(left, config) + join_penalty(right, config)
-        }
-        PhysicalPlan::Filter { input, .. }
-        | PhysicalPlan::Projection { input, .. }
-        | PhysicalPlan::Aggregate { input, .. }
-        | PhysicalPlan::Distinct { input }
-        | PhysicalPlan::TopN { input, .. }
-        | PhysicalPlan::Sort { input, .. }
-        | PhysicalPlan::Limit { input, .. }
-        | PhysicalPlan::Derived { input, .. } => join_penalty(input, config),
-        PhysicalPlan::TableScan { .. }
-        | PhysicalPlan::IndexScan { .. }
-        | PhysicalPlan::Dml { .. } => 0.0,
+        PhysicalPlan::Join { algorithm, .. } => match algorithm {
+            chryso_planner::JoinAlgorithm::Hash => {
+                config.join * (config.join_hash_multiplier - 1.0)
+            }
+            chryso_planner::JoinAlgorithm::NestedLoop => {
+                config.join * (config.join_nested_multiplier - 1.0)
+            }
+        },
+        _ => 0.0,
     }
 }
 
@@ -385,7 +369,7 @@ fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
 
 fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
     // Unit cost uses configurable weights for every node in the tree.
-    let base = node_weight(plan, config);
+    let base = node_weight(plan, config) + local_join_penalty(plan, config);
     let children = match plan {
         PhysicalPlan::Join { left, right, .. } => {
             total_weight(left, config) + total_weight(right, config)
@@ -402,13 +386,14 @@ fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
         | PhysicalPlan::IndexScan { .. }
         | PhysicalPlan::Dml { .. } => 0.0,
     };
-    base + children + join_penalty(plan, config)
+    base + children
 }
 
 fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelConfig) -> f64 {
     // Stats cost applies selectivity per node and accumulates subtree contributions.
     let rows = estimate_rows(plan, stats);
-    let mut cost = rows * node_weight(plan, config) + join_penalty(plan, config);
+    let mut cost =
+        rows * node_weight(plan, config) + local_join_penalty(plan, config);
     cost += match plan {
         PhysicalPlan::Join { left, right, .. } => {
             total_stats_cost(left, stats, config) + total_stats_cost(right, stats, config)

@@ -16,13 +16,26 @@ impl YaccParser {
 
 impl SqlParser for YaccParser {
     fn parse(&self, sql: &str) -> ChrysoResult<chryso_core::ast::Statement> {
+        // When strict validation is enabled, surface lrpar errors instead of silently falling back.
+        let strict = std::env::var("CHRYSO_YACC_STRICT")
+            .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(false);
         let lexerdef = sql_l::lexerdef();
         let lexer = lexerdef.lexer(sql);
         let (result, errors) = sql_y::parse(&lexer);
-        if errors.is_empty() && result.is_none() {
-            return Err(ChrysoError::new(
-                "yacc parser failed to produce a statement",
-            ));
+        if strict {
+            if !errors.is_empty() {
+                let mut rendered = Vec::new();
+                for error in errors {
+                    rendered.push(error.pp(&lexer, &sql_y::token_epp).to_string());
+                }
+                return Err(ChrysoError::new(rendered.join("\n")));
+            }
+            if result.is_none() {
+                return Err(ChrysoError::new(
+                    "yacc parser failed to produce a statement",
+                ));
+            }
         }
         let parser = SimpleParser::new(self.config.clone());
         parser.parse(sql)
