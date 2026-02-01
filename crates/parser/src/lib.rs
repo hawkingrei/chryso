@@ -674,7 +674,11 @@ impl Parser {
             } else {
                 return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
             };
-            let fetch_value = self.parse_limit_value()?;
+            let fetch_value = if self.peek_is_limit_value() {
+                self.parse_limit_value()?
+            } else {
+                1
+            };
             let _ = if self.consume_keyword(Keyword::Row) {
                 true
             } else if self.consume_keyword(Keyword::Rows) {
@@ -682,7 +686,9 @@ impl Parser {
             } else {
                 return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
             };
-            let _ = self.consume_keyword(Keyword::Only);
+            if !self.consume_keyword(Keyword::Only) {
+                return Err(ChrysoError::new("FETCH expects ONLY"));
+            }
             if limit.is_none() {
                 limit = Some(fetch_value);
             }
@@ -1559,6 +1565,10 @@ impl Parser {
 
     fn peek_is_keyword(&self, keyword: Keyword) -> bool {
         matches!(self.peek(), Some(Token::Keyword(kw)) if *kw == keyword)
+    }
+
+    fn peek_is_limit_value(&self) -> bool {
+        matches!(self.peek(), Some(Token::Number(_)))
     }
 
     fn consume_token(&mut self, token: &Token) -> bool {
@@ -3696,6 +3706,29 @@ mod tests {
             panic!("expected select");
         };
         assert_eq!(select.limit, Some(3));
+    }
+
+    #[test]
+    fn parse_fetch_first_without_count_defaults_to_one() {
+        let sql = "select id from sales order by id fetch first row only";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.limit, Some(1));
+    }
+
+    #[test]
+    fn reject_fetch_without_only() {
+        let sql = "select id from sales order by id fetch first row";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).unwrap_err();
+        assert!(err.to_string().contains("FETCH expects ONLY"));
     }
 
     #[test]
