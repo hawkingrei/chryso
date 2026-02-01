@@ -486,9 +486,9 @@ fn build_cost_model<'a>(
         model_config
     } else {
         if let Some(trace) = trace {
-            trace.warnings.push(
-                "invalid cost config detected; falling back to defaults".to_string(),
-            );
+            trace
+                .warnings
+                .push("invalid cost config detected; falling back to defaults".to_string());
         }
         CostModelConfig::default()
     };
