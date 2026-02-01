@@ -603,7 +603,7 @@ impl Parser {
     }
 
     fn parse_select(&mut self) -> ChrysoResult<SelectStatement> {
-        let top = if self.consume_keyword(Keyword::Top) {
+        let mut top = if self.consume_keyword(Keyword::Top) {
             Some(self.parse_top_value()?)
         } else {
             None
@@ -617,6 +617,12 @@ impl Parser {
         } else {
             Vec::new()
         };
+        if self.consume_keyword(Keyword::Top) {
+            if top.is_some() {
+                return Err(ChrysoError::new("TOP specified more than once"));
+            }
+            top = Some(self.parse_top_value()?);
+        }
         let projection = self.parse_projection()?;
         let from = if self.consume_keyword(Keyword::From) {
             Some(self.parse_table_ref()?)
@@ -2225,6 +2231,20 @@ mod tests {
         assert!(select.distinct);
         assert!(select.distinct_on.is_empty());
         assert_eq!(select.offset, Some(5));
+    }
+
+    #[test]
+    fn parse_select_with_distinct_top() {
+        let sql = "select distinct top 5 id from users";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(select.distinct);
+        assert_eq!(select.limit, Some(5));
     }
 
     #[test]
