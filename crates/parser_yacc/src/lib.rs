@@ -252,12 +252,26 @@ impl<'a> AstBuilder<'a> {
             return Ok(TableFactor::Table { name });
         }
         if nodes.len() == 3 {
-            let stmt = self.statement(&nodes[1])?;
+            let stmt = self.subquery_stmt(&nodes[1])?;
             return Ok(TableFactor::Derived {
                 query: Box::new(stmt),
             });
         }
         Err(self.err_with_rule(ridx))
+    }
+
+    fn subquery_stmt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
+        let Node::Nonterm { ridx, .. } = node else {
+            return Err(self.err("expected subquery node"));
+        };
+        let ridx = ridx.as_storaget();
+        if ridx == sql_y::R_SELECTSTMT {
+            return self.select_stmt(node);
+        }
+        if ridx == sql_y::R_WITHSTMT {
+            return self.with_stmt(node);
+        }
+        Err(self.err("unsupported subquery type"))
     }
 
     fn join_list(&self, node: &Node<Lexeme, u32>, left: &TableRef) -> ChrysoResult<Vec<Join>> {
@@ -919,5 +933,24 @@ mod tests {
             panic!("expected join predicate");
         };
         assert!(matches!(op, BinaryOperator::Eq | BinaryOperator::And));
+    }
+
+    #[test]
+    fn yacc_parser_parses_derived_table() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser
+            .parse("select * from (select 1) t")
+            .expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let table = select.from.expect("from");
+        match table.factor {
+            TableFactor::Derived { .. } => {}
+            _ => panic!("expected derived table"),
+        }
+        assert_eq!(table.alias.as_deref(), Some("t"));
     }
 }
