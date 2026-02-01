@@ -392,8 +392,7 @@ fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
 fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelConfig) -> f64 {
     // Stats cost applies selectivity per node and accumulates subtree contributions.
     let rows = estimate_rows(plan, stats);
-    let mut cost =
-        rows * node_weight(plan, config) + local_join_penalty(plan, config);
+    let mut cost = rows * node_weight(plan, config) + local_join_penalty(plan, config);
     cost += match plan {
         PhysicalPlan::Join { left, right, .. } => {
             total_stats_cost(left, stats, config) + total_stats_cost(right, stats, config)
