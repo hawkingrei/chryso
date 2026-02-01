@@ -1,6 +1,6 @@
 use crate::cost::{Cost, CostModel};
 use crate::physical_rules::PhysicalRuleSet;
-use crate::{MemoTrace, MemoTraceCandidate, MemoTraceGroup, RuleConfig, SearchBudget};
+use crate::{MemoTrace, MemoTraceCandidate, MemoTraceGroup, RuleConfig, RuleContext, SearchBudget};
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,6 +89,7 @@ impl Memo {
         let max_rewrites = budget.max_rewrites.unwrap_or(usize::MAX);
         let mut new_exprs = Vec::new();
         let mut rewrites = 0usize;
+        let mut rule_ctx = RuleContext::default();
         for group in &self.groups {
             for expr in &group.expressions {
                 if let MemoOperator::Logical(plan) = &expr.operator {
@@ -99,7 +100,7 @@ impl Memo {
                         if !rule_config.is_enabled(rule.name()) {
                             continue;
                         }
-                        for rewritten in rule.apply(plan) {
+                        for rewritten in rule.apply(plan, &mut rule_ctx) {
                             if rewrites >= max_rewrites {
                                 break;
                             }

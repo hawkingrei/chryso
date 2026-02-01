@@ -185,8 +185,7 @@ impl<'a> StatsCostModel<'a> {
 
 impl CostModel for StatsCostModel<'_> {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        let mut cost = estimate_rows(plan, self.stats) * node_weight(plan, &self.config);
-        cost += join_penalty(plan, &self.config);
+        let mut cost = total_stats_cost(plan, self.stats, &self.config);
         if !cost.is_finite() || cost > self.config.max_cost {
             cost = self.config.max_cost;
         }
@@ -272,8 +271,19 @@ mod tests {
             },
         );
         let model = StatsCostModel::new(&stats);
-        let cost = model.cost(&plan);
-        assert!(cost.0 < 5.0);
+        let selective = model.cost(&plan);
+
+        stats.insert_column_stats(
+            "sales",
+            "region",
+            ColumnStats {
+                distinct_count: 1.0,
+                null_fraction: 0.0,
+            },
+        );
+        let model = StatsCostModel::new(&stats);
+        let non_selective = model.cost(&plan);
+        assert!(selective.0 < non_selective.0);
     }
 
     #[test]
@@ -392,6 +402,28 @@ fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
         | PhysicalPlan::Dml { .. } => 0.0,
     };
     base + children + join_penalty(plan, config)
+}
+
+fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelConfig) -> f64 {
+    let rows = estimate_rows(plan, stats);
+    let mut cost = rows * node_weight(plan, config) + join_penalty(plan, config);
+    cost += match plan {
+        PhysicalPlan::Join { left, right, .. } => {
+            total_stats_cost(left, stats, config) + total_stats_cost(right, stats, config)
+        }
+        PhysicalPlan::Filter { input, .. }
+        | PhysicalPlan::Projection { input, .. }
+        | PhysicalPlan::Aggregate { input, .. }
+        | PhysicalPlan::Distinct { input }
+        | PhysicalPlan::TopN { input, .. }
+        | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => total_stats_cost(input, stats, config),
+        PhysicalPlan::TableScan { .. }
+        | PhysicalPlan::IndexScan { .. }
+        | PhysicalPlan::Dml { .. } => 0.0,
+    };
+    cost
 }
 
 fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {

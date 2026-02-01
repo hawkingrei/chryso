@@ -1,6 +1,6 @@
 use crate::cost::{CostModel, UnitCostModel};
 use crate::memo::Memo;
-use crate::rules::RuleSet;
+use crate::rules::{RuleContext, RuleSet};
 use chryso_metadata::StatsCache;
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 use std::collections::HashSet;
@@ -403,16 +403,18 @@ fn optimize_with_cascades(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
+    let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
         &mut trace,
+        &mut rule_ctx,
         config.debug_rules,
     );
     trace
         .conflicting_literals
-        .extend(crate::rules::take_literal_conflicts());
+        .extend(rule_ctx.take_literal_conflicts());
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
@@ -435,14 +437,15 @@ fn optimize_with_cascades_memo(
     config: &OptimizerConfig,
     _stats: &StatsCache,
 ) -> (PhysicalPlan, MemoTrace) {
+    let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
         &mut OptimizerTrace::new(),
+        &mut rule_ctx,
         config.debug_rules,
     );
-    let _ = crate::rules::take_literal_conflicts();
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
@@ -519,6 +522,7 @@ fn apply_rules_recursive(
     rules: &RuleSet,
     rule_config: &RuleConfig,
     trace: &mut OptimizerTrace,
+    rule_ctx: &mut RuleContext,
     debug_rules: bool,
 ) -> LogicalPlan {
     let mut rewritten = plan.clone();
@@ -527,7 +531,7 @@ fn apply_rules_recursive(
         if !rule_config.is_enabled(rule.name()) {
             continue;
         }
-        let alternatives = rule.apply(&rewritten);
+        let alternatives = rule.apply(&rewritten, rule_ctx);
         if !alternatives.is_empty() {
             matched.push(rule.name().to_string());
             rewritten = alternatives.last().cloned().unwrap_or(rewritten);
@@ -544,6 +548,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -554,6 +559,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -569,6 +575,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             right: Box::new(apply_rules_recursive(
@@ -576,6 +583,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             on,
@@ -592,6 +600,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -601,6 +610,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -616,6 +626,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -626,6 +637,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -641,6 +653,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -654,6 +667,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             alias,
@@ -666,7 +680,7 @@ fn apply_rules_recursive(
         if !rule_config.is_enabled(rule.name()) {
             continue;
         }
-        let alternatives = rule.apply(&final_plan);
+        let alternatives = rule.apply(&final_plan, rule_ctx);
         if !alternatives.is_empty() {
             final_plan = alternatives.last().cloned().unwrap_or(final_plan);
         }
@@ -679,13 +693,14 @@ fn apply_rules_fixpoint(
     rules: &RuleSet,
     rule_config: &RuleConfig,
     trace: &mut OptimizerTrace,
+    rule_ctx: &mut RuleContext,
     debug_rules: bool,
 ) -> LogicalPlan {
     const MAX_RULE_PASSES: usize = 8;
     let mut current = plan.clone();
     for _ in 0..MAX_RULE_PASSES {
         let before = logical_plan_fingerprint(&current);
-        let next = apply_rules_recursive(&current, rules, rule_config, trace, debug_rules);
+        let next = apply_rules_recursive(&current, rules, rule_config, trace, rule_ctx, debug_rules);
         let after = logical_plan_fingerprint(&next);
         if before == after {
             return current;

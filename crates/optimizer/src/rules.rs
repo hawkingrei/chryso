@@ -3,21 +3,31 @@ use crate::utils::{
 };
 use chryso_core::ast::{BinaryOperator, Expr, Literal};
 use chryso_planner::LogicalPlan;
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::thread_local;
-
-thread_local! {
-    static LITERAL_CONFLICTS: RefCell<VecDeque<(String, String)>> = RefCell::new(VecDeque::new());
-}
-
-pub fn take_literal_conflicts() -> Vec<(String, String)> {
-    LITERAL_CONFLICTS.with(|conflicts| conflicts.borrow_mut().drain(..).collect())
-}
+use std::collections::BTreeSet;
 
 pub trait Rule {
     fn name(&self) -> &str;
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan>;
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan>;
+}
+
+#[derive(Default, Debug)]
+pub struct RuleContext {
+    literal_conflicts: BTreeSet<(String, String)>,
+}
+
+impl RuleContext {
+    pub fn record_literal_conflicts<I>(&mut self, pairs: I)
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
+        self.literal_conflicts.extend(pairs);
+    }
+
+    pub fn take_literal_conflicts(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.literal_conflicts)
+            .into_iter()
+            .collect()
+    }
 }
 
 pub struct RuleSet {
@@ -34,10 +44,10 @@ impl RuleSet {
         self
     }
 
-    pub fn apply_all(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    pub fn apply_all(&self, plan: &LogicalPlan, ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let mut results = Vec::new();
         for rule in &self.rules {
-            results.extend(rule.apply(plan));
+            results.extend(rule.apply(plan, ctx));
         }
         results
     }
@@ -94,7 +104,7 @@ impl Rule for NoopRule {
         "noop"
     }
 
-    fn apply(&self, _plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, _plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         Vec::new()
     }
 }
@@ -106,7 +116,7 @@ impl Rule for MergeFilters {
         "merge_filters"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -136,7 +146,7 @@ impl Rule for PruneProjection {
         "prune_projection"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Projection { exprs, input } = plan else {
             return Vec::new();
         };
@@ -154,7 +164,7 @@ impl Rule for MergeProjections {
         "merge_projections"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Projection { exprs, input } = plan else {
             return Vec::new();
         };
@@ -200,7 +210,7 @@ impl Rule for RemoveTrueFilter {
         "remove_true_filter"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -218,7 +228,7 @@ impl Rule for FilterPushdown {
         "filter_pushdown"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -255,7 +265,7 @@ impl Rule for FilterJoinPushdown {
         "filter_join_pushdown"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -373,7 +383,7 @@ impl Rule for JoinPredicatePushdown {
         "join_predicate_pushdown"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Join {
             join_type,
             left,
@@ -487,7 +497,7 @@ impl Rule for NormalizePredicates {
         "normalize_predicates"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -509,7 +519,7 @@ impl Rule for PredicateInference {
         "predicate_inference"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         match plan {
             LogicalPlan::Filter { predicate, input } => match input.as_ref() {
                 LogicalPlan::Join {
@@ -523,7 +533,7 @@ impl Rule for PredicateInference {
                         op: BinaryOperator::And,
                         right: Box::new(on.clone()),
                     };
-                    let (inferred, changed) = infer_predicates(&combined);
+                    let (inferred, changed) = infer_predicates(&combined, ctx);
                     if !changed {
                         return Vec::new();
                     }
@@ -545,7 +555,7 @@ impl Rule for PredicateInference {
                     }]
                 }
                 _ => {
-                    let (predicate, changed) = infer_predicates(predicate);
+                    let (predicate, changed) = infer_predicates(predicate, ctx);
                     if !changed {
                         return Vec::new();
                     }
@@ -561,7 +571,7 @@ impl Rule for PredicateInference {
                 right,
                 on,
             } if matches!(join_type, chryso_core::ast::JoinType::Inner) => {
-                let (on, changed) = infer_predicates(on);
+                let (on, changed) = infer_predicates(on, ctx);
                 if !changed {
                     return Vec::new();
                 }
@@ -584,7 +594,7 @@ impl Rule for JoinCommute {
         "join_commute"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Join {
             join_type,
             left,
@@ -613,7 +623,7 @@ impl Rule for FilterOrDedup {
         "filter_or_dedup"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -640,7 +650,7 @@ impl Rule for LimitPushdown {
         "limit_pushdown"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Limit {
             limit,
             offset,
@@ -682,7 +692,7 @@ impl Rule for TopNRule {
         "topn_rule"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Limit {
             limit: Some(limit),
             offset: None,
@@ -713,6 +723,11 @@ mod tests {
     use chryso_core::ast::{BinaryOperator, Expr};
     use chryso_planner::LogicalPlan;
 
+    fn apply(rule: &impl Rule, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+        let mut ctx = super::RuleContext::default();
+        rule.apply(plan, &mut ctx)
+    }
+
     #[test]
     fn merge_filters_combines_predicates() {
         let plan = LogicalPlan::Filter {
@@ -725,7 +740,7 @@ mod tests {
             }),
         };
         let rule = MergeFilters;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -745,7 +760,7 @@ mod tests {
             }),
         };
         let rule = PruneProjection;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
     }
 
@@ -761,7 +776,7 @@ mod tests {
             }),
         };
         let rule = FilterPushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
     }
 
@@ -781,7 +796,7 @@ mod tests {
             }),
         };
         let rule = FilterPushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Sort { input, .. } = &results[0] else {
             panic!("expected sort");
@@ -802,7 +817,7 @@ mod tests {
             }),
         };
         let rule = NormalizePredicates;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
     }
 
@@ -819,7 +834,7 @@ mod tests {
             }),
         };
         let rule = NormalizePredicates;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -844,7 +859,7 @@ mod tests {
             }),
         };
         let rule = NormalizePredicates;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -878,7 +893,7 @@ mod tests {
             }),
         };
         let rule = TopNRule;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
     }
 
@@ -895,7 +910,7 @@ mod tests {
             }),
         };
         let rule = LimitPushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
     }
 
@@ -914,7 +929,7 @@ mod tests {
             }),
         };
         let rule = MergeProjections;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Projection { exprs, .. } = &results[0] else {
             panic!("expected projection");
@@ -931,7 +946,7 @@ mod tests {
             }),
         };
         let rule = RemoveTrueFilter;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         assert!(matches!(results[0], LogicalPlan::Scan { .. }));
     }
@@ -949,7 +964,7 @@ mod tests {
             }),
         };
         let rule = RemoveTrueFilter;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert!(results.is_empty());
     }
 
@@ -973,7 +988,7 @@ mod tests {
             }),
         };
         let rule = FilterJoinPushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Join { left, .. } = &results[0] else {
             panic!("expected join");
@@ -1001,7 +1016,7 @@ mod tests {
             }),
         };
         let rule = FilterJoinPushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Join { on, .. } = &results[0] else {
             panic!("expected join");
@@ -1025,7 +1040,7 @@ mod tests {
             }),
         };
         let rule = FilterOrDedup;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -1058,7 +1073,7 @@ mod tests {
             },
         };
         let rule = JoinPredicatePushdown;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Join { left, on, .. } = &results[0] else {
             panic!("expected join");
@@ -1088,7 +1103,7 @@ mod tests {
             }),
         };
         let rule = PredicateInference;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -1125,7 +1140,7 @@ mod tests {
             },
         };
         let rule = PredicateInference;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Join { on, .. } = &results[0] else {
             panic!("expected join");
@@ -1161,9 +1176,9 @@ mod tests {
                 }),
             },
         };
-        let inferred = PredicateInference.apply(&plan);
+        let inferred = apply(&PredicateInference, &plan);
         assert_eq!(inferred.len(), 1);
-        let pushed = JoinPredicatePushdown.apply(&inferred[0]);
+        let pushed = apply(&JoinPredicatePushdown, &inferred[0]);
         assert_eq!(pushed.len(), 1);
         let LogicalPlan::Join { right, .. } = &pushed[0] else {
             panic!("expected join");
@@ -1202,7 +1217,7 @@ mod tests {
                 },
             }),
         };
-        let inferred = PredicateInference.apply(&plan);
+        let inferred = apply(&PredicateInference, &plan);
         assert_eq!(inferred.len(), 1);
         let LogicalPlan::Filter { input, predicate } = &inferred[0] else {
             panic!("expected filter");
@@ -1243,7 +1258,7 @@ mod tests {
             }),
         };
         let rule = PredicateInference;
-        let results = rule.apply(&plan);
+        let results = apply(&rule, &plan);
         assert_eq!(results.len(), 1);
         let LogicalPlan::Filter { predicate, .. } = &results[0] else {
             panic!("expected filter");
@@ -1263,7 +1278,7 @@ impl Rule for AggregatePredicatePushdown {
         "aggregate_predicate_pushdown"
     }
 
-    fn apply(&self, plan: &LogicalPlan) -> Vec<LogicalPlan> {
+    fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan> {
         let LogicalPlan::Filter { predicate, input } = plan else {
             return Vec::new();
         };
@@ -1305,7 +1320,7 @@ enum Side {
 
 // shared helpers are in utils.rs
 
-fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
+fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
     let conjuncts = split_conjuncts(predicate);
     let mut existing = std::collections::HashSet::new();
     for expr in &conjuncts {
@@ -1350,9 +1365,7 @@ fn infer_predicates(predicate: &Expr) -> (Expr, bool) {
 
     let mut class_literals = std::collections::HashMap::<String, Option<Literal>>::new();
     if !literal_conflicts.is_empty() {
-        LITERAL_CONFLICTS.with(|conflicts| {
-            conflicts.borrow_mut().extend(conflict_pairs.into_iter());
-        });
+        ctx.record_literal_conflicts(conflict_pairs);
     }
     for ident in &literal_conflicts {
         let root = uf.find(ident);
