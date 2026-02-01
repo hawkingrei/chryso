@@ -1,3 +1,4 @@
+use cfgrammar::TIdx;
 use chryso_core::ast::{
     Assignment, BinaryOperator, ColumnDef, Cte, DeleteStatement, Expr, InsertSource,
     InsertStatement, Join, JoinType, Literal, SelectItem, SelectStatement, Statement, TableFactor,
@@ -5,7 +6,6 @@ use chryso_core::ast::{
 };
 use chryso_core::{ChrysoError, ChrysoResult};
 use chryso_parser::{ParserConfig, SqlParser};
-use cfgrammar::TIdx;
 use lrpar::{Lexeme as _, Node};
 
 lrlex::lrlex_mod!("sql.l");
@@ -94,11 +94,13 @@ impl<'a> AstBuilder<'a> {
         let if_not_exists = self.if_not_exists_opt(&nodes[2])?;
         let name = self.ident_from_term(&nodes[3])?;
         let columns = self.column_defs_opt(&nodes[4])?;
-        Ok(Statement::CreateTable(chryso_core::ast::CreateTableStatement {
-            name,
-            if_not_exists,
-            columns,
-        }))
+        Ok(Statement::CreateTable(
+            chryso_core::ast::CreateTableStatement {
+                name,
+                if_not_exists,
+                columns,
+            },
+        ))
     }
 
     fn drop_stmt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
@@ -347,7 +349,12 @@ impl<'a> AstBuilder<'a> {
         Ok(join_type)
     }
 
-    fn join_condition(&self, node: &Node<Lexeme, u32>, left: &TableRef, right: &TableRef) -> ChrysoResult<Expr> {
+    fn join_condition(
+        &self,
+        node: &Node<Lexeme, u32>,
+        left: &TableRef,
+        right: &TableRef,
+    ) -> ChrysoResult<Expr> {
         let (_, nodes) = self.expect_nonterm(node, sql_y::R_JOINCONDITION)?;
         let keyword = self.term_text(&nodes[0])?;
         if keyword.eq_ignore_ascii_case("ON") {
@@ -596,9 +603,9 @@ impl<'a> AstBuilder<'a> {
             return Ok(Expr::Literal(Literal::Number(value)));
         }
         if text.starts_with('\'') {
-            return Ok(Expr::Literal(Literal::String(
-                decode_string_literal(text.as_str())?,
-            )));
+            return Ok(Expr::Literal(Literal::String(decode_string_literal(
+                text.as_str(),
+            )?)));
         }
         Ok(Expr::Identifier(text))
     }
@@ -719,11 +726,12 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn table_ref_name(&self, table: &TableRef) -> ChrysoResult<String> {
+        if let Some(alias) = &table.alias {
+            return Ok(alias.clone());
+        }
         match &table.factor {
             TableFactor::Table { name } => Ok(name.clone()),
-            TableFactor::Derived { .. } => {
-                Err(ChrysoError::new("subquery in FROM requires alias"))
-            }
+            TableFactor::Derived { .. } => Err(ChrysoError::new("subquery in FROM requires alias")),
         }
     }
 
@@ -804,11 +812,9 @@ impl<'a> AstBuilder<'a> {
 
     fn is_term_kind(&self, node: &Node<Lexeme, u32>, value: &str) -> bool {
         match node {
-            Node::Term { lexeme } => {
-                sql_y::token_epp(TIdx(lexeme.tok_id()))
-                    .map(|name| name == value)
-                    .unwrap_or(false)
-            }
+            Node::Term { lexeme } => sql_y::token_epp(TIdx(lexeme.tok_id()))
+                .map(|name| name == value)
+                .unwrap_or(false),
             _ => false,
         }
     }

@@ -7,6 +7,8 @@ fn main() {
     let grammar_dir = Path::new(&manifest_dir).join("grammar");
     let lexer_path = grammar_dir.join("sql.l");
     let parser_path = grammar_dir.join("sql.y");
+    println!("cargo:rerun-if-changed={}", lexer_path.display());
+    println!("cargo:rerun-if-changed={}", parser_path.display());
     let lexer_out = Path::new(&out_dir).join("sql.l.rs");
     let parser_out = Path::new(&out_dir).join("sql.y.rs");
     let allow_conflicts = std::env::var("CHRYSO_YACC_ALLOW_CONFLICTS")
