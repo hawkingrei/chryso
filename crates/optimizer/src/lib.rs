@@ -173,6 +173,7 @@ mod tests {
     use chryso_metadata::{StatsCache, StatsSnapshot, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
+    use serde_json;
     use std::collections::HashSet;
 
     #[test]
@@ -290,9 +291,8 @@ mod tests {
 
     #[test]
     fn optimizer_uses_stats_snapshot() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/testdata/stats/tpch_scale1.json");
-        let snapshot = StatsSnapshot::load_json(root).expect("snapshot");
+        let snapshot_json = include_str!("../tests/testdata/tpch_scale1.json");
+        let snapshot: StatsSnapshot = serde_json::from_str(snapshot_json).expect("snapshot");
         let mut stats = snapshot.to_cache();
         let sql = "select * from orders";
         let parser = SimpleParser::new(ParserConfig {
