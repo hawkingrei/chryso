@@ -30,6 +30,7 @@ pub struct OptimizerTrace {
     pub applied_rules: Vec<String>,
     pub stats_loaded: Vec<String>,
     pub conflicting_literals: Vec<(String, String)>,
+    pub warnings: Vec<String>,
 }
 
 impl OptimizerTrace {
@@ -38,6 +39,7 @@ impl OptimizerTrace {
             applied_rules: Vec::new(),
             stats_loaded: Vec::new(),
             conflicting_literals: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 }
@@ -422,7 +424,7 @@ fn optimize_with_cascades(
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model = build_cost_model(_stats, config);
+    let cost_model = build_cost_model(_stats, config, Some(&mut trace));
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let mut best = memo
         .best_physical(root, &physical_rules, cost_model.as_ref())
@@ -454,7 +456,7 @@ fn optimize_with_cascades_memo(
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model = build_cost_model(_stats, config);
+    let cost_model = build_cost_model(_stats, config, None);
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());
     let mut best = memo
@@ -470,6 +472,7 @@ fn optimize_with_cascades_memo(
 fn build_cost_model<'a>(
     stats: &'a StatsCache,
     config: &'a OptimizerConfig,
+    trace: Option<&mut OptimizerTrace>,
 ) -> Box<dyn CostModel + 'a> {
     let base = config.cost_config.clone().unwrap_or_default();
     let model_config = match &config.system_params {
@@ -482,7 +485,11 @@ fn build_cost_model<'a>(
     let model_config = if model_config.validate().is_ok() {
         model_config
     } else {
-        eprintln!("optimizer: invalid cost config detected; falling back to defaults");
+        if let Some(trace) = trace {
+            trace.warnings.push(
+                "invalid cost config detected; falling back to defaults".to_string(),
+            );
+        }
         CostModelConfig::default()
     };
     if stats.is_empty() {

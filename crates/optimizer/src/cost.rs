@@ -174,7 +174,6 @@ impl<'a> StatsCostModel<'a> {
         let validated = if config.validate().is_ok() {
             config
         } else {
-            eprintln!("optimizer: invalid cost config detected; falling back to defaults");
             CostModelConfig::default()
         };
         Self {
