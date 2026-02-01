@@ -482,6 +482,9 @@ fn build_cost_model<'a>(
     let model_config = if model_config.validate().is_ok() {
         model_config
     } else {
+        eprintln!(
+            "optimizer: invalid cost config detected; falling back to defaults"
+        );
         CostModelConfig::default()
     };
     if stats.is_empty() {
