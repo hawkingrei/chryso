@@ -24,6 +24,7 @@ impl RuleContext {
     }
 
     pub fn take_literal_conflicts(&mut self) -> Vec<(String, String)> {
+        // Preserve a deterministic order for trace output by draining the ordered set.
         std::mem::take(&mut self.literal_conflicts)
             .into_iter()
             .collect()
@@ -1321,6 +1322,7 @@ enum Side {
 // shared helpers are in utils.rs
 
 fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
+    // Infer equalities via union-find and surface literal conflicts for trace/debugging.
     let conjuncts = split_conjuncts(predicate);
     let mut existing = std::collections::HashSet::new();
     for expr in &conjuncts {

@@ -384,6 +384,7 @@ fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
 }
 
 fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+    // Unit cost uses configurable weights for every node in the tree.
     let base = node_weight(plan, config);
     let children = match plan {
         PhysicalPlan::Join { left, right, .. } => {
@@ -405,6 +406,7 @@ fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
 }
 
 fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelConfig) -> f64 {
+    // Stats cost applies selectivity per node and accumulates subtree contributions.
     let rows = estimate_rows(plan, stats);
     let mut cost = rows * node_weight(plan, config) + join_penalty(plan, config);
     cost += match plan {

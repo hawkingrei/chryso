@@ -403,6 +403,7 @@ fn optimize_with_cascades(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
+    // Keep rule side effects (e.g., literal conflicts) explicit and thread-safe.
     let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,

@@ -89,6 +89,7 @@ impl Memo {
         let max_rewrites = budget.max_rewrites.unwrap_or(usize::MAX);
         let mut new_exprs = Vec::new();
         let mut rewrites = 0usize;
+        // RuleContext tracks side-channel information (e.g., literal conflicts) while exploring.
         let mut rule_ctx = RuleContext::default();
         for group in &self.groups {
             for expr in &group.expressions {
