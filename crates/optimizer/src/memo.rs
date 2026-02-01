@@ -25,14 +25,43 @@ impl Memo {
         group_id
     }
 
-    pub fn best_physical(&self, root: GroupId, cost_model: &dyn CostModel) -> Option<PhysicalPlan> {
+    pub fn best_physical(
+        &self,
+        root: GroupId,
+        physical_rules: &PhysicalRuleSet,
+        cost_model: &dyn CostModel,
+    ) -> Option<PhysicalPlan> {
         let group = self.groups.get(root.0)?;
         let mut best: Option<(Cost, PhysicalPlan)> = None;
         for expr in &group.expressions {
-            if let Some(physical) = expr.to_physical(self) {
-                let cost = cost_model.cost(&physical);
-                if best.as_ref().map(|(c, _)| cost.0 < c.0).unwrap_or(true) {
-                    best = Some((cost, physical));
+            match &expr.operator {
+                MemoOperator::Logical(logical) => {
+                    let mut inputs = Vec::new();
+                    let mut missing_input = false;
+                    for child in &expr.children {
+                        if let Some(best_child) = self.best_physical(*child, physical_rules, cost_model)
+                        {
+                            inputs.push(best_child);
+                        } else {
+                            missing_input = true;
+                            break;
+                        }
+                    }
+                    if missing_input {
+                        continue;
+                    }
+                    for physical in physical_rules.apply_all(logical, &inputs) {
+                        let cost = cost_model.cost(&physical);
+                        if best.as_ref().map(|(c, _)| cost.0 < c.0).unwrap_or(true) {
+                            best = Some((cost, physical));
+                        }
+                    }
+                }
+                MemoOperator::Physical(plan) => {
+                    let cost = cost_model.cost(plan);
+                    if best.as_ref().map(|(c, _)| cost.0 < c.0).unwrap_or(true) {
+                        best = Some((cost, plan.clone()));
+                    }
                 }
             }
         }
@@ -50,7 +79,7 @@ impl Memo {
                 let mut inputs = Vec::new();
                 let mut missing_input = false;
                 for child in &expr.children {
-                    if let Some(best) = self.best_physical(*child, cost_model) {
+                    if let Some(best) = self.best_physical(*child, physical_rules, cost_model) {
                         inputs.push(best);
                     } else {
                         missing_input = true;

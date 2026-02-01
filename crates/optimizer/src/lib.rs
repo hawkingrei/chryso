@@ -423,8 +423,9 @@ fn optimize_with_cascades(
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
     let cost_model = build_cost_model(_stats, config);
+    let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let mut best = memo
-        .best_physical(root, cost_model.as_ref())
+        .best_physical(root, &physical_rules, cost_model.as_ref())
         .unwrap_or_else(|| logical_to_physical(&logical));
     if config.enable_properties {
         let required = crate::properties::PhysicalProperties::default();
@@ -457,7 +458,7 @@ fn optimize_with_cascades_memo(
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());
     let mut best = memo
-        .best_physical(root, cost_model.as_ref())
+        .best_physical(root, &physical_rules, cost_model.as_ref())
         .unwrap_or_else(|| logical_to_physical(&logical));
     if config.enable_properties {
         let required = crate::properties::PhysicalProperties::default();
