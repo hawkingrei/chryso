@@ -1,0 +1,56 @@
+{
+  "tables": [
+    [
+      "orders",
+      {
+        "row_count": 150000.0
+      }
+    ],
+    [
+      "lineitem",
+      {
+        "row_count": 6001215.0
+      }
+    ],
+    [
+      "customer",
+      {
+        "row_count": 150000.0
+      }
+    ]
+  ],
+  "columns": [
+    [
+      "orders",
+      "o_orderkey",
+      {
+        "distinct_count": 150000.0,
+        "null_fraction": 0.0
+      }
+    ],
+    [
+      "orders",
+      "o_custkey",
+      {
+        "distinct_count": 150000.0,
+        "null_fraction": 0.0
+      }
+    ],
+    [
+      "lineitem",
+      "l_orderkey",
+      {
+        "distinct_count": 150000.0,
+        "null_fraction": 0.0
+      }
+    ],
+    [
+      "lineitem",
+      "l_quantity",
+      {
+        "distinct_count": 50.0,
+        "null_fraction": 0.0
+      }
+    ]
+  ]
+}

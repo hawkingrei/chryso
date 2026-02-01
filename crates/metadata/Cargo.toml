@@ -11,3 +11,10 @@ documentation = "https://docs.rs/chryso-metadata"
 [dependencies.chryso-core]
 version = "0.0.1"
 path = "../core"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1"

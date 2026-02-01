@@ -124,15 +124,73 @@ impl Default for StatsCache {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TableStats {
     pub row_count: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColumnStats {
     pub distinct_count: f64,
     pub null_fraction: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StatsSnapshot {
+    pub tables: Vec<(String, TableStats)>,
+    pub columns: Vec<(String, String, ColumnStats)>,
+}
+
+impl StatsSnapshot {
+    pub fn to_cache(&self) -> StatsCache {
+        let mut cache = StatsCache::new_with_capacity(self.tables.len(), self.columns.len());
+        for (table, stats) in &self.tables {
+            cache.insert_table_stats(table.clone(), stats.clone());
+        }
+        for (table, column, stats) in &self.columns {
+            cache.insert_column_stats(table.clone(), column.clone(), stats.clone());
+        }
+        cache
+    }
+
+    pub fn from_cache(cache: &StatsCache) -> Self {
+        let mut tables = cache
+            .table_stats
+            .iter()
+            .map(|(name, stats)| (name.clone(), stats.clone()))
+            .collect::<Vec<_>>();
+        let mut columns = cache
+            .column_stats
+            .iter()
+            .map(|((table, column), stats)| (table.clone(), column.clone(), stats.clone()))
+            .collect::<Vec<_>>();
+        tables.sort_by(|(a, _), (b, _)| a.cmp(b));
+        columns.sort_by(|(ta, ca, _), (tb, cb, _)| (ta, ca).cmp(&(tb, cb)));
+        Self { tables, columns }
+    }
+
+    pub fn load_json(path: impl AsRef<std::path::Path>) -> chryso_core::error::ChrysoResult<Self> {
+        let content = std::fs::read_to_string(path.as_ref()).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("read stats snapshot failed: {err}"))
+        })?;
+        let snapshot = serde_json::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse stats snapshot failed: {err}"))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn write_json(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> chryso_core::error::ChrysoResult<()> {
+        let content = serde_json::to_string_pretty(self).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("serialize stats snapshot failed: {err}"))
+        })?;
+        std::fs::write(path.as_ref(), format!("{content}\n")).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("write stats snapshot failed: {err}"))
+        })?;
+        Ok(())
+    }
 }
 
 pub trait StatsProvider {
@@ -156,7 +214,7 @@ mod catalog_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnStats, StatsCache, TableStats};
+    use super::{ColumnStats, StatsCache, StatsSnapshot, TableStats};
 
     #[test]
     fn stats_cache_roundtrip() {
@@ -203,5 +261,51 @@ mod tests {
         let c1 = cache.column_stats("t1", "c1").is_some();
         let c2 = cache.column_stats("t1", "c2").is_some();
         assert!(c1 ^ c2);
+    }
+
+    #[test]
+    fn stats_snapshot_is_sorted() {
+        let mut cache = StatsCache::new();
+        cache.insert_table_stats("b", TableStats { row_count: 2.0 });
+        cache.insert_table_stats("a", TableStats { row_count: 1.0 });
+        cache.insert_column_stats(
+            "b",
+            "y",
+            ColumnStats {
+                distinct_count: 2.0,
+                null_fraction: 0.0,
+            },
+        );
+        cache.insert_column_stats(
+            "a",
+            "z",
+            ColumnStats {
+                distinct_count: 3.0,
+                null_fraction: 0.0,
+            },
+        );
+        cache.insert_column_stats(
+            "a",
+            "b",
+            ColumnStats {
+                distinct_count: 4.0,
+                null_fraction: 0.0,
+            },
+        );
+
+        let snapshot = StatsSnapshot::from_cache(&cache);
+        let tables = snapshot
+            .tables
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        let columns = snapshot
+            .columns
+            .iter()
+            .map(|(table, column, _)| (table.as_str(), column.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(tables, vec!["a", "b"]);
+        assert_eq!(columns, vec![("a", "b"), ("a", "z"), ("b", "y")]);
     }
 }

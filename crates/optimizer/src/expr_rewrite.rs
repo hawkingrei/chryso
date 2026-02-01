@@ -147,6 +147,7 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
             spec: chryso_core::ast::WindowSpec {
                 partition_by: spec.partition_by.iter().map(rewrite_expr).collect(),
                 order_by: rewrite_order_by(&spec.order_by),
+                frame: spec.frame.clone(),
             },
         },
         Expr::Subquery(select) => Expr::Subquery(select.clone()),

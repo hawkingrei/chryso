@@ -27,5 +27,8 @@
 
 ## Yacc Track
 - `crates/parser_yacc` provides a `YaccParser` shim and yacc/lex files.
+- By default, the build rejects grammar conflicts. To allow conflicts in local dev or CI:
+  - Local: `CHRYSO_YACC_ALLOW_CONFLICTS=1 cargo test -p chryso-parser-yacc`
+  - CI: set `CHRYSO_YACC_ALLOW_CONFLICTS=1` in the job environment before building.
 - Current: yacc grammar validates SQL shape; AST is still produced by `SimpleParser`.
 - Plan: generate a dedicated parser per dialect grammar file, mapping to `chryso_core::ast`.
