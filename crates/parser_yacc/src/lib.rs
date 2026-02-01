@@ -940,9 +940,7 @@ mod tests {
         let parser = YaccParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
-        let stmt = parser
-            .parse("select * from (select 1) t")
-            .expect("parse");
+        let stmt = parser.parse("select * from (select 1) t").expect("parse");
         let Statement::Select(select) = stmt else {
             panic!("expected select");
         };
