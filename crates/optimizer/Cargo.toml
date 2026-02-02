@@ -1,6 +1,6 @@
 [package]
 name = "chryso-optimizer"
-version = "0.0.2"
+version.workspace = true
 edition = "2024"
 description = "Chryso optimizer crate."
 license = "Apache-2.0"

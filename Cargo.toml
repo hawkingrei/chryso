@@ -1,6 +1,6 @@
 [package]
 name = "chryso"
-version = "0.0.2"
+version.workspace = true
 edition = "2024"
 description = "Chryso is a Calcite-style SQL parser + optimizer engine in Rust."
 readme = "README.md"

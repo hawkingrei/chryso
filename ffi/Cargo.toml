@@ -1,6 +1,6 @@
 [package]
 name = "chryso-ffi"
-version = "0.0.2"
+version.workspace = true
 edition = "2024"
 description = "Chryso ffi crate."
 license = "Apache-2.0"

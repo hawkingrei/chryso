@@ -8,4 +8,3 @@ ffi/velox/build/
 .env
 paper/
 .cache
-~/tmp/vector/chroma.sqlite3
