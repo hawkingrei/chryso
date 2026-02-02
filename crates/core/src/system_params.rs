@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 const DEFAULT_TENANT: &str = "__default__";
 
@@ -38,10 +39,7 @@ impl SystemParamRegistry {
     }
 
     pub fn set_param(&self, tenant: &str, key: impl Into<String>, value: SystemParamValue) {
-        let mut guard = match self.tenants.write() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut guard = self.tenants.write();
         let entry = guard.entry(tenant.to_string()).or_default();
         entry.insert(key.into(), value);
     }
@@ -51,10 +49,7 @@ impl SystemParamRegistry {
     }
 
     pub fn get_param(&self, tenant: Option<&str>, key: &str) -> Option<SystemParamValue> {
-        let guard = match self.tenants.read() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let guard = self.tenants.read();
         if let Some(tenant) = tenant {
             if let Some(params) = guard.get(tenant) {
                 if let Some(value) = params.get(key) {

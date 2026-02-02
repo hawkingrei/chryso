@@ -4,6 +4,7 @@
 - Keep dual parser tracks (yacc + handcrafted); benchmark and keep handcrafted path faster.
 - Defer planner support for WITH/SET ops until parser coverage stabilizes.
 - Orca-inspired testing: focus on deterministic plan selection and cost regression before adding parallel optimization.
+- YaccParser: expand AstBuilder operator coverage beyond AND/OR/= to match SimpleParser semantics.
 
 ## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
 
