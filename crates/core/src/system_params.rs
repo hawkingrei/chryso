@@ -38,7 +38,10 @@ impl SystemParamRegistry {
     }
 
     pub fn set_param(&self, tenant: &str, key: impl Into<String>, value: SystemParamValue) {
-        let mut guard = self.tenants.write().expect("system param lock");
+        let mut guard = match self.tenants.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let entry = guard.entry(tenant.to_string()).or_default();
         entry.insert(key.into(), value);
     }
@@ -48,7 +51,10 @@ impl SystemParamRegistry {
     }
 
     pub fn get_param(&self, tenant: Option<&str>, key: &str) -> Option<SystemParamValue> {
-        let guard = self.tenants.read().expect("system param lock");
+        let guard = match self.tenants.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         if let Some(tenant) = tenant {
             if let Some(params) = guard.get(tenant) {
                 if let Some(value) = params.get(key) {
