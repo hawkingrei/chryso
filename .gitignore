@@ -7,3 +7,4 @@ ffi/velox/build/
 *.swp
 .env
 paper/
+.cache

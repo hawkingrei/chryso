@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "chryso"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-adapter",
  "chryso-adapter-velox",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "chryso-adapter"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-core",
  "chryso-metadata",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "chryso-adapter-velox"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-adapter",
  "chryso-core",
@@ -463,21 +463,21 @@ dependencies = [
 
 [[package]]
 name = "chryso-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "parking_lot",
 ]
 
 [[package]]
 name = "chryso-ffi"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso",
 ]
 
 [[package]]
 name = "chryso-metadata"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-core",
  "serde",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "chryso-optimizer"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-core",
  "chryso-metadata",
@@ -499,14 +499,14 @@ dependencies = [
 
 [[package]]
 name = "chryso-parser"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-core",
 ]
 
 [[package]]
 name = "chryso-parser-yacc"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "cfgrammar",
  "chryso-core",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "chryso-planner"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chryso-core",
  "chryso-metadata",

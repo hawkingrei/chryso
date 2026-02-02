@@ -1,6 +1,6 @@
 [package]
 name = "chryso-adapter-velox"
-version = "0.0.1"
+version.workspace = true
 edition = "2024"
 description = "Velox adapter for Chryso."
 license = "Apache-2.0"
@@ -14,15 +14,15 @@ default = []
 velox-ffi = []
 
 [dependencies.chryso-adapter]
-version = "0.0.1"
+version = "0.0.2"
 path = "../adapter"
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"
 
 [dependencies.chryso-planner]
-version = "0.0.1"
+version = "0.0.2"
 path = "../planner"
 
 [dependencies.serde_json]

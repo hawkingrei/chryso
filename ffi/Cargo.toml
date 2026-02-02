@@ -1,6 +1,6 @@
 [package]
 name = "chryso-ffi"
-version = "0.0.1"
+version.workspace = true
 edition = "2024"
 description = "Chryso ffi crate."
 license = "Apache-2.0"
@@ -12,5 +12,5 @@ documentation = "https://docs.rs/chryso-ffi"
 crate-type = [ "cdylib", "staticlib",]
 
 [dependencies.chryso]
-version = "0.0.1"
+version = "0.0.2"
 path = ".."
