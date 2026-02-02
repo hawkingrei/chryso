@@ -873,12 +873,6 @@ fn decode_string_literal(input: &str) -> ChrysoResult<String> {
     let mut out = String::new();
     let mut chars = content.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            if let Some(next) = chars.next() {
-                out.push(next);
-            }
-            continue;
-        }
         if ch == '\'' && chars.peek() == Some(&'\'') {
             out.push('\'');
             chars.next();
