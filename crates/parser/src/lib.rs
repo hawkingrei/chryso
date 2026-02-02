@@ -691,11 +691,19 @@ impl Parser {
             }
             if limit.is_none() {
                 limit = Some(fetch_value);
+            } else {
+                return Err(ChrysoError::new(
+                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
+                ));
             }
         }
         if let Some(top_value) = top {
             if limit.is_none() {
                 limit = Some(top_value);
+            } else {
+                return Err(ChrysoError::new(
+                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
+                ));
             }
         }
         Ok(SelectStatement {
@@ -3729,6 +3737,16 @@ mod tests {
         });
         let err = parser.parse(sql).unwrap_err();
         assert!(err.to_string().contains("FETCH expects ONLY"));
+    }
+
+    #[test]
+    fn reject_multiple_limit_clauses() {
+        let sql = "select id from sales limit 2 fetch first 1 row only";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).unwrap_err();
+        assert!(err.to_string().contains("multiple limit clauses"));
     }
 
     #[test]

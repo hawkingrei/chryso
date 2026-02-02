@@ -81,6 +81,12 @@ impl CostModelConfig {
                 invalid.push(name);
             }
         }
+        if self.join_hash_multiplier < 1.0 {
+            invalid.push("join_hash_multiplier");
+        }
+        if self.join_nested_multiplier < 1.0 {
+            invalid.push("join_nested_multiplier");
+        }
         if invalid.is_empty() {
             Ok(())
         } else {
