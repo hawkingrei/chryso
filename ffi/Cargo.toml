@@ -7,6 +7,9 @@ license = "Apache-2.0"
 repository = "https://github.com/hawkingrei/chryso"
 homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-ffi"
+exclude = [
+  "velox/**",
+]
 
 [lib]
 crate-type = [ "cdylib", "staticlib",]
