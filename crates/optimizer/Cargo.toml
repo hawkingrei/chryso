@@ -20,6 +20,16 @@ path = "../planner"
 version = "0.0.1"
 path = "../metadata"
 
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1"
+
+[dependencies.toml]
+version = "0.8"
+
 [dev-dependencies.chryso-parser]
 version = "0.0.1"
 path = "../parser"

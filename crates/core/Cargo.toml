@@ -9,3 +9,4 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-core"
 
 [dependencies]
+parking_lot = "0.12"

@@ -4,26 +4,14 @@
 - Keep dual parser tracks (yacc + handcrafted); benchmark and keep handcrafted path faster.
 - Defer planner support for WITH/SET ops until parser coverage stabilizes.
 - Orca-inspired testing: focus on deterministic plan selection and cost regression before adding parallel optimization.
+- YaccParser: expand AstBuilder operator coverage beyond AND/OR/= to match SimpleParser semantics.
 
 ## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
 
-501. Optimizer: add a cost model config struct with tunable coefficients (scan, filter, join, sort, agg).
-502. Optimizer: load cost config from `toml` or `json` with defaults when missing.
-503. Optimizer: add a `CostProfile` snapshot format for offline tuning inputs.
-504. Optimizer: add deterministic plan selection tests with fixed stats (no randomness).
-505. Optimizer: add cost regression tests that compare relative ordering of candidate plans.
 506. Optimizer: add plan pattern assertions (e.g., hash join vs nested loop) for key TPCH queries.
-507. Optimizer: add a trace output format that includes alternative plans + costs for debugging. (done)
-508. Optimizer: expose a CLI command to dump memo groups and best plan per group. (done)
-509. Optimizer: add a "cost tuning" harness that runs TPCH queries and logs plan costs. (done)
-510. Optimizer: add a local calibration script to adjust coefficients and re-run regression suite. (done)
-511. Optimizer: add config knobs to disable/enable specific rules for tuning experiments. (done)
 512. Optimizer: add rule impact reporting (plan diff + cost delta).
 513. Optimizer: add a seedable evaluation mode to ensure repeatability.
-514. Optimizer: add a "plan baseline" file format for CI verification.
-515. Optimizer: add a stats snapshot loader to simulate catalogs for tests.
 516. Optimizer: add multi-scenario tests (different stats distributions for same query).
-517. Optimizer: add guardrails for overflow/NaN cost values.
 518. Optimizer: document cost model assumptions and coefficient semantics in `docs/`.
 519. Optimizer: add optional "explain cost breakdown" by operator.
 520. Optimizer: add a cost sensitivity report (delta per coefficient).
@@ -32,17 +20,12 @@
 523. Optimizer: add a CLI option to lock rule ordering for reproducibility.
 524. Optimizer: add a `--no-reorder` mode for rule isolation tests.
 525. Optimizer: add benchmarks that run optimizer only (no execution).
-526. Optimizer: add a stable plan fingerprint for regression comparisons.
 527. Optimizer: add a "plan equivalence" checker to avoid false regressions.
 528. Optimizer: add support for per-query cost overrides.
-529. Optimizer: add a validation step for cost config ranges.
 530. Optimizer: add doc examples for tuning workflow (TPCH-specific).
-531. Optimizer: add CI job to run optimizer regression suite.
-532. Optimizer: add fixture-based golden plans for key TPCH queries.
 533. Optimizer: add a "cost sanity" test to compare trivial queries.
 534. Optimizer: add an API to inject synthetic stats for unit tests.
 535. Optimizer: add a "memo explosion" guard with threshold logging.
-536. Optimizer: add a "plan search budget" config (max groups, max rewrites). (done)
 537. Optimizer: add rule application metrics (count, time).
 538. Optimizer: add a "cost cache" for repeated cost evaluation.
 539. Optimizer: add a "plan cache" for equivalent logical plans.
@@ -80,209 +63,6 @@
 571. Optimizer: add a TODO list for parallel optimizer search design (memo group parallelism).
 572. Optimizer: add a TODO list for safe deterministic concurrency constraints.
 573. Optimizer: add tests that enforce deterministic output under concurrency flags (disabled by default).
-
-## Parser (1-200)
-
-1. Parser: lexer: add token for CASE
-2. Parser: dialect: support CAST keyword parsing (done)
-3. Parser: expr: parse ILIKE operator precedence
-4. Parser: expr: parse IS NULL expression form
-5. Parser: literal: parse IS NOT NULL literal
-6. Parser: identifier: support BETWEEN quoting rules
-7. Parser: statement: parse NOT BETWEEN statement variant
-8. Parser: select: support IN list clause
-9. Parser: join: support NOT IN list join syntax
-10. Parser: function: parse EXISTS function call
-11. Parser: window: parse ANY/ALL window clause
-12. Parser: predicate: normalize DISTINCT ON in parser
-13. Parser: error: improve QUALIFY diagnostic
-14. Parser: AST: add node for WITH CTE
-15. Parser: AST: normalize RECURSIVE CTE during parse
-16. Parser: parser: enable UNION feature flag
-17. Parser: parser: add tests for UNION ALL
-18. Parser: parser: improve recovery for EXCEPT
-19. Parser: parser: support INTERSECT hints
-20. Parser: parser: handle WINDOW frame comments
-21. Parser: lexer: add token for ROWS
-22. Parser: dialect: support RANGE keyword parsing
-23. Parser: expr: parse GROUPS operator precedence
-24. Parser: expr: parse OVER(PARTITION) expression form
-25. Parser: literal: parse LATERAL literal
-26. Parser: identifier: support CROSS JOIN quoting rules
-27. Parser: statement: parse RIGHT JOIN statement variant
-28. Parser: select: support FULL JOIN clause
-29. Parser: join: support USING join syntax
-30. Parser: function: parse NATURAL JOIN function call
-31. Parser: window: parse LIMIT/OFFSET window clause
-32. Parser: predicate: normalize FETCH FIRST in parser
-33. Parser: error: improve TOP diagnostic
-34. Parser: AST: add node for ORDER BY NULLS FIRST/LAST
-35. Parser: AST: normalize NULLIF during parse
-36. Parser: parser: enable COALESCE feature flag
-37. Parser: parser: add tests for GREATEST/LEAST
-38. Parser: parser: improve recovery for TRIM/UPPER/LOWER
-39. Parser: parser: support ARRAY literal hints
-40. Parser: parser: handle MAP literal comments
-41. Parser: lexer: add token for STRUCT literal
-42. Parser: dialect: support JSON literal keyword parsing
-43. Parser: expr: parse INTERVAL literal operator precedence (done)
-44. Parser: expr: parse DATE/TIME/TIMESTAMP expression form (done)
-45. Parser: literal: parse BINARY/HEX literal literal
-46. Parser: identifier: support ESCAPE in LIKE quoting rules
-47. Parser: statement: parse POSITION/SUBSTRING statement variant
-48. Parser: select: support REGEXP clause (done, MySQL REGEXP keyword, PostgreSQL regex operators, and SIMILAR TO)
-49. Parser: join: support DELIMITED identifiers join syntax
-50. Parser: function: parse schema-qualified identifiers function call
-51. Parser: window: parse parameter placeholders window clause
-52. Parser: predicate: normalize named parameters in parser
-53. Parser: error: improve INSERT ... SELECT diagnostic
-54. Parser: AST: add node for INSERT DEFAULT VALUES
-55. Parser: AST: normalize UPSERT/MERGE during parse
-56. Parser: parser: enable UPDATE ... FROM feature flag
-57. Parser: parser: add tests for DELETE ... USING
-58. Parser: parser: improve recovery for RETURNING
-59. Parser: parser: support ALTER TABLE hints
-60. Parser: parser: handle DROP TABLE comments
-61. Parser: lexer: add token for CREATE INDEX
-62. Parser: dialect: support ANALYZE TABLE keyword parsing
-63. Parser: expr: parse EXPLAIN ANALYZE operator precedence
-64. Parser: expr: parse SHOW expression form
-65. Parser: literal: parse DESCRIBE literal
-66. Parser: identifier: support mysql mode quoting rules
-67. Parser: statement: parse pgsql mode statement variant
-68. Parser: select: support CASE clause
-69. Parser: join: support CAST join syntax
-70. Parser: function: parse ILIKE function call
-71. Parser: window: parse IS NULL window clause
-72. Parser: predicate: normalize IS NOT NULL in parser
-73. Parser: error: improve BETWEEN diagnostic
-74. Parser: AST: add node for NOT BETWEEN
-75. Parser: AST: normalize IN list during parse
-76. Parser: parser: enable NOT IN list feature flag
-77. Parser: parser: add tests for EXISTS
-78. Parser: parser: improve recovery for ANY/ALL
-79. Parser: parser: support DISTINCT ON hints
-80. Parser: parser: handle QUALIFY comments
-81. Parser: lexer: add token for WITH CTE
-82. Parser: dialect: support RECURSIVE CTE keyword parsing
-83. Parser: expr: parse UNION operator precedence
-84. Parser: expr: parse UNION ALL expression form
-85. Parser: literal: parse EXCEPT literal
-86. Parser: identifier: support INTERSECT quoting rules
-87. Parser: statement: parse WINDOW frame statement variant
-88. Parser: select: support ROWS clause
-89. Parser: join: support RANGE join syntax
-90. Parser: function: parse GROUPS function call
-91. Parser: window: parse OVER(PARTITION) window clause
-92. Parser: predicate: normalize LATERAL in parser
-93. Parser: error: improve CROSS JOIN diagnostic
-94. Parser: AST: add node for RIGHT JOIN
-95. Parser: AST: normalize FULL JOIN during parse
-96. Parser: parser: enable USING feature flag
-97. Parser: parser: add tests for NATURAL JOIN
-98. Parser: parser: improve recovery for LIMIT/OFFSET
-99. Parser: parser: support FETCH FIRST hints
-100. Parser: parser: handle TOP comments
-101. Parser: lexer: add token for ORDER BY NULLS FIRST/LAST
-102. Parser: dialect: support NULLIF keyword parsing
-103. Parser: expr: parse COALESCE operator precedence
-104. Parser: expr: parse GREATEST/LEAST expression form
-105. Parser: literal: parse TRIM/UPPER/LOWER literal
-106. Parser: identifier: support ARRAY literal quoting rules
-107. Parser: statement: parse MAP literal statement variant
-108. Parser: select: support STRUCT literal clause
-109. Parser: join: support JSON literal join syntax
-110. Parser: function: parse INTERVAL literal function call
-111. Parser: window: parse DATE/TIME/TIMESTAMP window clause
-112. Parser: predicate: normalize BINARY/HEX literal in parser
-113. Parser: error: improve ESCAPE in LIKE diagnostic
-114. Parser: AST: add node for POSITION/SUBSTRING
-115. Parser: AST: normalize REGEXP during parse
-116. Parser: parser: enable DELIMITED identifiers feature flag
-117. Parser: parser: add tests for schema-qualified identifiers
-118. Parser: parser: improve recovery for parameter placeholders
-119. Parser: parser: support named parameters hints
-120. Parser: parser: handle INSERT ... SELECT comments
-121. Parser: lexer: add token for INSERT DEFAULT VALUES
-122. Parser: dialect: support UPSERT/MERGE keyword parsing
-123. Parser: expr: parse UPDATE ... FROM operator precedence
-124. Parser: expr: parse DELETE ... USING expression form
-125. Parser: literal: parse RETURNING literal
-126. Parser: identifier: support ALTER TABLE quoting rules
-127. Parser: statement: parse DROP TABLE statement variant
-128. Parser: select: support CREATE INDEX clause
-129. Parser: join: support ANALYZE TABLE join syntax
-130. Parser: function: parse EXPLAIN ANALYZE function call
-131. Parser: window: parse SHOW window clause
-132. Parser: predicate: normalize DESCRIBE in parser
-133. Parser: error: improve mysql mode diagnostic
-134. Parser: AST: add node for pgsql mode
-135. Parser: AST: normalize CASE during parse
-136. Parser: parser: enable CAST feature flag
-137. Parser: parser: add tests for ILIKE
-138. Parser: parser: improve recovery for IS NULL
-139. Parser: parser: support IS NOT NULL hints
-140. Parser: parser: handle BETWEEN comments
-141. Parser: lexer: add token for NOT BETWEEN
-142. Parser: dialect: support IN list keyword parsing
-143. Parser: expr: parse NOT IN list operator precedence
-144. Parser: expr: parse EXISTS expression form
-145. Parser: literal: parse ANY/ALL literal
-146. Parser: identifier: support DISTINCT ON quoting rules
-147. Parser: statement: parse QUALIFY statement variant
-148. Parser: select: support WITH CTE clause
-149. Parser: join: support RECURSIVE CTE join syntax
-150. Parser: function: parse UNION function call
-151. Parser: window: parse UNION ALL window clause
-152. Parser: predicate: normalize EXCEPT in parser
-153. Parser: error: improve INTERSECT diagnostic
-154. Parser: AST: add node for WINDOW frame
-155. Parser: AST: normalize ROWS during parse
-156. Parser: parser: enable RANGE feature flag
-157. Parser: parser: add tests for GROUPS
-158. Parser: parser: improve recovery for OVER(PARTITION)
-159. Parser: parser: support LATERAL hints
-160. Parser: parser: handle CROSS JOIN comments
-161. Parser: lexer: add token for RIGHT JOIN
-162. Parser: dialect: support FULL JOIN keyword parsing
-163. Parser: expr: parse USING operator precedence
-164. Parser: expr: parse NATURAL JOIN expression form
-165. Parser: literal: parse LIMIT/OFFSET literal
-166. Parser: identifier: support FETCH FIRST quoting rules
-167. Parser: statement: parse TOP statement variant
-168. Parser: select: support ORDER BY NULLS FIRST/LAST clause
-169. Parser: join: support NULLIF join syntax
-170. Parser: function: parse COALESCE function call
-171. Parser: window: parse GREATEST/LEAST window clause
-172. Parser: predicate: normalize TRIM/UPPER/LOWER in parser
-173. Parser: error: improve ARRAY literal diagnostic
-174. Parser: AST: add node for MAP literal
-175. Parser: AST: normalize STRUCT literal during parse
-176. Parser: parser: enable JSON literal feature flag
-177. Parser: parser: add tests for INTERVAL literal
-178. Parser: parser: improve recovery for DATE/TIME/TIMESTAMP
-179. Parser: parser: support BINARY/HEX literal hints
-180. Parser: parser: handle ESCAPE in LIKE comments
-181. Parser: lexer: add token for POSITION/SUBSTRING
-182. Parser: dialect: support REGEXP keyword parsing
-183. Parser: expr: parse DELIMITED identifiers operator precedence
-184. Parser: expr: parse schema-qualified identifiers expression form
-185. Parser: literal: parse parameter placeholders literal
-186. Parser: identifier: support named parameters quoting rules
-187. Parser: statement: parse INSERT ... SELECT statement variant
-188. Parser: select: support INSERT DEFAULT VALUES clause
-189. Parser: join: support UPSERT/MERGE join syntax
-190. Parser: function: parse UPDATE ... FROM function call
-191. Parser: window: parse DELETE ... USING window clause
-192. Parser: predicate: normalize RETURNING in parser
-193. Parser: error: improve ALTER TABLE diagnostic
-194. Parser: AST: add node for DROP TABLE
-195. Parser: AST: normalize CREATE INDEX during parse
-196. Parser: parser: enable ANALYZE TABLE feature flag
-197. Parser: parser: add tests for EXPLAIN ANALYZE
-198. Parser: parser: improve recovery for SHOW
-199. Parser: parser: support DESCRIBE hints
-200. Parser: parser: handle mysql mode comments
 
 ## Logical Plan (201-350)
 

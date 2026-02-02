@@ -132,26 +132,27 @@ pub struct PlanBuilder;
 impl PlanBuilder {
     pub fn build(statement: Statement) -> ChrysoResult<LogicalPlan> {
         let statement = chryso_core::ast::normalize_statement(&statement);
+        let formatted_sql = chryso_core::sql_format::format_statement(&statement);
         let plan = match statement {
-            Statement::With(_) => Err(chryso_core::ChrysoError::new(
-                "WITH is not supported in the planner yet",
-            )),
+            Statement::With(_) => Ok(LogicalPlan::Dml {
+                sql: formatted_sql.clone(),
+            }),
             Statement::Select(select) => build_select(select),
-            Statement::SetOp { .. } => Err(chryso_core::ChrysoError::new(
-                "SET operations are not supported in the planner yet",
-            )),
+            Statement::SetOp { .. } => Ok(LogicalPlan::Dml {
+                sql: formatted_sql.clone(),
+            }),
             Statement::Explain(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::CreateTable(_)
             | Statement::DropTable(_)
             | Statement::Truncate(_)
             | Statement::Analyze(_) => Ok(LogicalPlan::Dml {
-                sql: chryso_core::sql_format::format_statement(&statement),
+                sql: formatted_sql.clone(),
             }),
             Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) => {
                 Ok(LogicalPlan::Dml {
-                    sql: chryso_core::sql_format::format_statement(&statement),
+                    sql: formatted_sql.clone(),
                 })
             }
         }?;
@@ -160,6 +161,11 @@ impl PlanBuilder {
 }
 
 fn build_select(select: SelectStatement) -> ChrysoResult<LogicalPlan> {
+    if select.qualify.is_some() || !select.distinct_on.is_empty() {
+        return Ok(LogicalPlan::Dml {
+            sql: chryso_core::sql_format::format_statement(&Statement::Select(select)),
+        });
+    }
     let mut plan = if let Some(from) = select.from {
         build_from(from)?
     } else {
@@ -198,11 +204,6 @@ fn build_select(select: SelectStatement) -> ChrysoResult<LogicalPlan> {
         input: Box::new(plan),
     };
     if select.distinct {
-        if !select.distinct_on.is_empty() {
-            return Err(chryso_core::ChrysoError::new(
-                "DISTINCT ON is not supported in the planner yet",
-            ));
-        }
         plan = LogicalPlan::Distinct {
             input: Box::new(plan),
         };

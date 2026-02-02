@@ -1,12 +1,143 @@
 use chryso_metadata::StatsCache;
 use chryso_planner::PhysicalPlan;
 pub use chryso_planner::cost::{Cost, CostModel};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::fs;
+use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CostModelConfig {
+    pub scan: f64,
+    pub filter: f64,
+    pub projection: f64,
+    pub join: f64,
+    pub sort: f64,
+    pub aggregate: f64,
+    pub limit: f64,
+    pub derived: f64,
+    pub dml: f64,
+    pub join_hash_multiplier: f64,
+    pub join_nested_multiplier: f64,
+    pub max_cost: f64,
+}
+
+impl Default for CostModelConfig {
+    fn default() -> Self {
+        Self {
+            scan: 1.0,
+            filter: 0.5,
+            projection: 0.1,
+            join: 5.0,
+            sort: 3.0,
+            aggregate: 4.0,
+            limit: 0.05,
+            derived: 0.1,
+            dml: 1.0,
+            join_hash_multiplier: 1.0,
+            join_nested_multiplier: 5.0,
+            max_cost: 1.0e18,
+        }
+    }
+}
+
+impl CostModelConfig {
+    pub const PARAM_SCAN: &'static str = "optimizer.cost.scan";
+    pub const PARAM_FILTER: &'static str = "optimizer.cost.filter";
+    pub const PARAM_PROJECTION: &'static str = "optimizer.cost.projection";
+    pub const PARAM_JOIN: &'static str = "optimizer.cost.join";
+    pub const PARAM_SORT: &'static str = "optimizer.cost.sort";
+    pub const PARAM_AGGREGATE: &'static str = "optimizer.cost.aggregate";
+    pub const PARAM_LIMIT: &'static str = "optimizer.cost.limit";
+    pub const PARAM_DERIVED: &'static str = "optimizer.cost.derived";
+    pub const PARAM_DML: &'static str = "optimizer.cost.dml";
+    pub const PARAM_JOIN_HASH_MULTIPLIER: &'static str = "optimizer.cost.join_hash_multiplier";
+    pub const PARAM_JOIN_NESTED_MULTIPLIER: &'static str = "optimizer.cost.join_nested_multiplier";
+    pub const PARAM_MAX_COST: &'static str = "optimizer.cost.max_cost";
+
+    pub fn load_from_path(path: impl AsRef<Path>) -> chryso_core::error::ChrysoResult<Self> {
+        let value: CostModelConfig = load_config_from_path(path, "cost config")?;
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn validate(&self) -> chryso_core::error::ChrysoResult<()> {
+        let mut invalid = Vec::new();
+        for (name, value) in [
+            ("scan", self.scan),
+            ("filter", self.filter),
+            ("projection", self.projection),
+            ("join", self.join),
+            ("sort", self.sort),
+            ("aggregate", self.aggregate),
+            ("limit", self.limit),
+            ("derived", self.derived),
+            ("dml", self.dml),
+            ("join_hash_multiplier", self.join_hash_multiplier),
+            ("join_nested_multiplier", self.join_nested_multiplier),
+            ("max_cost", self.max_cost),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                invalid.push(name);
+            }
+        }
+        if self.join_hash_multiplier < 1.0 {
+            invalid.push("join_hash_multiplier");
+        }
+        if self.join_nested_multiplier < 1.0 {
+            invalid.push("join_nested_multiplier");
+        }
+        if invalid.is_empty() {
+            Ok(())
+        } else {
+            Err(chryso_core::error::ChrysoError::new(format!(
+                "invalid cost config fields: {}",
+                invalid.join(", ")
+            )))
+        }
+    }
+
+    pub fn apply_system_params(
+        &self,
+        registry: &chryso_core::system_params::SystemParamRegistry,
+        tenant: Option<&str>,
+    ) -> Self {
+        let mut updated = self.clone();
+        let apply = |key: &str, target: &mut f64| {
+            if let Some(value) = registry.get_f64(tenant, key) {
+                if value.is_finite() && value > 0.0 {
+                    *target = value;
+                }
+            }
+        };
+        apply(Self::PARAM_SCAN, &mut updated.scan);
+        apply(Self::PARAM_FILTER, &mut updated.filter);
+        apply(Self::PARAM_PROJECTION, &mut updated.projection);
+        apply(Self::PARAM_JOIN, &mut updated.join);
+        apply(Self::PARAM_SORT, &mut updated.sort);
+        apply(Self::PARAM_AGGREGATE, &mut updated.aggregate);
+        apply(Self::PARAM_LIMIT, &mut updated.limit);
+        apply(Self::PARAM_DERIVED, &mut updated.derived);
+        apply(Self::PARAM_DML, &mut updated.dml);
+        apply(
+            Self::PARAM_JOIN_HASH_MULTIPLIER,
+            &mut updated.join_hash_multiplier,
+        );
+        apply(
+            Self::PARAM_JOIN_NESTED_MULTIPLIER,
+            &mut updated.join_nested_multiplier,
+        );
+        apply(Self::PARAM_MAX_COST, &mut updated.max_cost);
+        updated
+    }
+}
 
 pub struct UnitCostModel;
 
 impl CostModel for UnitCostModel {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        Cost(plan.node_count() as f64 + join_penalty(plan))
+        let default = CostModelConfig::default();
+        Cost(total_weight(plan, &default))
     }
 }
 
@@ -16,19 +147,55 @@ impl std::fmt::Debug for UnitCostModel {
     }
 }
 
+pub struct UnitCostModelWithConfig {
+    config: CostModelConfig,
+}
+
+impl UnitCostModelWithConfig {
+    pub fn new(config: CostModelConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl CostModel for UnitCostModelWithConfig {
+    fn cost(&self, plan: &PhysicalPlan) -> Cost {
+        Cost(total_weight(plan, &self.config))
+    }
+}
+
 pub struct StatsCostModel<'a> {
     stats: &'a StatsCache,
+    config: CostModelConfig,
 }
 
 impl<'a> StatsCostModel<'a> {
     pub fn new(stats: &'a StatsCache) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            config: CostModelConfig::default(),
+        }
+    }
+
+    pub fn with_config(stats: &'a StatsCache, config: CostModelConfig) -> Self {
+        let validated = if config.validate().is_ok() {
+            config
+        } else {
+            CostModelConfig::default()
+        };
+        Self {
+            stats,
+            config: validated,
+        }
     }
 }
 
 impl CostModel for StatsCostModel<'_> {
     fn cost(&self, plan: &PhysicalPlan) -> Cost {
-        Cost(estimate_rows(plan, self.stats) + join_penalty(plan))
+        let mut cost = total_stats_cost(plan, self.stats, &self.config);
+        if !cost.is_finite() || cost > self.config.max_cost {
+            cost = self.config.max_cost;
+        }
+        Cost(cost)
     }
 }
 
@@ -40,7 +207,8 @@ impl std::fmt::Debug for StatsCostModel<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostModel, StatsCache, StatsCostModel, UnitCostModel};
+    use super::{CostModel, CostModelConfig, StatsCache, StatsCostModel, UnitCostModel};
+    use chryso_core::system_params::{SystemParamRegistry, SystemParamValue};
     use chryso_metadata::ColumnStats;
     use chryso_planner::PhysicalPlan;
 
@@ -53,7 +221,7 @@ mod tests {
             }),
         };
         let cost = UnitCostModel.cost(&plan);
-        assert_eq!(cost.0, 2.0);
+        assert_eq!(cost.0, 1.5);
     }
 
     #[test]
@@ -109,19 +277,145 @@ mod tests {
             },
         );
         let model = StatsCostModel::new(&stats);
-        let cost = model.cost(&plan);
-        assert!(cost.0 < 5.0);
+        let selective = model.cost(&plan);
+
+        stats.insert_column_stats(
+            "sales",
+            "region",
+            ColumnStats {
+                distinct_count: 1.0,
+                null_fraction: 0.0,
+            },
+        );
+        let model = StatsCostModel::new(&stats);
+        let non_selective = model.cost(&plan);
+        assert!(selective.0 < non_selective.0);
+    }
+
+    #[test]
+    fn config_validation_rejects_non_positive() {
+        let mut config = CostModelConfig::default();
+        config.join = 0.0;
+        let err = config.validate().expect_err("invalid config");
+        assert!(err.to_string().contains("join"));
+    }
+
+    #[test]
+    fn system_params_override_cost_config() {
+        let registry = SystemParamRegistry::new();
+        registry.set_default_param(CostModelConfig::PARAM_FILTER, SystemParamValue::Float(0.9));
+        let config = CostModelConfig::default();
+        let updated = config.apply_system_params(&registry, Some("tenant"));
+        assert_eq!(updated.filter, 0.9);
+    }
+
+    #[test]
+    fn system_params_ignore_invalid_values() {
+        let registry = SystemParamRegistry::new();
+        registry.set_default_param(CostModelConfig::PARAM_SORT, SystemParamValue::Float(0.0));
+        let config = CostModelConfig::default();
+        let updated = config.apply_system_params(&registry, Some("tenant"));
+        assert_eq!(updated.sort, config.sort);
     }
 }
 
-fn join_penalty(plan: &PhysicalPlan) -> f64 {
+pub(crate) fn load_config_from_path<T: DeserializeOwned>(
+    path: impl AsRef<Path>,
+    label: &str,
+) -> chryso_core::error::ChrysoResult<T> {
+    let content = fs::read_to_string(path.as_ref()).map_err(|err| {
+        chryso_core::error::ChrysoError::new(format!("read {label} failed: {err}"))
+    })?;
+    if path
+        .as_ref()
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false)
+    {
+        toml::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse toml {label} failed: {err}"))
+        })
+    } else {
+        serde_json::from_str(&content).map_err(|err| {
+            chryso_core::error::ChrysoError::new(format!("parse json {label} failed: {err}"))
+        })
+    }
+}
+
+fn local_join_penalty(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
     match plan {
         PhysicalPlan::Join { algorithm, .. } => match algorithm {
-            chryso_planner::JoinAlgorithm::Hash => 1.0,
-            chryso_planner::JoinAlgorithm::NestedLoop => 5.0,
+            chryso_planner::JoinAlgorithm::Hash => {
+                config.join * (config.join_hash_multiplier - 1.0)
+            }
+            chryso_planner::JoinAlgorithm::NestedLoop => {
+                config.join * (config.join_nested_multiplier - 1.0)
+            }
         },
         _ => 0.0,
     }
+}
+
+fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+    match plan {
+        PhysicalPlan::TableScan { .. } | PhysicalPlan::IndexScan { .. } => config.scan,
+        PhysicalPlan::Filter { .. } => config.filter,
+        PhysicalPlan::Projection { .. } => config.projection,
+        PhysicalPlan::Join { .. } => config.join,
+        PhysicalPlan::Aggregate { .. } => config.aggregate,
+        PhysicalPlan::Distinct { .. } => config.aggregate,
+        PhysicalPlan::TopN { .. } => config.sort,
+        PhysicalPlan::Sort { .. } => config.sort,
+        PhysicalPlan::Limit { .. } => config.limit,
+        PhysicalPlan::Derived { .. } => config.derived,
+        PhysicalPlan::Dml { .. } => config.dml,
+    }
+}
+
+fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
+    // Unit cost uses configurable weights for every node in the tree.
+    let base = node_weight(plan, config) + local_join_penalty(plan, config);
+    let children = match plan {
+        PhysicalPlan::Join { left, right, .. } => {
+            total_weight(left, config) + total_weight(right, config)
+        }
+        PhysicalPlan::Filter { input, .. }
+        | PhysicalPlan::Projection { input, .. }
+        | PhysicalPlan::Aggregate { input, .. }
+        | PhysicalPlan::Distinct { input }
+        | PhysicalPlan::TopN { input, .. }
+        | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => total_weight(input, config),
+        PhysicalPlan::TableScan { .. }
+        | PhysicalPlan::IndexScan { .. }
+        | PhysicalPlan::Dml { .. } => 0.0,
+    };
+    base + children
+}
+
+fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelConfig) -> f64 {
+    // Stats cost applies selectivity per node and accumulates subtree contributions.
+    let rows = estimate_rows(plan, stats);
+    let mut cost = rows * node_weight(plan, config) + local_join_penalty(plan, config);
+    cost += match plan {
+        PhysicalPlan::Join { left, right, .. } => {
+            total_stats_cost(left, stats, config) + total_stats_cost(right, stats, config)
+        }
+        PhysicalPlan::Filter { input, .. }
+        | PhysicalPlan::Projection { input, .. }
+        | PhysicalPlan::Aggregate { input, .. }
+        | PhysicalPlan::Distinct { input }
+        | PhysicalPlan::TopN { input, .. }
+        | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Limit { input, .. }
+        | PhysicalPlan::Derived { input, .. } => total_stats_cost(input, stats, config),
+        PhysicalPlan::TableScan { .. }
+        | PhysicalPlan::IndexScan { .. }
+        | PhysicalPlan::Dml { .. } => 0.0,
+    };
+    cost
 }
 
 fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {

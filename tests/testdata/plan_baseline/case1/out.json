@@ -1,0 +1,9 @@
+{
+  "cases": {
+    "baseline_topn": [
+      "TopN order_by=id asc limit=3",
+      "  Project exprs=id",
+      "    TableScan table=users"
+    ]
+  }
+}

@@ -1,28 +1,36 @@
 use crate::cost::{CostModel, UnitCostModel};
 use crate::memo::Memo;
-use crate::rules::RuleSet;
+use crate::rules::{RuleContext, RuleSet};
 use chryso_metadata::StatsCache;
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 use std::collections::HashSet;
 
 pub mod column_prune;
 pub mod cost;
+pub mod cost_profile;
 pub mod enforcer;
 pub mod estimation;
 pub mod expr_rewrite;
 pub mod join_order;
 pub mod memo;
 pub mod physical_rules;
+pub mod plan_fingerprint;
 pub mod properties;
 pub mod rules;
 pub mod stats_collect;
 pub mod subquery;
 pub mod utils;
 
+pub use cost::CostModelConfig;
+pub use cost_profile::CostProfile;
+pub use plan_fingerprint::{logical_fingerprint, physical_fingerprint};
+
 #[derive(Debug)]
 pub struct OptimizerTrace {
     pub applied_rules: Vec<String>,
     pub stats_loaded: Vec<String>,
+    pub conflicting_literals: Vec<(String, String)>,
+    pub warnings: Vec<String>,
 }
 
 impl OptimizerTrace {
@@ -30,6 +38,8 @@ impl OptimizerTrace {
         Self {
             applied_rules: Vec::new(),
             stats_loaded: Vec::new(),
+            conflicting_literals: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 }
@@ -103,6 +113,9 @@ pub struct OptimizerConfig {
     pub trace: bool,
     pub debug_rules: bool,
     pub stats_provider: Option<std::sync::Arc<dyn chryso_metadata::StatsProvider>>,
+    pub cost_config: Option<CostModelConfig>,
+    pub system_params: Option<std::sync::Arc<chryso_core::system_params::SystemParamRegistry>>,
+    pub tenant_id: Option<String>,
 }
 
 impl std::fmt::Debug for OptimizerConfig {
@@ -116,6 +129,9 @@ impl std::fmt::Debug for OptimizerConfig {
             .field("trace", &self.trace)
             .field("debug_rules", &self.debug_rules)
             .field("stats_provider", &self.stats_provider.is_some())
+            .field("cost_config", &self.cost_config.is_some())
+            .field("system_params", &self.system_params.is_some())
+            .field("tenant_id", &self.tenant_id)
             .finish()
     }
 }
@@ -154,10 +170,12 @@ pub struct SearchBudget {
 mod tests {
     use super::cost::UnitCostModel;
     use super::{CascadesOptimizer, OptimizerConfig};
-    use chryso_core::ast::{Expr, Literal};
-    use chryso_metadata::{StatsCache, type_inference::SimpleTypeInferencer};
+    use crate::CostModelConfig;
+    use chryso_core::ast::{BinaryOperator, Expr, Literal};
+    use chryso_metadata::{StatsCache, StatsSnapshot, type_inference::SimpleTypeInferencer};
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
+    use serde_json;
     use std::collections::HashSet;
 
     #[test]
@@ -240,6 +258,71 @@ mod tests {
             .optimize_with_trace(&logical, &mut StatsCache::new());
         assert!(!matches!(physical, PhysicalPlan::Sort { .. }));
     }
+
+    #[test]
+    fn trace_records_literal_conflicts() {
+        let logical = LogicalPlan::Filter {
+            predicate: Expr::BinaryOp {
+                left: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("a".to_string())),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::Literal(Literal::Number(1.0))),
+                }),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("a".to_string())),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::Literal(Literal::Number(2.0))),
+                }),
+            },
+            input: Box::new(LogicalPlan::Scan {
+                table: "t".to_string(),
+            }),
+        };
+        let (_, trace) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut StatsCache::new());
+        assert!(
+            trace
+                .conflicting_literals
+                .iter()
+                .any(|(left, right)| left.contains("a = 1") && right.contains("a = 2")),
+            "expected conflict pair, got {:?}",
+            trace.conflicting_literals
+        );
+    }
+
+    #[test]
+    fn optimizer_uses_stats_snapshot() {
+        let snapshot_json = include_str!("../tests/testdata/tpch_scale1.json");
+        let snapshot: StatsSnapshot = serde_json::from_str(snapshot_json).expect("snapshot");
+        let mut stats = snapshot.to_cache();
+        let sql = "select * from orders";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let (physical, _) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut stats);
+        assert!(matches!(physical, PhysicalPlan::TableScan { .. }));
+    }
+
+    #[test]
+    fn optimizer_uses_system_param_override() {
+        let registry = chryso_core::system_params::SystemParamRegistry::new();
+        registry.set_default_param(
+            CostModelConfig::PARAM_FILTER,
+            chryso_core::system_params::SystemParamValue::Float(9.0),
+        );
+        let mut config = OptimizerConfig::default();
+        config.system_params = Some(std::sync::Arc::new(registry));
+        let base = CostModelConfig::default();
+        let updated = base.apply_system_params(
+            config.system_params.as_ref().unwrap(),
+            config.tenant_id.as_deref(),
+        );
+        assert_eq!(updated.filter, 9.0);
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -253,6 +336,9 @@ impl Default for OptimizerConfig {
             trace: false,
             debug_rules: false,
             stats_provider: None,
+            cost_config: None,
+            system_params: None,
+            tenant_id: None,
         }
     }
 }
@@ -319,26 +405,29 @@ fn optimize_with_cascades(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
+    // Keep rule side effects (e.g., literal conflicts) explicit and thread-safe.
+    let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
         &mut trace,
+        &mut rule_ctx,
         config.debug_rules,
     );
+    trace
+        .conflicting_literals
+        .extend(rule_ctx.take_literal_conflicts());
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
-        Box::new(UnitCostModel)
-    } else {
-        Box::new(cost::StatsCostModel::new(_stats))
-    };
+    let cost_model = build_cost_model(_stats, config, Some(&mut trace));
+    let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let mut best = memo
-        .best_physical(root, cost_model.as_ref())
+        .best_physical(root, &physical_rules, cost_model.as_ref())
         .unwrap_or_else(|| logical_to_physical(&logical));
     if config.enable_properties {
         let required = crate::properties::PhysicalProperties::default();
@@ -352,11 +441,13 @@ fn optimize_with_cascades_memo(
     config: &OptimizerConfig,
     _stats: &StatsCache,
 ) -> (PhysicalPlan, MemoTrace) {
+    let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
         &config.rule_config,
         &mut OptimizerTrace::new(),
+        &mut rule_ctx,
         config.debug_rules,
     );
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
@@ -365,21 +456,47 @@ fn optimize_with_cascades_memo(
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
     memo.explore(&config.rules, &config.rule_config, &config.search_budget);
-    let cost_model: Box<dyn CostModel> = if _stats.is_empty() {
-        Box::new(UnitCostModel)
-    } else {
-        Box::new(cost::StatsCostModel::new(_stats))
-    };
+    let cost_model = build_cost_model(_stats, config, None);
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());
     let mut best = memo
-        .best_physical(root, cost_model.as_ref())
+        .best_physical(root, &physical_rules, cost_model.as_ref())
         .unwrap_or_else(|| logical_to_physical(&logical));
     if config.enable_properties {
         let required = crate::properties::PhysicalProperties::default();
         best = crate::enforcer::enforce(best, &required);
     }
     (best, trace)
+}
+
+fn build_cost_model<'a>(
+    stats: &'a StatsCache,
+    config: &'a OptimizerConfig,
+    trace: Option<&mut OptimizerTrace>,
+) -> Box<dyn CostModel + 'a> {
+    let base = config.cost_config.clone().unwrap_or_default();
+    let model_config = match &config.system_params {
+        Some(registry) => {
+            let tenant = config.tenant_id.as_deref();
+            base.apply_system_params(registry, tenant)
+        }
+        None => base,
+    };
+    let model_config = if model_config.validate().is_ok() {
+        model_config
+    } else {
+        if let Some(trace) = trace {
+            trace
+                .warnings
+                .push("invalid cost config detected; falling back to defaults".to_string());
+        }
+        CostModelConfig::default()
+    };
+    if stats.is_empty() {
+        Box::new(cost::UnitCostModelWithConfig::new(model_config))
+    } else {
+        Box::new(cost::StatsCostModel::with_config(stats, model_config))
+    }
 }
 
 fn ensure_stats(
@@ -415,6 +532,7 @@ fn apply_rules_recursive(
     rules: &RuleSet,
     rule_config: &RuleConfig,
     trace: &mut OptimizerTrace,
+    rule_ctx: &mut RuleContext,
     debug_rules: bool,
 ) -> LogicalPlan {
     let mut rewritten = plan.clone();
@@ -423,7 +541,7 @@ fn apply_rules_recursive(
         if !rule_config.is_enabled(rule.name()) {
             continue;
         }
-        let alternatives = rule.apply(&rewritten);
+        let alternatives = rule.apply(&rewritten, rule_ctx);
         if !alternatives.is_empty() {
             matched.push(rule.name().to_string());
             rewritten = alternatives.last().cloned().unwrap_or(rewritten);
@@ -440,6 +558,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -450,6 +569,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -465,6 +585,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             right: Box::new(apply_rules_recursive(
@@ -472,6 +593,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             on,
@@ -488,6 +610,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -497,6 +620,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -512,6 +636,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -522,6 +647,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -537,6 +663,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
         },
@@ -550,6 +677,7 @@ fn apply_rules_recursive(
                 rules,
                 rule_config,
                 trace,
+                rule_ctx,
                 debug_rules,
             )),
             alias,
@@ -562,7 +690,7 @@ fn apply_rules_recursive(
         if !rule_config.is_enabled(rule.name()) {
             continue;
         }
-        let alternatives = rule.apply(&final_plan);
+        let alternatives = rule.apply(&final_plan, rule_ctx);
         if !alternatives.is_empty() {
             final_plan = alternatives.last().cloned().unwrap_or(final_plan);
         }
@@ -575,13 +703,15 @@ fn apply_rules_fixpoint(
     rules: &RuleSet,
     rule_config: &RuleConfig,
     trace: &mut OptimizerTrace,
+    rule_ctx: &mut RuleContext,
     debug_rules: bool,
 ) -> LogicalPlan {
     const MAX_RULE_PASSES: usize = 8;
     let mut current = plan.clone();
     for _ in 0..MAX_RULE_PASSES {
         let before = logical_plan_fingerprint(&current);
-        let next = apply_rules_recursive(&current, rules, rule_config, trace, debug_rules);
+        let next =
+            apply_rules_recursive(&current, rules, rule_config, trace, rule_ctx, debug_rules);
         let after = logical_plan_fingerprint(&next);
         if before == after {
             return current;
