@@ -102,12 +102,9 @@ impl Memo {
                     let mut inputs = Vec::new();
                     let mut missing_input = false;
                     for child in &expr.children {
-                        if let Some((_, best_child)) = self.best_physical_with_cache(
-                            *child,
-                            physical_rules,
-                            cost_model,
-                            cache,
-                        ) {
+                        if let Some((_, best_child)) =
+                            self.best_physical_with_cache(*child, physical_rules, cost_model, cache)
+                        {
                             inputs.push(best_child);
                         } else {
                             missing_input = true;
