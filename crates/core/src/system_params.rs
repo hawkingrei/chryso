@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 const DEFAULT_TENANT: &str = "__default__";
