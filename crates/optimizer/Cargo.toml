@@ -1,6 +1,6 @@
 [package]
 name = "chryso-optimizer"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso optimizer crate."
 license = "Apache-2.0"
@@ -9,15 +9,15 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-optimizer"
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"
 
 [dependencies.chryso-planner]
-version = "0.0.1"
+version = "0.0.2"
 path = "../planner"
 
 [dependencies.chryso-metadata]
-version = "0.0.1"
+version = "0.0.2"
 path = "../metadata"
 
 [dependencies.serde]
@@ -31,5 +31,5 @@ version = "1"
 version = "0.8"
 
 [dev-dependencies.chryso-parser]
-version = "0.0.1"
+version = "0.0.2"
 path = "../parser"

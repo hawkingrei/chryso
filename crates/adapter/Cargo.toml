@@ -1,6 +1,6 @@
 [package]
 name = "chryso-adapter"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso adapter crate."
 license = "Apache-2.0"
@@ -13,19 +13,19 @@ default = []
 duckdb = [ "dep:duckdb", "duckdb/bundled",]
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"
 
 [dependencies.chryso-planner]
-version = "0.0.1"
+version = "0.0.2"
 path = "../planner"
 
 [dependencies.chryso-metadata]
-version = "0.0.1"
+version = "0.0.2"
 path = "../metadata"
 
 [dependencies.chryso-parser]
-version = "0.0.1"
+version = "0.0.2"
 path = "../parser"
 
 [dependencies.duckdb]

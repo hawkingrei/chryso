@@ -1,6 +1,6 @@
 [package]
 name = "chryso-planner"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso planner crate."
 license = "Apache-2.0"
@@ -9,14 +9,14 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-planner"
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"
 
 [dependencies.chryso-metadata]
-version = "0.0.1"
+version = "0.0.2"
 path = "../metadata"
 
 
 [dev-dependencies.chryso-parser]
-version = "0.0.1"
+version = "0.0.2"
 path = "../parser"

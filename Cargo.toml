@@ -1,6 +1,6 @@
 [package]
 name = "chryso"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso is a Calcite-style SQL parser + optimizer engine in Rust."
 readme = "README.md"
@@ -36,33 +36,33 @@ velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
 
 [dependencies.chryso-adapter]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/adapter"
 default-features = false
 
 [dependencies.chryso-adapter-velox]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/adapter-velox"
 optional = true
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/core"
 
 [dependencies.chryso-metadata]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/metadata"
 
 [dependencies.chryso-optimizer]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/optimizer"
 
 [dependencies.chryso-parser]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/parser"
 
 [dependencies.chryso-planner]
-version = "0.0.1"
+version = "0.0.2"
 path = "crates/planner"
 
 [dev-dependencies.serde]
@@ -70,7 +70,7 @@ version = "1"
 features = [ "derive",]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 license = "Apache-2.0"
 repository = "https://github.com/hawkingrei/chryso"
 homepage = "https://github.com/hawkingrei/chryso"

@@ -7,3 +7,5 @@ ffi/velox/build/
 *.swp
 .env
 paper/
+.cache
+~/tmp/vector/chroma.sqlite3

@@ -1,6 +1,6 @@
 [package]
 name = "chryso-parser"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso parser crate."
 license = "Apache-2.0"
@@ -9,5 +9,5 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-parser"
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"

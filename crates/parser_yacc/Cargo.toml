@@ -1,6 +1,6 @@
 [package]
 name = "chryso-parser-yacc"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Chryso parser-yacc crate."
 license = "Apache-2.0"
@@ -14,11 +14,11 @@ lrlex = "0.13"
 lrpar = "0.13"
 
 [dependencies.chryso-core]
-version = "0.0.1"
+version = "0.0.2"
 path = "../core"
 
 [dependencies.chryso-parser]
-version = "0.0.1"
+version = "0.0.2"
 path = "../parser"
 
 [build-dependencies]
