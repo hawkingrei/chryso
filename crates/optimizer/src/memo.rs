@@ -1,6 +1,7 @@
 use crate::cost::{Cost, CostModel};
 use crate::physical_rules::PhysicalRuleSet;
-use crate::{MemoTrace, MemoTraceCandidate, MemoTraceGroup, RuleConfig, RuleContext, SearchBudget};
+use crate::rules::RuleContext;
+use crate::{MemoTrace, MemoTraceCandidate, MemoTraceGroup, RuleConfig, SearchBudget};
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 use std::collections::HashMap;
 
