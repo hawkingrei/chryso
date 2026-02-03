@@ -107,17 +107,29 @@ OptColumnList
   ;
 
 SelectStmt
+  : SelectExpr SelectSuffix
+  ;
+
+SelectExpr
+  : SelectTerm
+  | SelectExpr UNION SelectTerm
+  | SelectExpr UNION_ALL SelectTerm
+  | SelectExpr INTERSECT SelectTerm
+  | SelectExpr INTERSECT_ALL SelectTerm
+  | SelectExpr EXCEPT SelectTerm
+  | SelectExpr EXCEPT_ALL SelectTerm
+  ;
+
+SelectTerm
   : SelectCore
-  | SelectStmt UNION SelectCore
-  | SelectStmt UNION_ALL SelectCore
-  | SelectStmt INTERSECT SelectCore
-  | SelectStmt INTERSECT_ALL SelectCore
-  | SelectStmt EXCEPT SelectCore
-  | SelectStmt EXCEPT_ALL SelectCore
+  ;
+
+SelectSuffix
+  : OrderByClauseOpt LimitClauseOpt OffsetClauseOpt
   ;
 
 SelectCore
-  : SELECT DistinctOpt SelectList FromClauseOpt WhereClause GroupByClauseOpt HavingClauseOpt OrderByClauseOpt LimitClauseOpt OffsetClauseOpt
+  : SELECT DistinctOpt SelectList FromClauseOpt WhereClause GroupByClauseOpt HavingClauseOpt
   ;
 
 FromClauseOpt
@@ -159,7 +171,10 @@ TableRefListTail
   ;
 
 TableRef
-  : TableFactor OptAlias JoinList
+  : TableFactor OptAlias
+  | TableRef RegularJoin
+  | TableRef CrossJoin
+  | TableRef NaturalJoin
   ;
 
 TableFactor
@@ -179,27 +194,16 @@ ColumnAliasListOpt
   | LPAREN IdentList RPAREN
   ;
 
-JoinList
-  :
-  | JoinClause JoinList
-  ;
-
-JoinClause
-  : RegularJoin
-  | CrossJoin
-  | NaturalJoin
-  ;
-
 RegularJoin
-  : JoinTypeRegular TableRef JoinCondition
+  : JoinTypeRegular TableFactor OptAlias JoinCondition
   ;
 
 CrossJoin
-  : CROSS JOIN TableRef
+  : CROSS JOIN TableFactor OptAlias
   ;
 
 NaturalJoin
-  : NaturalJoinType TableRef
+  : NaturalJoinType TableFactor OptAlias
   ;
 
 JoinTypeRegular

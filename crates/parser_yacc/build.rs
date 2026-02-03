@@ -13,7 +13,7 @@ fn main() {
     let parser_out = Path::new(&out_dir).join("sql.y.rs");
     let allow_conflicts = std::env::var("CHRYSO_YACC_ALLOW_CONFLICTS")
         .map(|value| !matches!(value.as_str(), "0" | "false" | "FALSE"))
-        .unwrap_or(true);
+        .unwrap_or(false);
 
     lrlex::CTLexerBuilder::new()
         .lexer_path(&lexer_path)

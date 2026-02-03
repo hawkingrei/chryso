@@ -171,25 +171,70 @@ impl<'a> AstBuilder<'a> {
 
     fn select_stmt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
         let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTSTMT)?;
-        if nodes.len() == 1 {
-            return self.select_core(&nodes[0]);
+        if nodes.len() != 2 {
+            return Err(self.err_with_rule(ridx));
         }
-        let left = self.select_stmt(&nodes[0])?;
-        let right = self.select_core(&nodes[nodes.len() - 1])?;
-        let op = match nodes.len() {
-            3 => self.set_op_from_term(&nodes[1])?,
-            _ => return Err(self.err_with_rule(ridx)),
-        };
-        Ok(Statement::SetOp {
-            left: Box::new(left),
-            op,
-            right: Box::new(right),
-        })
+        let expr = self.select_expr(&nodes[0])?;
+        let (order_by, limit, offset) = self.select_suffix(&nodes[1])?;
+        match expr {
+            Statement::Select(mut stmt) => {
+                stmt.order_by = order_by;
+                stmt.limit = limit;
+                stmt.offset = offset;
+                Ok(Statement::Select(stmt))
+            }
+            Statement::SetOp { .. } => {
+                if !order_by.is_empty() || limit.is_some() || offset.is_some() {
+                    return Err(self.err("order/limit/offset on set ops is not supported"));
+                }
+                Ok(expr)
+            }
+            _ => Err(self.err("unexpected select expression")),
+        }
+    }
+
+    fn select_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTEXPR)?;
+        if nodes.len() == 1 {
+            return self.select_term(&nodes[0]);
+        }
+        if nodes.len() == 3 {
+            let left = self.select_expr(&nodes[0])?;
+            let right = self.select_term(&nodes[2])?;
+            let op = self.set_op_from_term(&nodes[1])?;
+            return Ok(Statement::SetOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            });
+        }
+        Err(self.err_with_rule(ridx))
+    }
+
+    fn select_term(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTTERM)?;
+        if nodes.len() != 1 {
+            return Err(self.err_with_rule(ridx));
+        }
+        self.select_core(&nodes[0])
+    }
+
+    fn select_suffix(
+        &self,
+        node: &Node<Lexeme, u32>,
+    ) -> ChrysoResult<(Vec<OrderByExpr>, Option<u64>, Option<u64>)> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTSUFFIX)?;
+        if nodes.len() != 3 {
+            return Err(self.err_with_rule(ridx));
+        }
+        let order_by = self.order_by_clause_opt(&nodes[0])?;
+        let limit = self.limit_clause_opt(&nodes[1])?;
+        let offset = self.offset_clause_opt(&nodes[2])?;
+        Ok((order_by, limit, offset))
     }
 
     fn select_core(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
-        // SELECT DistinctOpt SelectList FromClauseOpt WhereClause GroupByClauseOpt
-        // HavingClauseOpt OrderByClauseOpt LimitClauseOpt OffsetClauseOpt
+        // SELECT DistinctOpt SelectList FromClauseOpt WhereClause GroupByClauseOpt HavingClauseOpt
         let (_, nodes) = self.expect_nonterm(node, sql_y::R_SELECTCORE)?;
         let (distinct, distinct_on) = self.distinct_opt(&nodes[1])?;
         let projection = self.select_list(&nodes[2])?;
@@ -197,9 +242,6 @@ impl<'a> AstBuilder<'a> {
         let selection = self.where_clause(&nodes[4])?;
         let group_by = self.group_by_clause_opt(&nodes[5])?;
         let having = self.having_clause_opt(&nodes[6])?;
-        let order_by = self.order_by_clause_opt(&nodes[7])?;
-        let limit = self.limit_clause_opt(&nodes[8])?;
-        let offset = self.offset_clause_opt(&nodes[9])?;
         Ok(Statement::Select(SelectStatement {
             distinct,
             distinct_on,
@@ -209,9 +251,9 @@ impl<'a> AstBuilder<'a> {
             group_by,
             having,
             qualify: None,
-            order_by,
-            limit,
-            offset,
+            order_by: Vec::new(),
+            limit: None,
+            offset: None,
         }))
     }
 
@@ -257,19 +299,36 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn table_ref(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<TableRef> {
-        // TableFactor OptAlias JoinList
-        let (_, nodes) = self.expect_nonterm(node, sql_y::R_TABLEREF)?;
-        let factor = self.table_factor(&nodes[0])?;
-        let (alias, column_aliases) = self.opt_alias(&nodes[1])?;
-        let mut table = TableRef {
-            factor,
-            alias,
-            column_aliases,
-            joins: Vec::new(),
+        // TableFactor OptAlias | TableRef RegularJoin | TableRef CrossJoin | TableRef NaturalJoin
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_TABLEREF)?;
+        if nodes.len() != 2 {
+            return Err(self.err_with_rule(ridx));
+        }
+        let (Node::Nonterm { ridx: left_ridx, .. }, Node::Nonterm { ridx: right_ridx, .. }) =
+            (&nodes[0], &nodes[1])
+        else {
+            return Err(self.err("expected nonterminal table ref"));
         };
-        let joins = self.join_list(&nodes[2], &table)?;
-        table.joins = joins;
-        Ok(table)
+        let left_rule = left_ridx.as_storaget();
+        let right_rule = right_ridx.as_storaget();
+        if left_rule == sql_y::R_TABLEFACTOR && right_rule == sql_y::R_OPTALIAS {
+            return self.table_ref_from_factor_alias(&nodes[0], &nodes[1]);
+        }
+        if left_rule == sql_y::R_TABLEREF {
+            let mut table = self.table_ref(&nodes[0])?;
+            let join = if right_rule == sql_y::R_REGULARJOIN {
+                self.regular_join(self.expect_nonterm_child(&nodes, 1)?.1, &table)?
+            } else if right_rule == sql_y::R_CROSSJOIN {
+                self.cross_join(self.expect_nonterm_child(&nodes, 1)?.1)?
+            } else if right_rule == sql_y::R_NATURALJOIN {
+                self.natural_join(self.expect_nonterm_child(&nodes, 1)?.1)?
+            } else {
+                return Err(self.err("unsupported join clause"));
+            };
+            table.joins.push(join);
+            return Ok(table);
+        }
+        Err(self.err("unsupported table ref"))
     }
 
     fn table_factor(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<TableFactor> {
@@ -301,42 +360,25 @@ impl<'a> AstBuilder<'a> {
         Err(self.err("unsupported subquery type"))
     }
 
-    fn join_list(&self, node: &Node<Lexeme, u32>, left: &TableRef) -> ChrysoResult<Vec<Join>> {
-        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_JOINLIST)?;
-        if nodes.is_empty() {
-            return Ok(Vec::new());
-        }
-        if nodes.len() == 2 {
-            let mut joins = Vec::new();
-            joins.push(self.join_clause(&nodes[0], left)?);
-            joins.extend(self.join_list(&nodes[1], left)?);
-            return Ok(joins);
-        }
-        Err(self.err_with_rule(ridx))
-    }
-
-    fn join_clause(&self, node: &Node<Lexeme, u32>, left: &TableRef) -> ChrysoResult<Join> {
-        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_JOINCLAUSE)?;
-        if nodes.len() != 1 {
-            return Err(self.err_with_rule(ridx));
-        }
-        let child = self.expect_nonterm_child(&nodes, 0)?;
-        if child.0 == sql_y::R_REGULARJOIN {
-            return self.regular_join(&child.1, left);
-        }
-        if child.0 == sql_y::R_CROSSJOIN {
-            return self.cross_join(&child.1);
-        }
-        if child.0 == sql_y::R_NATURALJOIN {
-            return self.natural_join(&child.1);
-        }
-        Err(self.err("unsupported join clause"))
+    fn table_ref_from_factor_alias(
+        &self,
+        factor_node: &Node<Lexeme, u32>,
+        alias_node: &Node<Lexeme, u32>,
+    ) -> ChrysoResult<TableRef> {
+        let factor = self.table_factor(factor_node)?;
+        let (alias, column_aliases) = self.opt_alias(alias_node)?;
+        Ok(TableRef {
+            factor,
+            alias,
+            column_aliases,
+            joins: Vec::new(),
+        })
     }
 
     fn regular_join(&self, nodes: &[Node<Lexeme, u32>], left: &TableRef) -> ChrysoResult<Join> {
         let join_type = self.join_type_regular(&nodes[0])?;
-        let right = self.table_ref(&nodes[1])?;
-        let on = self.join_condition(&nodes[2], left, &right)?;
+        let right = self.table_ref_from_factor_alias(&nodes[1], &nodes[2])?;
+        let on = self.join_condition(&nodes[3], left, &right)?;
         Ok(Join {
             join_type,
             right,
@@ -345,7 +387,7 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn cross_join(&self, nodes: &[Node<Lexeme, u32>]) -> ChrysoResult<Join> {
-        let right = self.table_ref(&nodes[2])?;
+        let right = self.table_ref_from_factor_alias(&nodes[2], &nodes[3])?;
         Ok(Join {
             join_type: JoinType::Inner,
             right,
@@ -355,7 +397,7 @@ impl<'a> AstBuilder<'a> {
 
     fn natural_join(&self, nodes: &[Node<Lexeme, u32>]) -> ChrysoResult<Join> {
         let join_type = self.natural_join_type(&nodes[0])?;
-        let right = self.table_ref(&nodes[1])?;
+        let right = self.table_ref_from_factor_alias(&nodes[1], &nodes[2])?;
         Ok(Join {
             join_type,
             right,
