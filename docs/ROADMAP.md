@@ -28,8 +28,8 @@ TODO: Add richer AST/Logical rewrite rules (e.g., `a=a`, `a!=a`, null-aware simp
 14. done - Add OFFSET parsing
 15. done - Add DISTINCT parsing
 16. done - Add basic DDL/EXPLAIN placeholder statements
-17. in-progress - Add parser error recovery and nicer messages
-18. in-progress - Add parser golden tests for dialect differences
+17. done - Add parser error recovery and nicer messages
+18. done - Add parser golden tests for dialect differences
 19. done - Define logical plan node set
 20. done - Implement logical plan builder for new clauses
 21. done - Add expression normalization utilities
@@ -78,7 +78,7 @@ TODO: Add richer AST/Logical rewrite rules (e.g., `a=a`, `a!=a`, null-aware simp
 64. done - Add optimizer unit tests for rules
 65. done - Add memo unit tests for group insertion
 66. done - Add cost model unit tests
-67. todo - Add analyze tests with mock stats
+67. done - Add analyze tests with mock stats
 68. done - Add adapter SQL snapshot tests
 69. done - Add EXPLAIN output tests
 70. done - Add benchmark harness for parser

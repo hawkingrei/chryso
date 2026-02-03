@@ -1,12 +1,18 @@
 %start Statement
 
 %token SELECT FROM WHERE DISTINCT ON AND OR NOT
-%token WITH RECURSIVE UNION ALL INTERSECT EXCEPT
+%token WITH RECURSIVE UNION UNION_ALL INTERSECT INTERSECT_ALL EXCEPT EXCEPT_ALL
 %token INSERT INTO VALUES DEFAULT UPDATE SET DELETE RETURNING
 %token CREATE DROP TRUNCATE IF EXISTS TABLE
 %token JOIN LEFT RIGHT FULL CROSS NATURAL USING AS
+%token GROUP BY HAVING ORDER LIMIT OFFSET
+%token ASC DESC NULLS FIRST LAST
 %token COMMA DOT STAR LPAREN RPAREN EQ
 %token IDENT NUMBER STRING
+%left UNION UNION_ALL INTERSECT INTERSECT_ALL EXCEPT EXCEPT_ALL
+%left OR
+%left AND
+%left EQ
 
 %%
 
@@ -54,8 +60,12 @@ ColumnDefsOpt
   ;
 
 ColumnDefList
-  : ColumnDef
-  | ColumnDefList COMMA ColumnDef
+  : ColumnDef ColumnDefListTail
+  ;
+
+ColumnDefListTail
+  :
+  | COMMA ColumnDef ColumnDefListTail
   ;
 
 ColumnDef
@@ -79,8 +89,12 @@ RecursiveOpt
   ;
 
 CteList
-  : Cte
-  | CteList COMMA Cte
+  : Cte CteListTail
+  ;
+
+CteListTail
+  :
+  | COMMA Cte CteListTail
   ;
 
 Cte
@@ -93,17 +107,29 @@ OptColumnList
   ;
 
 SelectStmt
+  : SelectExpr SelectSuffix
+  ;
+
+SelectExpr
+  : SelectTerm
+  | SelectExpr UNION SelectTerm
+  | SelectExpr UNION_ALL SelectTerm
+  | SelectExpr INTERSECT SelectTerm
+  | SelectExpr INTERSECT_ALL SelectTerm
+  | SelectExpr EXCEPT SelectTerm
+  | SelectExpr EXCEPT_ALL SelectTerm
+  ;
+
+SelectTerm
   : SelectCore
-  | SelectStmt UNION SelectCore
-  | SelectStmt UNION ALL SelectCore
-  | SelectStmt INTERSECT SelectCore
-  | SelectStmt INTERSECT ALL SelectCore
-  | SelectStmt EXCEPT SelectCore
-  | SelectStmt EXCEPT ALL SelectCore
+  ;
+
+SelectSuffix
+  : OrderByClauseOpt LimitClauseOpt OffsetClauseOpt
   ;
 
 SelectCore
-  : SELECT DistinctOpt SelectList FromClauseOpt WhereClause
+  : SELECT DistinctOpt SelectList FromClauseOpt WhereClause GroupByClauseOpt HavingClauseOpt
   ;
 
 FromClauseOpt
@@ -113,14 +139,26 @@ FromClauseOpt
 
 DistinctOpt
   :
-  | DISTINCT
-  | DISTINCT ON LPAREN ExprList RPAREN
+  | DISTINCT DistinctOnOpt
+  ;
+
+DistinctOnOpt
+  :
+  | ON LPAREN ExprList RPAREN
   ;
 
 SelectList
+  : SelectItem SelectListTail
+  ;
+
+SelectItem
   : STAR
-  | SelectList COMMA Expr
   | Expr
+  ;
+
+SelectListTail
+  :
+  | COMMA SelectItem SelectListTail
   ;
 
 FromClause
@@ -128,12 +166,19 @@ FromClause
   ;
 
 TableRefList
-  : TableRef
-  | TableRefList COMMA TableRef
+  : TableRef TableRefListTail
+  ;
+
+TableRefListTail
+  :
+  | COMMA TableRef TableRefListTail
   ;
 
 TableRef
-  : TableFactor OptAlias JoinList
+  : TableFactor OptAlias
+  | TableRef RegularJoin
+  | TableRef CrossJoin
+  | TableRef NaturalJoin
   ;
 
 TableFactor
@@ -153,27 +198,16 @@ ColumnAliasListOpt
   | LPAREN IdentList RPAREN
   ;
 
-JoinList
-  :
-  | JoinList JoinClause
-  ;
-
-JoinClause
-  : RegularJoin
-  | CrossJoin
-  | NaturalJoin
-  ;
-
 RegularJoin
-  : JoinTypeRegular TableRef JoinCondition
+  : JoinTypeRegular TableFactor OptAlias JoinCondition
   ;
 
 CrossJoin
-  : CROSS JOIN TableRef
+  : CROSS JOIN TableFactor OptAlias
   ;
 
 NaturalJoin
-  : NaturalJoinType TableRef
+  : NaturalJoinType TableFactor OptAlias
   ;
 
 JoinTypeRegular
@@ -200,6 +234,56 @@ WhereClause
   | WHERE Expr
   ;
 
+GroupByClauseOpt
+  :
+  | GROUP BY ExprList
+  ;
+
+HavingClauseOpt
+  :
+  | HAVING Expr
+  ;
+
+OrderByClauseOpt
+  :
+  | ORDER BY OrderByList
+  ;
+
+OrderByList
+  : OrderByExpr OrderByListTail
+  ;
+
+OrderByListTail
+  :
+  | COMMA OrderByExpr OrderByListTail
+  ;
+
+OrderByExpr
+  : Expr OptSortDirection OptNullsOrder
+  ;
+
+OptSortDirection
+  :
+  | ASC
+  | DESC
+  ;
+
+OptNullsOrder
+  :
+  | NULLS FIRST
+  | NULLS LAST
+  ;
+
+LimitClauseOpt
+  :
+  | LIMIT NUMBER
+  ;
+
+OffsetClauseOpt
+  :
+  | OFFSET NUMBER
+  ;
+
 InsertStmt
   : INSERT INTO IDENT OptColumnList DEFAULT VALUES ReturningClause
   | INSERT INTO IDENT OptColumnList VALUES ValuesList ReturningClause
@@ -207,8 +291,16 @@ InsertStmt
   ;
 
 ValuesList
+  : ValuesRow ValuesListTail
+  ;
+
+ValuesListTail
+  :
+  | COMMA ValuesRow ValuesListTail
+  ;
+
+ValuesRow
   : LPAREN ExprList RPAREN
-  | ValuesList COMMA LPAREN ExprList RPAREN
   ;
 
 UpdateStmt
@@ -225,8 +317,12 @@ ReturningClause
   ;
 
 AssignmentList
-  : Assignment
-  | AssignmentList COMMA Assignment
+  : Assignment AssignmentListTail
+  ;
+
+AssignmentListTail
+  :
+  | COMMA Assignment AssignmentListTail
   ;
 
 Assignment
@@ -234,20 +330,56 @@ Assignment
   ;
 
 ExprList
-  : Expr
-  | ExprList COMMA Expr
+  : Expr ExprListTail
+  ;
+
+ExprListTail
+  :
+  | COMMA Expr ExprListTail
   ;
 
 IdentList
-  : IDENT
-  | IdentList COMMA IDENT
+  : IDENT IdentListTail
+  ;
+
+IdentListTail
+  :
+  | COMMA IDENT IdentListTail
   ;
 
 Expr
-  : Expr AND Expr
-  | Expr OR Expr
-  | Expr EQ Expr
-  | LPAREN Expr RPAREN
+  : OrExpr
+  ;
+
+OrExpr
+  : AndExpr OrExprTail
+  ;
+
+OrExprTail
+  :
+  | OR AndExpr OrExprTail
+  ;
+
+AndExpr
+  : EqExpr AndExprTail
+  ;
+
+AndExprTail
+  :
+  | AND EqExpr AndExprTail
+  ;
+
+EqExpr
+  : PrimaryExpr EqExprTail
+  ;
+
+EqExprTail
+  :
+  | EQ PrimaryExpr EqExprTail
+  ;
+
+PrimaryExpr
+  : LPAREN Expr RPAREN
   | IDENT DOT IDENT
   | IDENT DOT STAR
   | IDENT

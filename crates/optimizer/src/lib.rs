@@ -172,11 +172,15 @@ mod tests {
     use super::{CascadesOptimizer, OptimizerConfig};
     use crate::CostModelConfig;
     use chryso_core::ast::{BinaryOperator, Expr, Literal};
-    use chryso_metadata::{StatsCache, StatsSnapshot, type_inference::SimpleTypeInferencer};
+    use chryso_metadata::{
+        ColumnStats, StatsCache, StatsProvider, StatsSnapshot, TableStats,
+        type_inference::SimpleTypeInferencer,
+    };
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
     use serde_json;
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     #[test]
     fn explain_with_types_and_costs() {
@@ -322,6 +326,50 @@ mod tests {
             config.tenant_id.as_deref(),
         );
         assert_eq!(updated.filter, 9.0);
+    }
+
+    #[test]
+    fn analyze_stats_provider_populates_cache() {
+        struct TestStatsProvider;
+
+        impl StatsProvider for TestStatsProvider {
+            fn load_stats(
+                &self,
+                tables: &[String],
+                columns: &[(String, String)],
+                cache: &mut StatsCache,
+            ) -> chryso_core::ChrysoResult<()> {
+                for table in tables {
+                    cache.insert_table_stats(table, TableStats { row_count: 42.0 });
+                }
+                for (table, column) in columns {
+                    cache.insert_column_stats(
+                        table,
+                        column,
+                        ColumnStats {
+                            distinct_count: 7.0,
+                            null_fraction: 0.1,
+                        },
+                    );
+                }
+                Ok(())
+            }
+        }
+
+        let sql = "select id from sales where region = 'us'";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+        let mut stats = StatsCache::new();
+        let mut config = OptimizerConfig::default();
+        config.stats_provider = Some(Arc::new(TestStatsProvider));
+        let optimizer = CascadesOptimizer::new(config);
+        let (_, trace) = optimizer.optimize_with_trace(&logical, &mut stats);
+        assert!(stats.table_stats("sales").is_some());
+        assert!(stats.column_stats("sales", "region").is_some());
+        assert!(trace.stats_loaded.contains(&"sales".to_string()));
     }
 }
 

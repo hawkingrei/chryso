@@ -744,7 +744,20 @@ pub mod duckdb {
 #[cfg(test)]
 mod tests {
     use super::{AdapterCapabilities, ExecutorAdapter, MockAdapter, ParamValue, QueryResult};
+    use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
+    use chryso_parser_yacc::YaccParser;
     use chryso_planner::PhysicalPlan;
+
+    fn assert_sql_parses(sql: &str) {
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        parser.parse(sql).expect("simple parse");
+        let yacc_parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        yacc_parser.parse(sql).expect("yacc parse");
+    }
 
     #[test]
     fn mock_adapter_records_plan() {
@@ -848,5 +861,77 @@ mod tests {
         let sql = super::physical_to_sql(&plan);
         assert!(sql.contains("from users"));
         assert!(sql.contains("where id = 1"));
+    }
+
+    #[test]
+    fn physical_sql_is_parseable_by_simple_parser() {
+        let plan = PhysicalPlan::Projection {
+            exprs: vec![chryso_core::ast::Expr::Identifier("id".to_string())],
+            input: Box::new(PhysicalPlan::Filter {
+                predicate: chryso_core::ast::Expr::BinaryOp {
+                    left: Box::new(chryso_core::ast::Expr::Identifier("region".to_string())),
+                    op: chryso_core::ast::BinaryOperator::Eq,
+                    right: Box::new(chryso_core::ast::Expr::Literal(
+                        chryso_core::ast::Literal::String("us".to_string()),
+                    )),
+                },
+                input: Box::new(PhysicalPlan::TableScan {
+                    table: "sales".to_string(),
+                }),
+            }),
+        };
+        let sql = super::physical_to_sql(&plan);
+        assert_sql_parses(&sql);
+    }
+
+    #[test]
+    fn physical_sql_join_parseable_by_yacc() {
+        let plan = PhysicalPlan::Join {
+            join_type: chryso_core::ast::JoinType::Inner,
+            algorithm: chryso_planner::JoinAlgorithm::Hash,
+            left: Box::new(PhysicalPlan::TableScan {
+                table: "users".to_string(),
+            }),
+            right: Box::new(PhysicalPlan::TableScan {
+                table: "orders".to_string(),
+            }),
+            on: chryso_core::ast::Expr::BinaryOp {
+                left: Box::new(chryso_core::ast::Expr::Identifier("l.id".to_string())),
+                op: chryso_core::ast::BinaryOperator::Eq,
+                right: Box::new(chryso_core::ast::Expr::Identifier("r.user_id".to_string())),
+            },
+        };
+        let sql = super::physical_to_sql(&plan);
+        assert_sql_parses(&sql);
+    }
+
+    #[test]
+    fn physical_sql_aggregate_parseable_by_yacc() {
+        let plan = PhysicalPlan::Aggregate {
+            group_exprs: vec![chryso_core::ast::Expr::Identifier("id".to_string())],
+            aggr_exprs: Vec::new(),
+            input: Box::new(PhysicalPlan::TableScan {
+                table: "sales".to_string(),
+            }),
+        };
+        let sql = super::physical_to_sql(&plan);
+        assert_sql_parses(&sql);
+    }
+
+    #[test]
+    fn physical_sql_topn_parseable_by_yacc() {
+        let plan = PhysicalPlan::TopN {
+            order_by: vec![chryso_core::ast::OrderByExpr {
+                expr: chryso_core::ast::Expr::Identifier("id".to_string()),
+                asc: true,
+                nulls_first: Some(false),
+            }],
+            limit: 5,
+            input: Box::new(PhysicalPlan::TableScan {
+                table: "users".to_string(),
+            }),
+        };
+        let sql = super::physical_to_sql(&plan);
+        assert_sql_parses(&sql);
     }
 }
