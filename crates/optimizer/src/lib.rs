@@ -178,9 +178,9 @@ mod tests {
     };
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
-    use std::sync::Arc;
     use serde_json;
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     #[test]
     fn explain_with_types_and_costs() {

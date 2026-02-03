@@ -896,13 +896,9 @@ mod tests {
                 table: "orders".to_string(),
             }),
             on: chryso_core::ast::Expr::BinaryOp {
-                left: Box::new(chryso_core::ast::Expr::Identifier(
-                    "l.id".to_string(),
-                )),
+                left: Box::new(chryso_core::ast::Expr::Identifier("l.id".to_string())),
                 op: chryso_core::ast::BinaryOperator::Eq,
-                right: Box::new(chryso_core::ast::Expr::Identifier(
-                    "r.user_id".to_string(),
-                )),
+                right: Box::new(chryso_core::ast::Expr::Identifier("r.user_id".to_string())),
             },
         };
         let sql = super::physical_to_sql(&plan);

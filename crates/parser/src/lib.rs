@@ -1692,11 +1692,7 @@ impl Parser {
             .peek()
             .map(token_label)
             .unwrap_or_else(|| "end of input".to_string());
-        ChrysoError::new(format!(
-            "{} at token {} ({found})",
-            err,
-            self.pos
-        ))
+        ChrysoError::new(format!("{} at token {} ({found})", err, self.pos))
     }
 
     fn next(&mut self) -> Option<Token> {
