@@ -184,13 +184,46 @@ impl<'a> AstBuilder<'a> {
                 Ok(Statement::Select(stmt))
             }
             Statement::SetOp { .. } => {
-                if !order_by.is_empty() || limit.is_some() || offset.is_some() {
-                    return Err(self.err("order/limit/offset on set ops is not supported"));
+                if order_by.is_empty() && limit.is_none() && offset.is_none() {
+                    return Ok(expr);
                 }
-                Ok(expr)
+                Ok(self.wrap_setop_with_suffix(expr, order_by, limit, offset))
             }
             _ => Err(self.err("unexpected select expression")),
         }
+    }
+
+    fn wrap_setop_with_suffix(
+        &self,
+        statement: Statement,
+        order_by: Vec<OrderByExpr>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> Statement {
+        let from = Some(TableRef {
+            factor: TableFactor::Derived {
+                query: Box::new(statement),
+            },
+            alias: None,
+            column_aliases: Vec::new(),
+            joins: Vec::new(),
+        });
+        Statement::Select(SelectStatement {
+            distinct: false,
+            distinct_on: Vec::new(),
+            projection: vec![SelectItem {
+                expr: Expr::Wildcard,
+                alias: None,
+            }],
+            from,
+            selection: None,
+            group_by: Vec::new(),
+            having: None,
+            qualify: None,
+            order_by,
+            limit,
+            offset,
+        })
     }
 
     fn select_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
