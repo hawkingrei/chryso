@@ -1,7 +1,7 @@
 %start Statement
 
 %token SELECT FROM WHERE DISTINCT ON AND OR NOT
-%token WITH RECURSIVE
+%token WITH RECURSIVE UNION UNION_ALL INTERSECT INTERSECT_ALL EXCEPT EXCEPT_ALL
 %token INSERT INTO VALUES DEFAULT UPDATE SET DELETE RETURNING
 %token CREATE DROP TRUNCATE IF EXISTS TABLE
 %token JOIN LEFT RIGHT FULL CROSS NATURAL USING AS
@@ -9,6 +9,10 @@
 %token ASC DESC NULLS FIRST LAST
 %token COMMA DOT STAR LPAREN RPAREN EQ
 %token IDENT NUMBER STRING
+%left UNION UNION_ALL INTERSECT INTERSECT_ALL EXCEPT EXCEPT_ALL
+%left OR
+%left AND
+%left EQ
 
 %%
 
@@ -104,6 +108,12 @@ OptColumnList
 
 SelectStmt
   : SelectCore
+  | SelectStmt UNION SelectCore
+  | SelectStmt UNION_ALL SelectCore
+  | SelectStmt INTERSECT SelectCore
+  | SelectStmt INTERSECT_ALL SelectCore
+  | SelectStmt EXCEPT SelectCore
+  | SelectStmt EXCEPT_ALL SelectCore
   ;
 
 SelectCore
@@ -117,8 +127,12 @@ FromClauseOpt
 
 DistinctOpt
   :
-  | DISTINCT
-  | DISTINCT ON LPAREN ExprList RPAREN
+  | DISTINCT DistinctOnOpt
+  ;
+
+DistinctOnOpt
+  :
+  | ON LPAREN ExprList RPAREN
   ;
 
 SelectList
@@ -358,15 +372,11 @@ EqExprTail
 
 PrimaryExpr
   : LPAREN Expr RPAREN
-  | IDENT PrimarySuffixOpt
+  | IDENT DOT IDENT
+  | IDENT DOT STAR
+  | IDENT
   | NUMBER
   | STRING
-  ;
-
-PrimarySuffixOpt
-  :
-  | DOT IDENT
-  | DOT STAR
   ;
 
 %%

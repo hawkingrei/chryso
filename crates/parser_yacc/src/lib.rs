@@ -171,10 +171,20 @@ impl<'a> AstBuilder<'a> {
 
     fn select_stmt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
         let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTSTMT)?;
-        if nodes.len() != 1 {
-            return Err(self.err_with_rule(ridx));
+        if nodes.len() == 1 {
+            return self.select_core(&nodes[0]);
         }
-        self.select_core(&nodes[0])
+        let left = self.select_stmt(&nodes[0])?;
+        let right = self.select_core(&nodes[nodes.len() - 1])?;
+        let op = match nodes.len() {
+            3 => self.set_op_from_term(&nodes[1])?,
+            _ => return Err(self.err_with_rule(ridx)),
+        };
+        Ok(Statement::SetOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        })
     }
 
     fn select_core(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
@@ -447,11 +457,22 @@ impl<'a> AstBuilder<'a> {
         if nodes.is_empty() {
             return Ok((false, Vec::new()));
         }
-        if nodes.len() == 1 {
-            return Ok((true, Vec::new()));
+        if nodes.len() != 2 {
+            return Err(self.err("unexpected distinct clause"));
         }
-        let exprs = self.expr_list(&nodes[3])?;
+        let exprs = self.distinct_on_opt(&nodes[1])?;
         Ok((true, exprs))
+    }
+
+    fn distinct_on_opt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Vec<Expr>> {
+        let (_, nodes) = self.expect_nonterm(node, sql_y::R_DISTINCTONOPT)?;
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+        if nodes.len() == 4 {
+            return self.expr_list(&nodes[2]);
+        }
+        Err(self.err("unexpected distinct on clause"))
     }
 
     fn where_clause(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Option<Expr>> {
@@ -849,31 +870,22 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() == 1 {
             return self.expr(&nodes[0]);
         }
-        if nodes.len() == 2 && self.is_term_kind(&nodes[0], "IDENT") {
-            let base = self.ident_from_term(&nodes[0])?;
-            if let Some(suffix) = self.primary_suffix_opt(&nodes[1])? {
-                return Ok(Expr::Identifier(format!("{base}.{suffix}")));
-            }
-            return Ok(Expr::Identifier(base));
-        }
         if nodes.len() == 3
             && self.is_term_kind(&nodes[0], "LPAREN")
             && self.is_term_kind(&nodes[2], "RPAREN")
         {
             return self.expr(&nodes[1]);
         }
+        if nodes.len() == 3
+            && self.is_term_kind(&nodes[0], "IDENT")
+            && self.is_term_kind(&nodes[1], "DOT")
+            && (self.is_term_kind(&nodes[2], "IDENT") || self.is_term_kind(&nodes[2], "STAR"))
+        {
+            let left = self.ident_from_term(&nodes[0])?;
+            let right = self.term_text(&nodes[2])?;
+            return Ok(Expr::Identifier(format!("{left}.{right}")));
+        }
         Err(self.err_with_rule(ridx))
-    }
-
-    fn primary_suffix_opt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Option<String>> {
-        let (_, nodes) = self.expect_nonterm(node, sql_y::R_PRIMARYSUFFIXOPT)?;
-        if nodes.is_empty() {
-            return Ok(None);
-        }
-        if nodes.len() == 2 && self.is_term_kind(&nodes[0], "DOT") {
-            return Ok(Some(self.term_text(&nodes[1])?));
-        }
-        Err(self.err("unexpected primary suffix"))
     }
 
     fn expr_from_term(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
@@ -1028,6 +1040,23 @@ impl<'a> AstBuilder<'a> {
             TableFactor::Table { name } => Ok(name.clone()),
             TableFactor::Derived { .. } => Err(ChrysoError::new("subquery in FROM requires alias")),
         }
+    }
+
+    fn set_op_from_term(
+        &self,
+        node: &Node<Lexeme, u32>,
+    ) -> ChrysoResult<chryso_core::ast::SetOperator> {
+        let keyword = self.term_text(node)?;
+        let op = match keyword.to_uppercase().as_str() {
+            "UNION" => chryso_core::ast::SetOperator::Union,
+            "UNION_ALL" => chryso_core::ast::SetOperator::UnionAll,
+            "INTERSECT" => chryso_core::ast::SetOperator::Intersect,
+            "INTERSECT_ALL" => chryso_core::ast::SetOperator::IntersectAll,
+            "EXCEPT" => chryso_core::ast::SetOperator::Except,
+            "EXCEPT_ALL" => chryso_core::ast::SetOperator::ExceptAll,
+            _ => return Err(self.err("unsupported set operator")),
+        };
+        Ok(op)
     }
 
     fn expect_nonterm<'b>(
