@@ -50,7 +50,7 @@
 \)                      "RPAREN"
 =                     "EQ"
 [0-9]+(\.[0-9]+)?       "NUMBER"
-'[^']*'               "STRING"
+'([^']|'')*'          "STRING"
 [a-zA-Z_][a-zA-Z0-9_]*  "IDENT"
 
 %%
