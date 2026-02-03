@@ -148,13 +148,17 @@ DistinctOnOpt
   ;
 
 SelectList
+  : SelectItem SelectListTail
+  ;
+
+SelectItem
   : STAR
-  | Expr SelectListTail
+  | Expr
   ;
 
 SelectListTail
   :
-  | COMMA Expr SelectListTail
+  | COMMA SelectItem SelectListTail
   ;
 
 FromClause

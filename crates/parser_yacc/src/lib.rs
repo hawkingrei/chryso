@@ -304,8 +304,14 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() != 2 {
             return Err(self.err_with_rule(ridx));
         }
-        let (Node::Nonterm { ridx: left_ridx, .. }, Node::Nonterm { ridx: right_ridx, .. }) =
-            (&nodes[0], &nodes[1])
+        let (
+            Node::Nonterm {
+                ridx: left_ridx, ..
+            },
+            Node::Nonterm {
+                ridx: right_ridx, ..
+            },
+        ) = (&nodes[0], &nodes[1])
         else {
             return Err(self.err("expected nonterminal table ref"));
         };
@@ -455,24 +461,29 @@ impl<'a> AstBuilder<'a> {
 
     fn select_list(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Vec<SelectItem>> {
         let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTLIST)?;
-        if nodes.len() == 1 {
-            if self.is_term_kind(&nodes[0], "STAR") {
-                return Ok(vec![SelectItem {
-                    expr: Expr::Wildcard,
-                    alias: None,
-                }]);
-            }
-            return Err(self.err_with_rule(ridx));
-        }
         if nodes.len() == 2 {
-            let mut items = vec![SelectItem {
-                expr: self.expr(&nodes[0])?,
-                alias: None,
-            }];
+            let mut items = vec![self.select_item(&nodes[0])?];
             self.select_list_tail(&nodes[1], &mut items)?;
             return Ok(items);
         }
         Err(self.err_with_rule(ridx))
+    }
+
+    fn select_item(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<SelectItem> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_SELECTITEM)?;
+        if nodes.len() != 1 {
+            return Err(self.err_with_rule(ridx));
+        }
+        if self.is_term_kind(&nodes[0], "STAR") {
+            return Ok(SelectItem {
+                expr: Expr::Wildcard,
+                alias: None,
+            });
+        }
+        Ok(SelectItem {
+            expr: self.expr(&nodes[0])?,
+            alias: None,
+        })
     }
 
     fn select_list_tail(
@@ -485,10 +496,7 @@ impl<'a> AstBuilder<'a> {
             return Ok(());
         }
         if nodes.len() == 3 {
-            items.push(SelectItem {
-                expr: self.expr(&nodes[1])?,
-                alias: None,
-            });
+            items.push(self.select_item(&nodes[1])?);
             return self.select_list_tail(&nodes[2], items);
         }
         Err(self.err("unexpected select list tail"))
@@ -771,11 +779,7 @@ impl<'a> AstBuilder<'a> {
         Err(self.err_with_rule(ridx))
     }
 
-    fn expr_list_tail(
-        &self,
-        node: &Node<Lexeme, u32>,
-        items: &mut Vec<Expr>,
-    ) -> ChrysoResult<()> {
+    fn expr_list_tail(&self, node: &Node<Lexeme, u32>, items: &mut Vec<Expr>) -> ChrysoResult<()> {
         let (_, nodes) = self.expect_nonterm(node, sql_y::R_EXPRLISTTAIL)?;
         if nodes.is_empty() {
             return Ok(());
@@ -1089,13 +1093,18 @@ impl<'a> AstBuilder<'a> {
         node: &Node<Lexeme, u32>,
     ) -> ChrysoResult<chryso_core::ast::SetOperator> {
         let keyword = self.term_text(node)?;
-        let op = match keyword.to_uppercase().as_str() {
+        let normalized = keyword
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_uppercase();
+        let op = match normalized.as_str() {
             "UNION" => chryso_core::ast::SetOperator::Union,
-            "UNION_ALL" => chryso_core::ast::SetOperator::UnionAll,
+            "UNION ALL" => chryso_core::ast::SetOperator::UnionAll,
             "INTERSECT" => chryso_core::ast::SetOperator::Intersect,
-            "INTERSECT_ALL" => chryso_core::ast::SetOperator::IntersectAll,
+            "INTERSECT ALL" => chryso_core::ast::SetOperator::IntersectAll,
             "EXCEPT" => chryso_core::ast::SetOperator::Except,
-            "EXCEPT_ALL" => chryso_core::ast::SetOperator::ExceptAll,
+            "EXCEPT ALL" => chryso_core::ast::SetOperator::ExceptAll,
             _ => return Err(self.err("unsupported set operator")),
         };
         Ok(op)
@@ -1212,6 +1221,7 @@ fn decode_string_literal(input: &str) -> ChrysoResult<String> {
 mod tests {
     use super::*;
     use chryso_parser::Dialect;
+    use lrpar::Lexer;
 
     #[test]
     fn yacc_parser_parses_select() {
@@ -1223,6 +1233,31 @@ mod tests {
             chryso_core::ast::Statement::Select(_) => {}
             _ => panic!("expected select"),
         }
+    }
+
+    #[test]
+    fn yacc_parser_parses_select_star_with_exprs() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse("select *, id from users").expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.projection.len(), 2);
+    }
+
+    #[test]
+    fn yacc_lexer_accepts_star_with_comma() {
+        let lexerdef = sql_l::lexerdef();
+        let lexer = lexerdef.lexer("select *, id from users");
+        let mut errors = Vec::new();
+        for item in lexer.iter() {
+            if let Err(err) = item {
+                errors.push(err);
+            }
+        }
+        assert!(errors.is_empty(), "lexer errors: {:?}", errors);
     }
 
     #[test]

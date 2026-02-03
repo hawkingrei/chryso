@@ -49,7 +49,7 @@
 (?i)nulls        "NULLS"
 (?i)first        "FIRST"
 (?i)last         "LAST"
-","                     "COMMA"
+,                      "COMMA"
 \.                      "DOT"
 \*                      "STAR"
 \(                      "LPAREN"
