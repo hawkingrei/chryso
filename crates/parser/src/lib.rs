@@ -178,7 +178,7 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ChrysoResult<Statement> {
-        if self.consume_keyword(Keyword::With) {
+        let result = if self.consume_keyword(Keyword::With) {
             self.parse_with_statement()
         } else if self.consume_keyword(Keyword::Explain) {
             let statement = self.parse_explain_statement()?;
@@ -209,11 +209,12 @@ impl Parser {
             self.parse_query_tail(select)
         } else {
             Err(ChrysoError::new("unexpected statement"))
-        }
+        };
+        result.map_err(|err| self.decorate_error(err))
     }
 
     fn parse_explain_statement(&mut self) -> ChrysoResult<Statement> {
-        if self.consume_keyword(Keyword::With) {
+        let result = if self.consume_keyword(Keyword::With) {
             self.parse_with_statement()
         } else if self.consume_keyword(Keyword::Select) {
             let select = self.parse_select()?;
@@ -230,7 +231,8 @@ impl Parser {
             self.parse_analyze_statement()
         } else {
             Err(ChrysoError::new("EXPLAIN expects a statement"))
-        }
+        };
+        result.map_err(|err| self.decorate_error(err))
     }
 
     fn parse_with_statement(&mut self) -> ChrysoResult<Statement> {
@@ -1683,6 +1685,18 @@ impl Parser {
             self.tokens.get(self.pos + offset),
             Some(Token::Keyword(kw)) if *kw == keyword
         )
+    }
+
+    fn decorate_error(&self, err: ChrysoError) -> ChrysoError {
+        let found = self
+            .peek()
+            .map(token_label)
+            .unwrap_or_else(|| "end of input".to_string());
+        ChrysoError::new(format!(
+            "{} at token {} ({found})",
+            err,
+            self.pos
+        ))
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -3737,6 +3751,16 @@ mod tests {
         });
         let err = parser.parse(sql).unwrap_err();
         assert!(err.to_string().contains("FETCH expects ONLY"));
+    }
+
+    #[test]
+    fn parse_error_includes_token_context() {
+        let sql = "select from";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).unwrap_err();
+        assert!(err.to_string().contains("token"));
     }
 
     #[test]

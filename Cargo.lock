@@ -447,6 +447,7 @@ dependencies = [
  "chryso-core",
  "chryso-metadata",
  "chryso-parser",
+ "chryso-parser-yacc",
  "chryso-planner",
  "duckdb",
 ]
