@@ -337,14 +337,8 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() != 2 {
             return Err(self.err_with_rule(ridx));
         }
-        let (
-            Node::Nonterm {
-                ridx: left_ridx, ..
-            },
-            Node::Nonterm {
-                ridx: right_ridx, ..
-            },
-        ) = (&nodes[0], &nodes[1])
+        let (Node::Nonterm { ridx: left_ridx, .. }, Node::Nonterm { ridx: right_ridx, .. }) =
+            (&nodes[0], &nodes[1])
         else {
             return Err(self.err("expected nonterminal table ref"));
         };
