@@ -1281,6 +1281,25 @@ mod tests {
     }
 
     #[test]
+    fn yacc_parser_parses_setop_with_order_limit() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser
+            .parse("select id from t1 union all select id from t2 order by id limit 1")
+            .expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 1);
+        assert_eq!(select.limit, Some(1));
+        let from = select.from.expect("from");
+        let TableFactor::Derived { .. } = from.factor else {
+            panic!("expected derived");
+        };
+    }
+
+    #[test]
     fn yacc_lexer_accepts_star_with_comma() {
         let lexerdef = sql_l::lexerdef();
         let lexer = lexerdef.lexer("select *, id from users");

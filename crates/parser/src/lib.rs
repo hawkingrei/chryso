@@ -1,6 +1,6 @@
 use chryso_core::ast::{
     BinaryOperator, Expr, Join, JoinType, Literal, OrderByExpr, SelectItem, SelectStatement,
-    Statement, TableRef, UnaryOperator,
+    Statement, TableFactor, TableRef, UnaryOperator,
 };
 use chryso_core::{ChrysoError, ChrysoResult};
 
@@ -334,14 +334,100 @@ impl Parser {
                 break;
             };
             self.expect_keyword(Keyword::Select)?;
-            let right = self.parse_select()?;
+            let right = self.parse_select_internal(false)?;
             current = Statement::SetOp {
                 left: Box::new(current),
                 op,
                 right: Box::new(Statement::Select(right)),
             };
         }
-        Ok(current)
+        if !matches!(current, Statement::SetOp { .. }) {
+            return Ok(current);
+        }
+        let order_by = if self.consume_keyword(Keyword::Order) {
+            self.expect_keyword(Keyword::By)?;
+            self.parse_order_by_list()?
+        } else {
+            Vec::new()
+        };
+        let mut limit = if self.consume_keyword(Keyword::Limit) {
+            Some(self.parse_limit_value()?)
+        } else {
+            None
+        };
+        let offset = if self.consume_keyword(Keyword::Offset) {
+            Some(self.parse_limit_value()?)
+        } else {
+            None
+        };
+        if self.consume_keyword(Keyword::Fetch) {
+            let _ = if self.consume_keyword(Keyword::First) {
+                true
+            } else if self.consume_keyword(Keyword::Next) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
+            };
+            let fetch_value = if self.peek_is_limit_value() {
+                self.parse_limit_value()?
+            } else {
+                1
+            };
+            let _ = if self.consume_keyword(Keyword::Row) {
+                true
+            } else if self.consume_keyword(Keyword::Rows) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
+            };
+            if !self.consume_keyword(Keyword::Only) {
+                return Err(ChrysoError::new("FETCH expects ONLY"));
+            }
+            if limit.is_none() {
+                limit = Some(fetch_value);
+            } else {
+                return Err(ChrysoError::new(
+                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
+                ));
+            }
+        }
+        if order_by.is_empty() && limit.is_none() && offset.is_none() {
+            return Ok(current);
+        }
+        Ok(self.wrap_setop_with_suffix(current, order_by, limit, offset))
+    }
+
+    fn wrap_setop_with_suffix(
+        &self,
+        statement: Statement,
+        order_by: Vec<OrderByExpr>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> Statement {
+        let from = Some(TableRef {
+            factor: TableFactor::Derived {
+                query: Box::new(statement),
+            },
+            alias: None,
+            column_aliases: Vec::new(),
+            joins: Vec::new(),
+        });
+        Statement::Select(SelectStatement {
+            distinct: false,
+            distinct_on: Vec::new(),
+            projection: vec![SelectItem {
+                expr: Expr::Wildcard,
+                alias: None,
+            }],
+            from,
+            selection: None,
+            group_by: Vec::new(),
+            having: None,
+            qualify: None,
+            order_by,
+            limit,
+            offset,
+        })
     }
 
     fn parse_create_statement(&mut self) -> ChrysoResult<Statement> {
@@ -605,6 +691,10 @@ impl Parser {
     }
 
     fn parse_select(&mut self) -> ChrysoResult<SelectStatement> {
+        self.parse_select_internal(true)
+    }
+
+    fn parse_select_internal(&mut self, allow_suffix: bool) -> ChrysoResult<SelectStatement> {
         let mut top = if self.consume_keyword(Keyword::Top) {
             Some(self.parse_top_value()?)
         } else {
@@ -652,51 +742,56 @@ impl Parser {
         } else {
             None
         };
-        let order_by = if self.consume_keyword(Keyword::Order) {
-            self.expect_keyword(Keyword::By)?;
-            self.parse_order_by_list()?
-        } else {
-            Vec::new()
-        };
-        let mut limit = if self.consume_keyword(Keyword::Limit) {
-            Some(self.parse_limit_value()?)
-        } else {
-            None
-        };
-        let offset = if self.consume_keyword(Keyword::Offset) {
-            Some(self.parse_limit_value()?)
-        } else {
-            None
-        };
-        if self.consume_keyword(Keyword::Fetch) {
-            let _ = if self.consume_keyword(Keyword::First) {
-                true
-            } else if self.consume_keyword(Keyword::Next) {
-                true
+        let mut order_by = Vec::new();
+        let mut limit = None;
+        let mut offset = None;
+        if allow_suffix {
+            order_by = if self.consume_keyword(Keyword::Order) {
+                self.expect_keyword(Keyword::By)?;
+                self.parse_order_by_list()?
             } else {
-                return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
+                Vec::new()
             };
-            let fetch_value = if self.peek_is_limit_value() {
-                self.parse_limit_value()?
+            limit = if self.consume_keyword(Keyword::Limit) {
+                Some(self.parse_limit_value()?)
             } else {
-                1
+                None
             };
-            let _ = if self.consume_keyword(Keyword::Row) {
-                true
-            } else if self.consume_keyword(Keyword::Rows) {
-                true
+            offset = if self.consume_keyword(Keyword::Offset) {
+                Some(self.parse_limit_value()?)
             } else {
-                return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
+                None
             };
-            if !self.consume_keyword(Keyword::Only) {
-                return Err(ChrysoError::new("FETCH expects ONLY"));
-            }
-            if limit.is_none() {
-                limit = Some(fetch_value);
-            } else {
-                return Err(ChrysoError::new(
-                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
-                ));
+            if self.consume_keyword(Keyword::Fetch) {
+                let _ = if self.consume_keyword(Keyword::First) {
+                    true
+                } else if self.consume_keyword(Keyword::Next) {
+                    true
+                } else {
+                    return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
+                };
+                let fetch_value = if self.peek_is_limit_value() {
+                    self.parse_limit_value()?
+                } else {
+                    1
+                };
+                let _ = if self.consume_keyword(Keyword::Row) {
+                    true
+                } else if self.consume_keyword(Keyword::Rows) {
+                    true
+                } else {
+                    return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
+                };
+                if !self.consume_keyword(Keyword::Only) {
+                    return Err(ChrysoError::new("FETCH expects ONLY"));
+                }
+                if limit.is_none() {
+                    limit = Some(fetch_value);
+                } else {
+                    return Err(ChrysoError::new(
+                        "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
+                    ));
+                }
             }
         }
         if let Some(top_value) = top {
@@ -2434,6 +2529,24 @@ mod tests {
             panic!("expected set op");
         };
         assert!(matches!(op, chryso_core::ast::SetOperator::UnionAll));
+    }
+
+    #[test]
+    fn parse_setop_with_order_limit() {
+        let sql = "select id from t1 union all select id from t2 order by id limit 1";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 1);
+        assert_eq!(select.limit, Some(1));
+        let from = select.from.expect("from");
+        let TableFactor::Derived { .. } = from.factor else {
+            panic!("expected derived");
+        };
     }
 
     #[test]
