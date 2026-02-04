@@ -92,7 +92,7 @@ jobs:
             deps-install
             deps-download
           key: ${{ runner.os }}-velox-deps-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
-      - name: Build Velox FFI (submodule + Arrow)
+      - name: Build Velox FFI (submodule, exec-only)
         run: |
           cmake -S ffi/velox -B ffi/velox/build \
             -DCHRYSO_VELOX_USE_SUBMODULE=ON \

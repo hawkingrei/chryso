@@ -18,6 +18,7 @@ fn main() {
         Ok(value) => PathBuf::from(value),
         Err(_) => {
             let (build_dir, source_dir) = default_build_paths();
+            emit_rerun_if_changed(&source_dir);
             build_velox_ffi(&source_dir, &build_dir);
             build_dir
         }
@@ -36,7 +37,8 @@ fn default_build_paths() -> (PathBuf, PathBuf) {
         .and_then(Path::parent)
         .unwrap_or_else(|| panic!("failed to locate workspace root from CARGO_MANIFEST_DIR"));
     let source_dir = workspace_dir.join("ffi").join("velox");
-    let build_dir = source_dir.join("build");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let build_dir = out_dir.join("velox-ffi");
     (build_dir, source_dir)
 }
 
@@ -82,4 +84,12 @@ fn build_velox_ffi(source_dir: &Path, build_dir: &Path) {
 
 fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn emit_rerun_if_changed(source_dir: &Path) {
+    let base = source_dir.display();
+    println!("cargo:rerun-if-changed={base}/CMakeLists.txt");
+    println!("cargo:rerun-if-changed={base}/src");
+    println!("cargo:rerun-if-changed={base}/include");
+    println!("cargo:rerun-if-changed={base}/tests");
 }

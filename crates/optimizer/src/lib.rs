@@ -532,12 +532,12 @@ fn optimize_with_cascades(
         config.debug_rules,
     );
     let conflict_pairs = rule_ctx.take_conflict_pairs();
-    for pair in conflict_pairs {
-        trace
-            .conflicting_literals
-            .push((pair.lhs.clone(), pair.rhs.clone()));
-        trace.conflict_pairs.push(pair);
-    }
+    trace.conflicting_literals.extend(
+        conflict_pairs
+            .iter()
+            .map(|pair| (pair.lhs.clone(), pair.rhs.clone())),
+    );
+    trace.conflict_pairs.extend(conflict_pairs);
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
