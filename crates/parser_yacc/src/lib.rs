@@ -184,13 +184,46 @@ impl<'a> AstBuilder<'a> {
                 Ok(Statement::Select(stmt))
             }
             Statement::SetOp { .. } => {
-                if !order_by.is_empty() || limit.is_some() || offset.is_some() {
-                    return Err(self.err("order/limit/offset on set ops is not supported"));
+                if order_by.is_empty() && limit.is_none() && offset.is_none() {
+                    return Ok(expr);
                 }
-                Ok(expr)
+                Ok(self.wrap_setop_with_suffix(expr, order_by, limit, offset))
             }
             _ => Err(self.err("unexpected select expression")),
         }
+    }
+
+    fn wrap_setop_with_suffix(
+        &self,
+        statement: Statement,
+        order_by: Vec<OrderByExpr>,
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> Statement {
+        let from = Some(TableRef {
+            factor: TableFactor::Derived {
+                query: Box::new(statement),
+            },
+            alias: None,
+            column_aliases: Vec::new(),
+            joins: Vec::new(),
+        });
+        Statement::Select(SelectStatement {
+            distinct: false,
+            distinct_on: Vec::new(),
+            projection: vec![SelectItem {
+                expr: Expr::Wildcard,
+                alias: None,
+            }],
+            from,
+            selection: None,
+            group_by: Vec::new(),
+            having: None,
+            qualify: None,
+            order_by,
+            limit,
+            offset,
+        })
     }
 
     fn select_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Statement> {
@@ -835,26 +868,26 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() != 2 {
             return Err(self.err_with_rule(ridx));
         }
-        let mut expr = self.and_expr(&nodes[0])?;
-        self.or_expr_tail(&nodes[1], &mut expr)?;
-        Ok(expr)
-    }
-
-    fn or_expr_tail(&self, node: &Node<Lexeme, u32>, expr: &mut Expr) -> ChrysoResult<()> {
-        let (_, nodes) = self.expect_nonterm(node, sql_y::R_OREXPRTAIL)?;
-        if nodes.is_empty() {
-            return Ok(());
+        let mut left = self.and_expr(&nodes[0])?;
+        let mut current_tail = &nodes[1];
+        loop {
+            let (_, tail_nodes) = self.expect_nonterm(current_tail, sql_y::R_OREXPRTAIL)?;
+            if tail_nodes.is_empty() {
+                break;
+            }
+            if tail_nodes.len() == 3 {
+                let right = self.and_expr(&tail_nodes[1])?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::Or,
+                    right: Box::new(right),
+                };
+                current_tail = &tail_nodes[2];
+            } else {
+                return Err(self.err("unexpected or expr tail"));
+            }
         }
-        if nodes.len() == 3 {
-            let right = self.and_expr(&nodes[1])?;
-            *expr = Expr::BinaryOp {
-                left: Box::new(expr.clone()),
-                op: BinaryOperator::Or,
-                right: Box::new(right),
-            };
-            return self.or_expr_tail(&nodes[2], expr);
-        }
-        Err(self.err("unexpected or expr tail"))
+        Ok(left)
     }
 
     fn and_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
@@ -862,26 +895,26 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() != 2 {
             return Err(self.err_with_rule(ridx));
         }
-        let mut expr = self.eq_expr(&nodes[0])?;
-        self.and_expr_tail(&nodes[1], &mut expr)?;
-        Ok(expr)
-    }
-
-    fn and_expr_tail(&self, node: &Node<Lexeme, u32>, expr: &mut Expr) -> ChrysoResult<()> {
-        let (_, nodes) = self.expect_nonterm(node, sql_y::R_ANDEXPRTAIL)?;
-        if nodes.is_empty() {
-            return Ok(());
+        let mut left = self.eq_expr(&nodes[0])?;
+        let mut current_tail = &nodes[1];
+        loop {
+            let (_, tail_nodes) = self.expect_nonterm(current_tail, sql_y::R_ANDEXPRTAIL)?;
+            if tail_nodes.is_empty() {
+                break;
+            }
+            if tail_nodes.len() == 3 {
+                let right = self.eq_expr(&tail_nodes[1])?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::And,
+                    right: Box::new(right),
+                };
+                current_tail = &tail_nodes[2];
+            } else {
+                return Err(self.err("unexpected and expr tail"));
+            }
         }
-        if nodes.len() == 3 {
-            let right = self.eq_expr(&nodes[1])?;
-            *expr = Expr::BinaryOp {
-                left: Box::new(expr.clone()),
-                op: BinaryOperator::And,
-                right: Box::new(right),
-            };
-            return self.and_expr_tail(&nodes[2], expr);
-        }
-        Err(self.err("unexpected and expr tail"))
+        Ok(left)
     }
 
     fn eq_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
@@ -889,26 +922,26 @@ impl<'a> AstBuilder<'a> {
         if nodes.len() != 2 {
             return Err(self.err_with_rule(ridx));
         }
-        let mut expr = self.primary_expr(&nodes[0])?;
-        self.eq_expr_tail(&nodes[1], &mut expr)?;
-        Ok(expr)
-    }
-
-    fn eq_expr_tail(&self, node: &Node<Lexeme, u32>, expr: &mut Expr) -> ChrysoResult<()> {
-        let (_, nodes) = self.expect_nonterm(node, sql_y::R_EQEXPRTAIL)?;
-        if nodes.is_empty() {
-            return Ok(());
+        let mut left = self.primary_expr(&nodes[0])?;
+        let mut current_tail = &nodes[1];
+        loop {
+            let (_, tail_nodes) = self.expect_nonterm(current_tail, sql_y::R_EQEXPRTAIL)?;
+            if tail_nodes.is_empty() {
+                break;
+            }
+            if tail_nodes.len() == 3 {
+                let right = self.primary_expr(&tail_nodes[1])?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(right),
+                };
+                current_tail = &tail_nodes[2];
+            } else {
+                return Err(self.err("unexpected eq expr tail"));
+            }
         }
-        if nodes.len() == 3 {
-            let right = self.primary_expr(&nodes[1])?;
-            *expr = Expr::BinaryOp {
-                left: Box::new(expr.clone()),
-                op: BinaryOperator::Eq,
-                right: Box::new(right),
-            };
-            return self.eq_expr_tail(&nodes[2], expr);
-        }
-        Err(self.err("unexpected eq expr tail"))
+        Ok(left)
     }
 
     fn primary_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
@@ -1245,6 +1278,25 @@ mod tests {
             panic!("expected select");
         };
         assert_eq!(select.projection.len(), 2);
+    }
+
+    #[test]
+    fn yacc_parser_parses_setop_with_order_limit() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser
+            .parse("select id from t1 union all select id from t2 order by id limit 1")
+            .expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 1);
+        assert_eq!(select.limit, Some(1));
+        let from = select.from.expect("from");
+        let TableFactor::Derived { .. } = from.factor else {
+            panic!("expected derived");
+        };
     }
 
     #[test]
