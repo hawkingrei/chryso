@@ -34,9 +34,7 @@ fn default_build_paths() -> (PathBuf, PathBuf) {
     let workspace_dir = manifest_dir
         .parent()
         .and_then(Path::parent)
-        .unwrap_or_else(|| {
-            panic!("failed to locate workspace root from CARGO_MANIFEST_DIR")
-        });
+        .unwrap_or_else(|| panic!("failed to locate workspace root from CARGO_MANIFEST_DIR"));
     let source_dir = workspace_dir.join("ffi").join("velox");
     let build_dir = source_dir.join("build");
     (build_dir, source_dir)

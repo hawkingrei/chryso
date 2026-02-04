@@ -33,7 +33,11 @@ impl RuleContext {
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        self.record_conflict_pairs(pairs.into_iter().map(|(lhs, rhs)| ConflictPair { lhs, rhs }));
+        self.record_conflict_pairs(
+            pairs
+                .into_iter()
+                .map(|(lhs, rhs)| ConflictPair { lhs, rhs }),
+        );
     }
 
     pub fn take_conflict_pairs(&mut self) -> Vec<ConflictPair> {
@@ -1376,7 +1380,10 @@ fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
                             format!("{} = {}", ident, Expr::Literal(existing.clone()).to_sql());
                         let right =
                             format!("{} = {}", ident, Expr::Literal(literal.clone()).to_sql());
-                        conflict_pairs.insert(ConflictPair { lhs: left, rhs: right });
+                        conflict_pairs.insert(ConflictPair {
+                            lhs: left,
+                            rhs: right,
+                        });
                     }
                 } else {
                     literal_bindings.insert(ident.clone(), literal.clone());

@@ -125,7 +125,8 @@ mod tests {
     fn duckdb_pipeline_executes_derived_subquery() {
         let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
         setup_sales_table(&adapter);
-        let sql = "select id from (select id from sales where region = 'us') as t order by id limit 1";
+        let sql =
+            "select id from (select id from sales where region = 'us') as t order by id limit 1";
 
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
