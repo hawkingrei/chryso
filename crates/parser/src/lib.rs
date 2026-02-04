@@ -344,53 +344,7 @@ impl Parser {
         if !matches!(current, Statement::SetOp { .. }) {
             return Ok(current);
         }
-        let order_by = if self.consume_keyword(Keyword::Order) {
-            self.expect_keyword(Keyword::By)?;
-            self.parse_order_by_list()?
-        } else {
-            Vec::new()
-        };
-        let mut limit = if self.consume_keyword(Keyword::Limit) {
-            Some(self.parse_limit_value()?)
-        } else {
-            None
-        };
-        let offset = if self.consume_keyword(Keyword::Offset) {
-            Some(self.parse_limit_value()?)
-        } else {
-            None
-        };
-        if self.consume_keyword(Keyword::Fetch) {
-            let _ = if self.consume_keyword(Keyword::First) {
-                true
-            } else if self.consume_keyword(Keyword::Next) {
-                true
-            } else {
-                return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
-            };
-            let fetch_value = if self.peek_is_limit_value() {
-                self.parse_limit_value()?
-            } else {
-                1
-            };
-            let _ = if self.consume_keyword(Keyword::Row) {
-                true
-            } else if self.consume_keyword(Keyword::Rows) {
-                true
-            } else {
-                return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
-            };
-            if !self.consume_keyword(Keyword::Only) {
-                return Err(ChrysoError::new("FETCH expects ONLY"));
-            }
-            if limit.is_none() {
-                limit = Some(fetch_value);
-            } else {
-                return Err(ChrysoError::new(
-                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
-                ));
-            }
-        }
+        let (order_by, limit, offset) = self.parse_suffix_clauses()?;
         if order_by.is_empty() && limit.is_none() && offset.is_none() {
             return Ok(current);
         }
@@ -746,53 +700,10 @@ impl Parser {
         let mut limit = None;
         let mut offset = None;
         if allow_suffix {
-            order_by = if self.consume_keyword(Keyword::Order) {
-                self.expect_keyword(Keyword::By)?;
-                self.parse_order_by_list()?
-            } else {
-                Vec::new()
-            };
-            limit = if self.consume_keyword(Keyword::Limit) {
-                Some(self.parse_limit_value()?)
-            } else {
-                None
-            };
-            offset = if self.consume_keyword(Keyword::Offset) {
-                Some(self.parse_limit_value()?)
-            } else {
-                None
-            };
-            if self.consume_keyword(Keyword::Fetch) {
-                let _ = if self.consume_keyword(Keyword::First) {
-                    true
-                } else if self.consume_keyword(Keyword::Next) {
-                    true
-                } else {
-                    return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
-                };
-                let fetch_value = if self.peek_is_limit_value() {
-                    self.parse_limit_value()?
-                } else {
-                    1
-                };
-                let _ = if self.consume_keyword(Keyword::Row) {
-                    true
-                } else if self.consume_keyword(Keyword::Rows) {
-                    true
-                } else {
-                    return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
-                };
-                if !self.consume_keyword(Keyword::Only) {
-                    return Err(ChrysoError::new("FETCH expects ONLY"));
-                }
-                if limit.is_none() {
-                    limit = Some(fetch_value);
-                } else {
-                    return Err(ChrysoError::new(
-                        "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
-                    ));
-                }
-            }
+            let suffix = self.parse_suffix_clauses()?;
+            order_by = suffix.0;
+            limit = suffix.1;
+            offset = suffix.2;
         }
         if let Some(top_value) = top {
             if limit.is_none() {
@@ -816,6 +727,59 @@ impl Parser {
             limit,
             offset,
         })
+    }
+
+    fn parse_suffix_clauses(
+        &mut self,
+    ) -> ChrysoResult<(Vec<OrderByExpr>, Option<u64>, Option<u64>)> {
+        let order_by = if self.consume_keyword(Keyword::Order) {
+            self.expect_keyword(Keyword::By)?;
+            self.parse_order_by_list()?
+        } else {
+            Vec::new()
+        };
+        let mut limit = if self.consume_keyword(Keyword::Limit) {
+            Some(self.parse_limit_value()?)
+        } else {
+            None
+        };
+        let offset = if self.consume_keyword(Keyword::Offset) {
+            Some(self.parse_limit_value()?)
+        } else {
+            None
+        };
+        if self.consume_keyword(Keyword::Fetch) {
+            let _ = if self.consume_keyword(Keyword::First) {
+                true
+            } else if self.consume_keyword(Keyword::Next) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects FIRST or NEXT"));
+            };
+            let fetch_value = if self.peek_is_limit_value() {
+                self.parse_limit_value()?
+            } else {
+                1
+            };
+            let _ = if self.consume_keyword(Keyword::Row) {
+                true
+            } else if self.consume_keyword(Keyword::Rows) {
+                true
+            } else {
+                return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
+            };
+            if !self.consume_keyword(Keyword::Only) {
+                return Err(ChrysoError::new("FETCH expects ONLY"));
+            }
+            if limit.is_none() {
+                limit = Some(fetch_value);
+            } else {
+                return Err(ChrysoError::new(
+                    "multiple limit clauses (LIMIT/FETCH/TOP) are not supported",
+                ));
+            }
+        }
+        Ok((order_by, limit, offset))
     }
 
     fn parse_projection(&mut self) -> ChrysoResult<Vec<SelectItem>> {
