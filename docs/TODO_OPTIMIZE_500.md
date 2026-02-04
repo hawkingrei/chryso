@@ -5,6 +5,9 @@
 - Defer planner support for WITH/SET ops until parser coverage stabilizes.
 - Orca-inspired testing: focus on deterministic plan selection and cost regression before adding parallel optimization.
 - YaccParser: expand AstBuilder operator coverage beyond AND/OR/= to match SimpleParser semantics.
+- Adapter tests: add table-driven fixtures to validate SimpleParser + YaccParser end-to-end pipeline for the same SQL set (duckdb adapter), ensuring identical behavior.
+- YaccParser: support function calls (including count(*)) and keep DML roundtrip coverage in duckdb pipeline tests.
+- Optimizer trace: record lhs/rhs conflict pairs alongside literal conflict strings for deterministic debugging.
 
 ## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
 

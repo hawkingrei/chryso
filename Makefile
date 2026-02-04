@@ -22,7 +22,12 @@ test-duckdb:
 	cargo test --features duckdb
 
 velox-ffi-config:
-	cmake -S ffi/velox -B $(ABS_VELOX_BUILD_DIR) -DCHRYSO_VELOX_USE_SUBMODULE=OFF -DCHRYSO_VELOX_USE_ARROW=OFF -DCHRYSO_VELOX_BUILD_TESTS=ON
+	cmake -S ffi/velox -B $(ABS_VELOX_BUILD_DIR) \
+		-DCHRYSO_VELOX_USE_SUBMODULE=ON \
+		-DCHRYSO_VELOX_USE_ARROW=OFF \
+		-DCHRYSO_ARROW_STRICT_VERSION=OFF \
+		-DCHRYSO_VELOX_BUILD_TESTS=ON \
+		-DCHRYSO_VELOX_EXEC_ONLY=ON
 
 velox-ffi-build: velox-ffi-config
 	cmake --build $(ABS_VELOX_BUILD_DIR) --parallel

@@ -87,6 +87,17 @@ Join algorithms are modeled in `planner::JoinAlgorithm` (hash/nested loop) and i
 Function registry lives in `metadata::functions`, with window functions represented in the AST.
 Top-N rewrites are handled by optimizer rules producing `LogicalPlan::TopN`/`PhysicalPlan::TopN`.
 
+## Optimizer Trace
+`optimizer::OptimizerTrace` captures side-channel diagnostics during optimization runs:
+- `applied_rules`: rules applied while exploring logical alternatives.
+- `stats_loaded`: tables for which stats were loaded.
+- `conflict_pairs`: ordered `(lhs, rhs)` literal conflicts detected during predicate inference.
+- `conflicting_literals`: legacy tuple list mirroring `conflict_pairs`.
+- `warnings`: non-fatal diagnostics (e.g., invalid config fallbacks).
+
+Use `CascadesOptimizer::optimize_with_trace` when you need deterministic trace output for debugging
+or regression comparisons.
+
 ## Statistics & Analyze
 `metadata::StatsCache` stores table/column stats. `ANALYZE` will populate:
 - Row count

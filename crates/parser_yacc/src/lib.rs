@@ -947,6 +947,11 @@ impl<'a> AstBuilder<'a> {
     fn primary_expr(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
         let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_PRIMARYEXPR)?;
         if nodes.len() == 1 {
+            if let Node::Nonterm { ridx, .. } = &nodes[0] {
+                if ridx.as_storaget() == sql_y::R_FUNCTIONCALL {
+                    return self.function_call(&nodes[0]);
+                }
+            }
             return self.expr(&nodes[0]);
         }
         if nodes.len() == 3
@@ -965,6 +970,38 @@ impl<'a> AstBuilder<'a> {
             return Ok(Expr::Identifier(format!("{left}.{right}")));
         }
         Err(self.err_with_rule(ridx))
+    }
+
+    fn function_call(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_FUNCTIONCALL)?;
+        if nodes.len() != 4 {
+            return Err(self.err_with_rule(ridx));
+        }
+        let name = self.ident_from_term(&nodes[0])?;
+        let args = self.function_args_opt(&nodes[2])?;
+        Ok(Expr::FunctionCall { name, args })
+    }
+
+    fn function_args_opt(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Vec<Expr>> {
+        let (_, nodes) = self.expect_nonterm(node, sql_y::R_FUNCTIONARGSOPT)?;
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+        if nodes.len() == 1 {
+            return self.function_args(&nodes[0]);
+        }
+        Err(self.err("unexpected function args opt"))
+    }
+
+    fn function_args(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Vec<Expr>> {
+        let (ridx, nodes) = self.expect_nonterm(node, sql_y::R_FUNCTIONARGS)?;
+        if nodes.len() != 1 {
+            return Err(self.err_with_rule(ridx));
+        }
+        if self.is_term_kind(&nodes[0], "STAR") {
+            return Ok(vec![Expr::Wildcard]);
+        }
+        self.expr_list(&nodes[0])
     }
 
     fn expr_from_term(&self, node: &Node<Lexeme, u32>) -> ChrysoResult<Expr> {
@@ -1297,6 +1334,22 @@ mod tests {
         let TableFactor::Derived { .. } = from.factor else {
             panic!("expected derived");
         };
+    }
+
+    #[test]
+    fn yacc_parser_parses_function_call_count_star() {
+        let parser = YaccParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse("select count(*) from t1").expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = &select.projection[0].expr else {
+            panic!("expected function call");
+        };
+        assert_eq!(name, "count");
+        assert!(matches!(args.get(0), Some(Expr::Wildcard)));
     }
 
     #[test]

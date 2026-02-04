@@ -382,9 +382,24 @@ PrimaryExpr
   : LPAREN Expr RPAREN
   | IDENT DOT IDENT
   | IDENT DOT STAR
+  | FunctionCall
   | IDENT
   | NUMBER
   | STRING
+  ;
+
+FunctionCall
+  : IDENT LPAREN FunctionArgsOpt RPAREN
+  ;
+
+FunctionArgsOpt
+  :
+  | FunctionArgs
+  ;
+
+FunctionArgs
+  : STAR
+  | ExprList
   ;
 
 %%

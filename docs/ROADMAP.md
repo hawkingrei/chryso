@@ -12,6 +12,7 @@ TODO: Add Bazel build support for workspace targets.
 TODO: Use DuckDB `SUMMARIZE <table>` output to backfill StatsCache (histogram/top-N if available).
 TODO: Add stats cache status reporting (in-memory footprint, loaded vs missing).
 TODO: Add richer AST/Logical rewrite rules (e.g., `a=a`, `a!=a`, null-aware simplifications).
+done - YaccParser: support function calls (including count(*)) and keep duckdb DDL/DML roundtrip coverage.
 1. done - Confirm scope and MVP success criteria
 2. done - Define module boundaries and public API surface
 3. in-progress - Establish error model and diagnostic spans

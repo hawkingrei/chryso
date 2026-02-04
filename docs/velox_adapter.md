@@ -25,7 +25,12 @@ git submodule update --init --recursive
 ## Build (macOS/Linux)
 
 ```bash
-cmake -S ffi/velox -B ffi/velox/build -DCHRYSO_VELOX_USE_SUBMODULE=ON
+cmake -S ffi/velox -B ffi/velox/build \
+  -DCHRYSO_VELOX_USE_SUBMODULE=ON \
+  -DCHRYSO_VELOX_USE_ARROW=OFF \
+  -DCHRYSO_ARROW_STRICT_VERSION=OFF \
+  -DCHRYSO_VELOX_BUILD_TESTS=ON \
+  -DCHRYSO_VELOX_EXEC_ONLY=ON
 cmake --build ffi/velox/build --parallel
 ```
 
@@ -48,7 +53,7 @@ cargo build --features velox
 Build the C++ shim, then run the demo example:
 
 ```bash
-scripts/build_velox_ffi.sh ffi/velox/build OFF ON OFF
+scripts/build_velox_ffi.sh ffi/velox/build ON OFF OFF ON
 
 export CHRYSO_VELOX_FFI_DIR="$(pwd)/ffi/velox/build"
 export DYLD_LIBRARY_PATH="$CHRYSO_VELOX_FFI_DIR:$DYLD_LIBRARY_PATH"   # macOS

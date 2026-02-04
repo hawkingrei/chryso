@@ -10,23 +10,44 @@ pub trait Rule {
     fn apply(&self, plan: &LogicalPlan, _ctx: &mut RuleContext) -> Vec<LogicalPlan>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ConflictPair {
+    pub lhs: String,
+    pub rhs: String,
+}
+
 #[derive(Default, Debug)]
 pub struct RuleContext {
-    literal_conflicts: BTreeSet<(String, String)>,
+    conflict_pairs: BTreeSet<ConflictPair>,
 }
 
 impl RuleContext {
+    pub fn record_conflict_pairs<I>(&mut self, pairs: I)
+    where
+        I: IntoIterator<Item = ConflictPair>,
+    {
+        self.conflict_pairs.extend(pairs);
+    }
+
     pub fn record_literal_conflicts<I>(&mut self, pairs: I)
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        self.literal_conflicts.extend(pairs);
+        self.record_conflict_pairs(pairs.into_iter().map(|(lhs, rhs)| ConflictPair { lhs, rhs }));
+    }
+
+    pub fn take_conflict_pairs(&mut self) -> Vec<ConflictPair> {
+        // Preserve a deterministic order for trace output by draining the ordered set.
+        std::mem::take(&mut self.conflict_pairs)
+            .into_iter()
+            .collect()
     }
 
     pub fn take_literal_conflicts(&mut self) -> Vec<(String, String)> {
         // Preserve a deterministic order for trace output by draining the ordered set.
-        std::mem::take(&mut self.literal_conflicts)
+        self.take_conflict_pairs()
             .into_iter()
+            .map(|pair| (pair.lhs, pair.rhs))
             .collect()
     }
 }
@@ -1332,7 +1353,7 @@ fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
     let mut uf = UnionFind::new();
     let mut literal_bindings = std::collections::HashMap::<String, Literal>::new();
     let mut literal_conflicts = std::collections::HashSet::<String>::new();
-    let mut conflict_pairs = std::collections::BTreeSet::<(String, String)>::new();
+    let mut conflict_pairs = std::collections::BTreeSet::<ConflictPair>::new();
 
     for conjunct in &conjuncts {
         let Expr::BinaryOp { left, op, right } = conjunct else {
@@ -1355,7 +1376,7 @@ fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
                             format!("{} = {}", ident, Expr::Literal(existing.clone()).to_sql());
                         let right =
                             format!("{} = {}", ident, Expr::Literal(literal.clone()).to_sql());
-                        conflict_pairs.insert((left, right));
+                        conflict_pairs.insert(ConflictPair { lhs: left, rhs: right });
                     }
                 } else {
                     literal_bindings.insert(ident.clone(), literal.clone());
@@ -1367,7 +1388,7 @@ fn infer_predicates(predicate: &Expr, ctx: &mut RuleContext) -> (Expr, bool) {
 
     let mut class_literals = std::collections::HashMap::<String, Option<Literal>>::new();
     if !literal_conflicts.is_empty() {
-        ctx.record_literal_conflicts(conflict_pairs);
+        ctx.record_conflict_pairs(conflict_pairs);
     }
     for ident in &literal_conflicts {
         let root = uf.find(ident);
