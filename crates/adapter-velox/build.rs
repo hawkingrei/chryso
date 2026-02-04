@@ -59,6 +59,7 @@ fn build_velox_ffi(source_dir: &Path, build_dir: &Path) {
         .arg(format!("-DCHRYSO_ARROW_STRICT_VERSION={strict_arrow}"))
         .arg(format!("-DCHRYSO_VELOX_BUILD_TESTS={build_tests}"))
         .arg(format!("-DCHRYSO_VELOX_EXEC_ONLY={exec_only}"))
+        .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         .status()
         .unwrap_or_else(|err| panic!("failed to run cmake configure: {err}"));
     if !status.success() {

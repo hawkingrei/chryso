@@ -99,7 +99,8 @@ jobs:
             -DCHRYSO_VELOX_USE_ARROW=OFF \
             -DCHRYSO_ARROW_STRICT_VERSION=OFF \
             -DCHRYSO_VELOX_BUILD_TESTS=ON \
-            -DCHRYSO_VELOX_EXEC_ONLY=ON
+            -DCHRYSO_VELOX_EXEC_ONLY=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build ffi/velox/build -j 2
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
