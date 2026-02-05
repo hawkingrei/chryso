@@ -62,6 +62,7 @@ jobs:
           export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
           export UV_INSTALL_DIR="${INSTALL_PREFIX}/bin"
           export PATH="${UV_INSTALL_DIR}:${PATH}"
+          export PROMPT_ALWAYS_RESPOND=Y
           ./ffi/velox/velox/scripts/setup-ubuntu.sh
       - name: Install Velox dependencies (macos)
         if: runner.os == 'macOS'
@@ -83,6 +84,7 @@ jobs:
           export INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps-install"
           export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
           export OS_CXXFLAGS=""
+          export PROMPT_ALWAYS_RESPOND=Y
           source ffi/velox/velox/scripts/setup-macos.sh
           install_build_prerequisites
           install_velox_deps_from_brew
