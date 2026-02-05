@@ -100,12 +100,15 @@ jobs:
             -DCHRYSO_ARROW_STRICT_VERSION=OFF \
             -DCHRYSO_VELOX_BUILD_TESTS=ON \
             -DCHRYSO_VELOX_EXEC_ONLY=ON \
+            -DVELOX_ENABLE_CCACHE=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build ffi/velox/build -j 2
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
           CMAKE_IGNORE_PREFIX_PATH: /opt/homebrew
           OS_CXXFLAGS: ""
+          CCACHE_DIR: ~/.ccache
       - name: Save velox build dir
         if: ${{ always() }}
         uses: actions/cache/save@v4
