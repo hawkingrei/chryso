@@ -28,6 +28,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Build
         run: cargo build
+      - name: Build CLI
+        run: cargo build --bin chryso-cli
       - name: Build examples
         run: cargo build --examples
       - name: Test
