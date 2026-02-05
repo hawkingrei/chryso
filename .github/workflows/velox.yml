@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  velox-full:
+  velox-exec-only:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
