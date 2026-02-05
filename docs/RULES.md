@@ -28,3 +28,9 @@ impl Rule for MyRule {
 ## Debugging
 Enable rule tracing via `OptimizerConfig { debug_rules: true, .. }` and inspect
 `CascadesOptimizer::optimize_with_trace`.
+
+The trace exposes conflict diagnostics recorded during rule application:
+- `OptimizerTrace.conflict_pairs`: ordered `(lhs, rhs)` pairs for detected literal conflicts.
+- `OptimizerTrace.conflicting_literals`: legacy tuple list mirroring `conflict_pairs`.
+
+Conflict pairs are recorded deterministically for easier diffing across runs.

@@ -1,6 +1,6 @@
 use crate::cost::{CostModel, UnitCostModel};
 use crate::memo::Memo;
-use crate::rules::{RuleContext, RuleSet};
+use crate::rules::{ConflictPair, RuleContext, RuleSet};
 use chryso_metadata::StatsCache;
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 use std::collections::HashSet;
@@ -30,6 +30,7 @@ pub struct OptimizerTrace {
     pub applied_rules: Vec<String>,
     pub stats_loaded: Vec<String>,
     pub conflicting_literals: Vec<(String, String)>,
+    pub conflict_pairs: Vec<ConflictPair>,
     pub warnings: Vec<String>,
 }
 
@@ -39,6 +40,7 @@ impl OptimizerTrace {
             applied_rules: Vec::new(),
             stats_loaded: Vec::new(),
             conflicting_literals: Vec::new(),
+            conflict_pairs: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -169,7 +171,7 @@ pub struct SearchBudget {
 #[cfg(test)]
 mod tests {
     use super::cost::UnitCostModel;
-    use super::{CascadesOptimizer, OptimizerConfig};
+    use super::{CascadesOptimizer, OptimizerConfig, OptimizerTrace};
     use crate::CostModelConfig;
     use chryso_core::ast::{BinaryOperator, Expr, Literal};
     use chryso_metadata::{
@@ -287,11 +289,20 @@ mod tests {
             .optimize_with_trace(&logical, &mut StatsCache::new());
         assert!(
             trace
-                .conflicting_literals
+                .conflict_pairs
                 .iter()
-                .any(|(left, right)| left.contains("a = 1") && right.contains("a = 2")),
+                .any(|pair| pair.lhs.contains("a = 1") && pair.rhs.contains("a = 2")),
             "expected conflict pair, got {:?}",
-            trace.conflicting_literals
+            trace.conflict_pairs
+        );
+        assert_eq!(
+            trace.conflicting_literals,
+            trace
+                .conflict_pairs
+                .iter()
+                .map(|pair| (pair.lhs.clone(), pair.rhs.clone()))
+                .collect::<Vec<_>>(),
+            "conflict_literals should mirror conflict_pairs"
         );
     }
 
@@ -370,6 +381,63 @@ mod tests {
         assert!(stats.table_stats("sales").is_some());
         assert!(stats.column_stats("sales", "region").is_some());
         assert!(trace.stats_loaded.contains(&"sales".to_string()));
+    }
+
+    #[test]
+    fn optimizer_trace_diff_template() {
+        // Template for trace diffing: compare two traces and surface key deltas.
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse("select id from t where a = 1").expect("parse");
+        let logical = PlanBuilder::build(stmt).expect("plan");
+
+        let (plan_a, trace_a) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut StatsCache::new());
+        let (plan_b, trace_b) = CascadesOptimizer::new(OptimizerConfig::default())
+            .optimize_with_trace(&logical, &mut StatsCache::new());
+
+        assert_eq!(plan_a.explain(0), plan_b.explain(0));
+        let summary = diff_trace_summary(&trace_a, &trace_b);
+        assert!(
+            summary.contains("applied_rules")
+                && summary.contains("conflict_pairs")
+                && summary.contains("stats_loaded"),
+            "expected summary keys, got: {summary}"
+        );
+    }
+
+    fn diff_trace_summary(left: &OptimizerTrace, right: &OptimizerTrace) -> String {
+        // Keep this tiny and deterministic for reuse in future trace diff tests.
+        let mut lines = Vec::new();
+        if left.applied_rules != right.applied_rules {
+            lines.push(format!(
+                "applied_rules: left={} right={}",
+                left.applied_rules.len(),
+                right.applied_rules.len()
+            ));
+        } else {
+            lines.push(format!("applied_rules: {}", left.applied_rules.len()));
+        }
+        if left.conflict_pairs != right.conflict_pairs {
+            lines.push(format!(
+                "conflict_pairs: left={} right={}",
+                left.conflict_pairs.len(),
+                right.conflict_pairs.len()
+            ));
+        } else {
+            lines.push(format!("conflict_pairs: {}", left.conflict_pairs.len()));
+        }
+        if left.stats_loaded != right.stats_loaded {
+            lines.push(format!(
+                "stats_loaded: left={} right={}",
+                left.stats_loaded.len(),
+                right.stats_loaded.len()
+            ));
+        } else {
+            lines.push(format!("stats_loaded: {}", left.stats_loaded.len()));
+        }
+        lines.join("; ")
     }
 }
 
@@ -463,9 +531,13 @@ fn optimize_with_cascades(
         &mut rule_ctx,
         config.debug_rules,
     );
-    trace
-        .conflicting_literals
-        .extend(rule_ctx.take_literal_conflicts());
+    let conflict_pairs = rule_ctx.take_conflict_pairs();
+    trace.conflicting_literals.extend(
+        conflict_pairs
+            .iter()
+            .map(|pair| (pair.lhs.clone(), pair.rhs.clone())),
+    );
+    trace.conflict_pairs.extend(conflict_pairs);
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
     let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);

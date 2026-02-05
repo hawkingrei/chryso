@@ -16,6 +16,10 @@ crossterm = "0.28"
 [dev-dependencies]
 serde_json = "1"
 
+[dev-dependencies.chryso-parser-yacc]
+version = "0.0.2"
+path = "crates/parser_yacc"
+
 [workspace]
 members = [
   "crates/adapter",

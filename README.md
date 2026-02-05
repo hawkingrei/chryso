@@ -12,6 +12,7 @@ Chryso is a Calcite-style SQL parser + optimizer engine in Rust. It focuses on a
 - Parser, planner, and core Cascades skeleton are implemented
 - DuckDB adapter translates physical plans to SQL and executes simple queries/DML
 - CI builds and tests with and without the DuckDB feature
+- Velox CI builds the FFI in exec-only mode (no Arrow) to keep the pipeline lean
 
 ## Workspace Layout
 ```
@@ -51,6 +52,17 @@ cargo test
 With DuckDB:
 ```bash
 cargo test --features duckdb
+```
+
+Velox exec-only build (FFI):
+```bash
+cmake -S ffi/velox -B ffi/velox/build \
+  -DCHRYSO_VELOX_USE_SUBMODULE=ON \
+  -DCHRYSO_VELOX_USE_ARROW=OFF \
+  -DCHRYSO_ARROW_STRICT_VERSION=OFF \
+  -DCHRYSO_VELOX_BUILD_TESTS=ON \
+  -DCHRYSO_VELOX_EXEC_ONLY=ON
+cmake --build ffi/velox/build --parallel
 ```
 
 Plan snapshot tests:

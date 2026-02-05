@@ -4,19 +4,24 @@ on:
   push:
     branches: 
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  velox-full:
+  velox-exec-only:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
+        os: [macos-latest, ubuntu-latest]
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Ensure ccache dir
+        run: mkdir -p ~/.ccache
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -53,6 +58,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build build-essential ccache
+          export INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps-install"
+          export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
+          export UV_INSTALL_DIR="${INSTALL_PREFIX}/bin"
+          export PATH="${UV_INSTALL_DIR}:${PATH}"
+          export PROMPT_ALWAYS_RESPOND=Y
           ./ffi/velox/velox/scripts/setup-ubuntu.sh
       - name: Install Velox dependencies (macos)
         if: runner.os == 'macOS'
@@ -74,12 +84,12 @@ jobs:
           export INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps-install"
           export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
           export OS_CXXFLAGS=""
+          export PROMPT_ALWAYS_RESPOND=Y
           source ffi/velox/velox/scripts/setup-macos.sh
           install_build_prerequisites
           install_velox_deps_from_brew
           install_faiss_deps
           install_double_conversion
-          install_arrow
           install_glog
           echo "${INSTALL_PREFIX}/bin" >> "$GITHUB_PATH"
       - name: Save velox deps cache
@@ -89,25 +99,31 @@ jobs:
           path: |
             deps-install
             deps-download
-          key: ${{ runner.os }}-velox-deps-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
-      - name: Build Velox FFI (submodule + Arrow)
+          key: ${{ runner.os }}-velox-deps-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}-${{ github.run_id }}
+      - name: Build Velox FFI (submodule, exec-only)
         run: |
           cmake -S ffi/velox -B ffi/velox/build \
             -DCHRYSO_VELOX_USE_SUBMODULE=ON \
-            -DCHRYSO_VELOX_USE_ARROW=ON \
+            -DCHRYSO_VELOX_USE_ARROW=OFF \
             -DCHRYSO_ARROW_STRICT_VERSION=OFF \
-            -DCHRYSO_VELOX_BUILD_TESTS=ON
+            -DCHRYSO_VELOX_BUILD_TESTS=ON \
+            -DCHRYSO_VELOX_EXEC_ONLY=ON \
+            -DVELOX_ENABLE_CCACHE=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -Dstemmer_SOURCE=BUNDLED \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build ffi/velox/build -j 2
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/deps-install
           CMAKE_IGNORE_PREFIX_PATH: /opt/homebrew
           OS_CXXFLAGS: ""
+          CCACHE_DIR: ~/.ccache
       - name: Save velox build dir
         if: ${{ always() }}
         uses: actions/cache/save@v4
         with:
           path: ffi/velox/build
-          key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
+          key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}-${{ github.run_id }}
       - name: Test Velox FFI (C++)
         run: ctest --test-dir ffi/velox/build -R chryso_velox_ffi_escape_test
       - name: Build velox adapter

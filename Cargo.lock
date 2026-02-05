@@ -433,6 +433,7 @@ dependencies = [
  "chryso-metadata",
  "chryso-optimizer",
  "chryso-parser",
+ "chryso-parser-yacc",
  "chryso-planner",
  "crossterm",
  "ratatui",
