@@ -29,7 +29,7 @@ jobs:
       - name: Build
         run: cargo build
       - name: Build CLI
-        run: cargo build --bin chryso-cli
+        run: cargo build --bin chryso-cli --features duckdb
       - name: Build examples
         run: cargo build --examples
       - name: Test
