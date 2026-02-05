@@ -93,4 +93,6 @@ fn emit_rerun_if_changed(source_dir: &Path) {
     println!("cargo:rerun-if-changed={base}/src");
     println!("cargo:rerun-if-changed={base}/include");
     println!("cargo:rerun-if-changed={base}/tests");
+    println!("cargo:rerun-if-changed={base}/velox");
+    println!("cargo:rerun-if-changed={base}/velox/CMakeLists.txt");
 }

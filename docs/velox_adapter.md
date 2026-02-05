@@ -69,9 +69,10 @@ Expected output (demo stub):
 [["demo_table"]]
 ```
 
-Arrow IPC output is written to `velox_demo.arrow` in the repo root.
+Arrow IPC output is written to `velox_demo.arrow` in the repo root when Arrow support is enabled.
 
 If you must enforce Arrow 15.x, set `-DCHRYSO_ARROW_STRICT_VERSION=ON` and ensure Arrow 15 is installed.
+To enable Arrow output, build with `-DCHRYSO_VELOX_USE_ARROW=ON`.
 
 ## Runtime Troubleshooting (macOS)
 

@@ -22,4 +22,5 @@ Use `MockAdapter` to validate plan generation and to test fallback behavior.
 
 ## CI Notes
 Velox CI builds the FFI in exec-only mode by default (no Arrow) to reduce build time.
-If you need Arrow IPC output, disable exec-only and enable Arrow in the workflow.
+If you need Arrow IPC output, enable Arrow support in the workflow via `CHRYSO_VELOX_USE_ARROW`.
+Exec-only mode does not control Arrow support.
