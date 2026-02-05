@@ -8,3 +8,5 @@ ffi/velox/build/
 .env
 paper/
 .cache
+deps-download/
+deps-install/

@@ -32,9 +32,9 @@ src/
 
 ## Quick Start
 
-Run the CLI (mock adapter by default):
+Run the CLI (requires DuckDB feature):
 ```bash
-cargo run --bin chryso-cli
+cargo run --bin chryso-cli --features duckdb
 ```
 
 Run the DuckDB demo:

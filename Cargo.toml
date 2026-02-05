@@ -39,6 +39,11 @@ duckdb = [ "chryso-adapter/duckdb",]
 velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
 
+[[bin]]
+name = "chryso-cli"
+path = "src/bin/chryso-cli.rs"
+required-features = ["duckdb"]
+
 [dependencies.chryso-adapter]
 version = "0.0.2"
 path = "crates/adapter"
