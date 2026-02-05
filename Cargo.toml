@@ -30,7 +30,7 @@ members = [
 ]
 
 [features]
-default = []
+default = ["duckdb"]
 duckdb = [ "chryso-adapter/duckdb",]
 velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
