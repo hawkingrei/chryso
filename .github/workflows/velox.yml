@@ -60,6 +60,8 @@ jobs:
           sudo apt-get install -y cmake ninja-build build-essential ccache
           export INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps-install"
           export DEPENDENCY_DIR="${GITHUB_WORKSPACE}/deps-download"
+          export UV_INSTALL_DIR="${INSTALL_PREFIX}/bin"
+          export PATH="${UV_INSTALL_DIR}:${PATH}"
           ./ffi/velox/velox/scripts/setup-ubuntu.sh
       - name: Install Velox dependencies (macos)
         if: runner.os == 'macOS'
