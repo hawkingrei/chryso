@@ -118,9 +118,4 @@ jobs:
           CHRYSO_DUCKDB_FFI_DIR: ${{ github.workspace }}/ffi/duckdb/build
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/duckdb/build
         run: cargo test --features duckdb-ops-ffi
-      - name: Test velox adapter (macos)
-        if: runner.os == 'macOS'
-        env:
-          CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
-          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
-        run: cargo test -p chryso-adapter-velox --features velox-ffi
+      # Velox adapter tests are handled by the dedicated velox-ffi job.
