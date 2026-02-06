@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -12,7 +14,7 @@ void chryso_duckdb_session_free(DuckDbSession* session);
 int chryso_duckdb_plan_execute(
     DuckDbSession* session,
     const unsigned char* plan_ptr,
-    unsigned long long plan_len,
+    size_t plan_len,
     char** result_out
 );
 

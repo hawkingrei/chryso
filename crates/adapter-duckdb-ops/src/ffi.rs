@@ -81,12 +81,10 @@ mod native {
         if ptr.is_null() {
             return Err(ChrysoError::new("duckdb ops returned null result"));
         }
-        let text = unsafe {
-            CStr::from_ptr(ptr)
-                .to_str()
-                .map_err(|err| ChrysoError::new(format!("duckdb ops utf8 error: {err}")))?
-                .to_string()
-        };
+        let text = CStr::from_ptr(ptr)
+            .to_str()
+            .map_err(|err| ChrysoError::new(format!("duckdb ops utf8 error: {err}")))?
+            .to_string();
         unsafe { chryso_duckdb_string_free(ptr) };
         Ok(text)
     }

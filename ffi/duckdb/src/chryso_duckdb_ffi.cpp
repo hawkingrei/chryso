@@ -4,6 +4,7 @@
 #include "yyjson.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -205,9 +206,13 @@ bool ParseNode(duckdb_yyjson::yyjson_val *value, PlanNode &out, std::string &err
       err = "index_scan missing table";
       return false;
     }
-    if (!ReadString(index_val, out.index, err)) {
-      err = "index_scan missing index";
-      return false;
+    if (index_val && !duckdb_yyjson::yyjson_is_null(index_val)) {
+      if (!ReadString(index_val, out.index, err)) {
+        err = "index_scan index must be string";
+        return false;
+      }
+    } else {
+      out.index.clear();
     }
     if (!ReadString(pred_val, out.predicate, err)) {
       err = "index_scan missing predicate";
@@ -783,7 +788,7 @@ void chryso_duckdb_session_free(DuckDbSession *session) {
 int chryso_duckdb_plan_execute(
     DuckDbSession *session,
     const unsigned char *plan_ptr,
-    unsigned long long plan_len,
+    size_t plan_len,
     char **result_out) {
   try {
     if (!session || !session->conn) {

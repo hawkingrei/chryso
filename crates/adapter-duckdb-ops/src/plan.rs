@@ -17,7 +17,8 @@ pub enum PlanNode {
     },
     IndexScan {
         table: String,
-        index: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        index: Option<String>,
         predicate: String,
     },
     Dml {
@@ -97,7 +98,7 @@ fn lower_plan(plan: &PhysicalPlan, nodes: &mut Vec<PlanNode>) -> usize {
             nodes,
             PlanNode::IndexScan {
                 table: table.clone(),
-                index: index.clone(),
+                index: Some(index.clone()),
                 predicate: predicate.to_sql(),
             },
         ),
