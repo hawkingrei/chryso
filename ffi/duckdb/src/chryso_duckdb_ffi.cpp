@@ -344,10 +344,20 @@ class JsonParser {
     } else if (code <= 0x7FF) {
       out.push_back(static_cast<char>(0xC0 | ((code >> 6) & 0x1F)));
       out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-    } else {
+    } else if (code <= 0xFFFF) {
       out.push_back(static_cast<char>(0xE0 | ((code >> 12) & 0x0F)));
       out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
       out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+    } else if (code <= 0x10FFFF) {
+      out.push_back(static_cast<char>(0xF0 | ((code >> 18) & 0x07)));
+      out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+    } else {
+      unsigned int replacement = 0xFFFD;
+      out.push_back(static_cast<char>(0xE0 | ((replacement >> 12) & 0x0F)));
+      out.push_back(static_cast<char>(0x80 | ((replacement >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (replacement & 0x3F)));
     }
   }
 
@@ -1109,49 +1119,57 @@ int chryso_duckdb_plan_execute(
     const unsigned char *plan_ptr,
     unsigned long long plan_len,
     char **result_out) {
-  if (!session || !session->conn) {
-    set_error("duckdb session is null");
-    return -1;
-  }
-  if (!plan_ptr || plan_len == 0) {
-    set_error("plan payload is empty");
-    return -1;
-  }
-  std::string payload(reinterpret_cast<const char *>(plan_ptr), plan_len);
-  PlanIr plan;
-  std::string err;
-  if (!ParsePlan(payload, plan, err)) {
-    set_error("plan parse failed: " + err);
-    return -1;
-  }
-
-  const PlanNode &root = plan.nodes[plan.root];
-  duckdb::unique_ptr<duckdb::QueryResult> result;
-  if (root.kind == NodeKind::Dml) {
-    result = session->conn->Query(root.sql);
-  } else {
-    std::vector<duckdb::shared_ptr<duckdb::Relation>> cache(plan.nodes.size());
-    std::vector<bool> built(plan.nodes.size(), false);
-    auto rel = BuildRelation(plan, plan.root, *session->conn, cache, built, err);
-    if (!rel) {
-      set_error("plan build failed: " + err);
+  try {
+    if (!session || !session->conn) {
+      set_error("duckdb session is null");
       return -1;
     }
-    result = rel->Execute();
-  }
-  if (!result) {
-    set_error("duckdb returned null result");
+    if (!plan_ptr || plan_len == 0) {
+      set_error("plan payload is empty");
+      return -1;
+    }
+    std::string payload(reinterpret_cast<const char *>(plan_ptr), plan_len);
+    PlanIr plan;
+    std::string err;
+    if (!ParsePlan(payload, plan, err)) {
+      set_error("plan parse failed: " + err);
+      return -1;
+    }
+
+    const PlanNode &root = plan.nodes[plan.root];
+    duckdb::unique_ptr<duckdb::QueryResult> result;
+    if (root.kind == NodeKind::Dml) {
+      result = session->conn->Query(root.sql);
+    } else {
+      std::vector<duckdb::shared_ptr<duckdb::Relation>> cache(plan.nodes.size());
+      std::vector<bool> built(plan.nodes.size(), false);
+      auto rel = BuildRelation(plan, plan.root, *session->conn, cache, built, err);
+      if (!rel) {
+        set_error("plan build failed: " + err);
+        return -1;
+      }
+      result = rel->Execute();
+    }
+    if (!result) {
+      set_error("duckdb returned null result");
+      return -1;
+    }
+    if (result->HasError()) {
+      set_error(result->GetError());
+      return -1;
+    }
+    auto json = ResultToJson(*result);
+    if (!WriteResult(result_out, json)) {
+      return -1;
+    }
+    return 0;
+  } catch (const std::exception &ex) {
+    set_error(ex.what());
+    return -1;
+  } catch (...) {
+    set_error("unknown duckdb exception");
     return -1;
   }
-  if (result->HasError()) {
-    set_error(result->GetError());
-    return -1;
-  }
-  auto json = ResultToJson(*result);
-  if (!WriteResult(result_out, json)) {
-    return -1;
-  }
-  return 0;
 }
 
 const char *chryso_duckdb_last_error() {

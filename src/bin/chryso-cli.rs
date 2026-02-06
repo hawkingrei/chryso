@@ -829,20 +829,16 @@ impl DdlHandler<SessionContext, NoExtension> for Adapter {
         _ctx: &SessionContext,
         env: &StatementEnvelope<NoExtension>,
     ) -> chryso::ChrysoResult<DdlResult> {
-        let sql = env.context.original_sql();
+        let sql = chryso::sql_format::format_statement(&env.statement);
         match self {
             Adapter::Duck(_) => {
-                let plan = chryso::PhysicalPlan::Dml {
-                    sql: sql.to_string(),
-                };
+                let plan = chryso::PhysicalPlan::Dml { sql: sql.clone() };
                 let _ = self.execute(&plan)?;
                 Ok(DdlResult { detail: None })
             }
             #[cfg(feature = "duckdb-ops-ffi")]
             Adapter::DuckOps(_) => {
-                let plan = chryso::PhysicalPlan::Dml {
-                    sql: sql.to_string(),
-                };
+                let plan = chryso::PhysicalPlan::Dml { sql: sql.clone() };
                 let _ = self.execute(&plan)?;
                 Ok(DdlResult { detail: None })
             }
