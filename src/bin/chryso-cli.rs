@@ -1,14 +1,13 @@
+#[cfg(feature = "duckdb-ops-ffi")]
+use chryso::DuckDbOpsAdapter;
 use chryso::adapter::ExecutorAdapter;
 use chryso::planner::{ExplainConfig, ExplainFormatter};
 use chryso::{
-    Authorizer, CascadesOptimizer, Dialect, DdlHandler, DdlResult, DuckDbAdapter, MockAdapter,
-    NoExtension, OptimizerConfig, ParserConfig, PlanBuilder, PlanOutcome, SqlParser,
-    SessionContext, Statement, StatementCategory, StatementContext, StatementEnvelope,
-    plan_with_hooks,
-    metadata::StatsCache, parser::SimpleParser, sql_utils::split_sql_with_tail,
+    Authorizer, CascadesOptimizer, DdlHandler, DdlResult, Dialect, DuckDbAdapter, MockAdapter,
+    NoExtension, OptimizerConfig, ParserConfig, PlanBuilder, PlanOutcome, SessionContext,
+    SqlParser, Statement, StatementCategory, StatementContext, StatementEnvelope,
+    metadata::StatsCache, parser::SimpleParser, plan_with_hooks, sql_utils::split_sql_with_tail,
 };
-#[cfg(feature = "duckdb-ops-ffi")]
-use chryso::DuckDbOpsAdapter;
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
@@ -39,11 +38,7 @@ fn main() {
             return;
         }
     };
-    runner.context = SessionContext::new(
-        cli_args.database,
-        cli_args.user,
-        cli_args.default_schema,
-    );
+    runner.context = SessionContext::new(cli_args.database, cli_args.user, cli_args.default_schema);
     if !cli_args.sql_parts.is_empty() {
         let sql = cli_args.sql_parts.join(" ");
         if let Err(err) = execute_non_interactive_with_memo(
@@ -778,8 +773,9 @@ impl PipelineRunner {
 fn build_adapter(engine: EngineMode) -> chryso::ChrysoResult<Adapter> {
     match engine {
         EngineMode::Ops => build_ops_adapter(),
-        EngineMode::Sql => DuckDbAdapter::try_new()
-            .map(|duck| Adapter::Duck(std::sync::Arc::new(duck))),
+        EngineMode::Sql => {
+            DuckDbAdapter::try_new().map(|duck| Adapter::Duck(std::sync::Arc::new(duck)))
+        }
         EngineMode::Mock => Ok(Adapter::Mock(MockAdapter::new())),
     }
 }
@@ -850,16 +846,12 @@ impl DdlHandler<SessionContext, NoExtension> for Adapter {
                 let _ = self.execute(&plan)?;
                 Ok(DdlResult { detail: None })
             }
-            Adapter::Mock(_) => Err(chryso::ChrysoError::new(
-                "ddl requires duckdb adapter",
-            )),
+            Adapter::Mock(_) => Err(chryso::ChrysoError::new("ddl requires duckdb adapter")),
         }
     }
 }
 
-fn ddl_handler(
-    adapter: &Adapter,
-) -> Option<&dyn DdlHandler<SessionContext, NoExtension>> {
+fn ddl_handler(adapter: &Adapter) -> Option<&dyn DdlHandler<SessionContext, NoExtension>> {
     Some(adapter)
 }
 

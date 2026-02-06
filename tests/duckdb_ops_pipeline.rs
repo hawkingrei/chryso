@@ -14,7 +14,11 @@ mod tests {
         optimizer.optimize(&logical, &mut stats)
     }
 
-    fn execute(adapter: &DuckDbOpsAdapter, parser: &dyn SqlParser, sql: &str) -> chryso::QueryResult {
+    fn execute(
+        adapter: &DuckDbOpsAdapter,
+        parser: &dyn SqlParser,
+        sql: &str,
+    ) -> chryso::QueryResult {
         let physical = build_physical(parser, sql);
         adapter.execute(&physical).expect("execute")
     }
@@ -83,7 +87,10 @@ mod tests {
             "select r.name, sum(s.amount) as total from sales s join regions r on s.region_id = r.id group by r.name order by r.name",
         );
 
-        assert_eq!(result.columns, vec!["name".to_string(), "total".to_string()]);
+        assert_eq!(
+            result.columns,
+            vec!["name".to_string(), "total".to_string()]
+        );
         assert_eq!(result.rows.len(), 2);
         assert_eq!(result.rows[0][0], "eu");
         assert_eq!(result.rows[0][1], "7");

@@ -12,16 +12,30 @@ pub struct PlanIr {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlanNode {
-    TableScan { table: String },
-    IndexScan { table: String, index: String, predicate: String },
-    Dml { sql: String },
+    TableScan {
+        table: String,
+    },
+    IndexScan {
+        table: String,
+        index: String,
+        predicate: String,
+    },
+    Dml {
+        sql: String,
+    },
     Derived {
         input: usize,
         alias: String,
         column_aliases: Vec<String>,
     },
-    Filter { predicate: String, input: usize },
-    Projection { exprs: Vec<String>, input: usize },
+    Filter {
+        predicate: String,
+        input: usize,
+    },
+    Projection {
+        exprs: Vec<String>,
+        input: usize,
+    },
     Join {
         join_type: String,
         left: usize,
@@ -33,7 +47,9 @@ pub enum PlanNode {
         aggr_exprs: Vec<String>,
         input: usize,
     },
-    Distinct { input: usize },
+    Distinct {
+        input: usize,
+    },
     TopN {
         order_by: Vec<OrderItem>,
         limit: u64,
@@ -67,9 +83,12 @@ pub fn plan_to_bytes(plan: &PhysicalPlan) -> ChrysoResult<Vec<u8>> {
 
 fn lower_plan(plan: &PhysicalPlan, nodes: &mut Vec<PlanNode>) -> usize {
     match plan {
-        PhysicalPlan::TableScan { table } => push_node(nodes, PlanNode::TableScan {
-            table: table.clone(),
-        }),
+        PhysicalPlan::TableScan { table } => push_node(
+            nodes,
+            PlanNode::TableScan {
+                table: table.clone(),
+            },
+        ),
         PhysicalPlan::IndexScan {
             table,
             index,

@@ -52,15 +52,15 @@ pub mod test_support;
 pub use adapter::{
     AdapterCapabilities, DuckDbAdapter, ExecutorAdapter, MockAdapter, ParamValue, QueryResult,
 };
-#[cfg(feature = "velox")]
-pub use adapter_velox::VeloxAdapter;
 #[cfg(feature = "duckdb-ops")]
 pub use adapter_duckdb_ops::DuckDbOpsAdapter;
+#[cfg(feature = "velox")]
+pub use adapter_velox::VeloxAdapter;
 pub use ast::{Expr, Statement, StatementCategory};
 pub use error::{ChrysoError, ChrysoResult};
 pub use optimizer::{CascadesOptimizer, OptimizerConfig};
 pub use parser::{Dialect, ParserConfig, SqlParser};
-pub use planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
-pub use statement::{NoExtension, StatementContext, StatementEnvelope};
-pub use session::SessionContext;
 pub use pipeline::{Authorizer, DdlHandler, DdlResult, PlanOutcome, plan_with_hooks};
+pub use planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
+pub use session::SessionContext;
+pub use statement::{NoExtension, StatementContext, StatementEnvelope};

@@ -31,9 +31,9 @@ impl Statement {
             Statement::With(with) => with.statement.category(),
             Statement::Select(_) | Statement::SetOp { .. } => StatementCategory::Query,
             Statement::Explain(_) | Statement::Analyze(_) => StatementCategory::Utility,
-            Statement::CreateTable(_)
-            | Statement::DropTable(_)
-            | Statement::Truncate(_) => StatementCategory::Ddl,
+            Statement::CreateTable(_) | Statement::DropTable(_) | Statement::Truncate(_) => {
+                StatementCategory::Ddl
+            }
             Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) => {
                 StatementCategory::Dml
             }
