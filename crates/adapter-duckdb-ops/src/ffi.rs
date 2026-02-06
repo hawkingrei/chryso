@@ -23,7 +23,7 @@ mod native {
             plan_len: usize,
             result_out: *mut *mut c_char,
         ) -> c_int;
-        pub fn chryso_duckdb_last_error() -> *const c_char;
+        pub fn chryso_duckdb_last_error() -> *mut c_char;
         pub fn chryso_duckdb_string_free(value: *mut c_char);
     }
 
@@ -96,8 +96,9 @@ mod native {
         if ptr.is_null() {
             return "duckdb ops error".to_string();
         }
-        let c_str = unsafe { CStr::from_ptr(ptr) };
-        c_str.to_string_lossy().to_string()
+        let message = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string();
+        unsafe { chryso_duckdb_string_free(ptr) };
+        message
     }
 
     #[allow(dead_code)]

@@ -28,6 +28,7 @@ target_include_directories(chryso_duckdb_ffi PUBLIC
 if(TARGET duckdb)
   target_include_directories(chryso_duckdb_ffi PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/yyjson/include
   )
   target_link_libraries(chryso_duckdb_ffi PRIVATE duckdb)
 endif()

@@ -16,7 +16,7 @@ int chryso_duckdb_plan_execute(
     char** result_out
 );
 
-const char* chryso_duckdb_last_error();
+char* chryso_duckdb_last_error();
 void chryso_duckdb_string_free(char* value);
 
 #ifdef __cplusplus

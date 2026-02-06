@@ -1,9 +1,9 @@
 #include "chryso_duckdb_ffi.h"
 
 #include "duckdb.hpp"
+#include "yyjson.hpp"
 
 #include <cassert>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -12,7 +12,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -29,384 +28,72 @@ void set_error(const std::string &message) {
   g_last_error = message;
 }
 
-struct JsonValue {
-  enum class Type { Null, Bool, Number, String, Array, Object };
-
-  Type type = Type::Null;
-  bool boolean = false;
-  double number = 0.0;
-  std::string string;
-  std::vector<JsonValue> array;
-  std::unordered_map<std::string, JsonValue> object;
+struct JsonDocDeleter {
+  void operator()(duckdb_yyjson::yyjson_doc *doc) const {
+    if (doc) {
+      duckdb_yyjson::yyjson_doc_free(doc);
+    }
+  }
 };
 
-class JsonParser {
- public:
-  JsonParser(const char *data, size_t len) : start_(data), cur_(data), end_(data + len) {}
-
-  bool Parse(JsonValue &out) {
-    SkipWs();
-    out = ParseValue();
-    SkipWs();
-    if (HasError()) {
-      return false;
-    }
-    if (cur_ != end_) {
-      SetError("unexpected trailing data");
-      return false;
-    }
-    return true;
-  }
-
-  bool HasError() const { return !error_.empty(); }
-  const std::string &Error() const { return error_; }
-
- private:
-  JsonValue ParseValue() {
-    if (cur_ >= end_) {
-      SetError("unexpected end of input");
-      return JsonValue{};
-    }
-    char ch = *cur_;
-    if (ch == '{') {
-      return ParseObject();
-    }
-    if (ch == '[') {
-      return ParseArray();
-    }
-    if (ch == '"') {
-      JsonValue value;
-      value.type = JsonValue::Type::String;
-      value.string = ParseString();
-      return value;
-    }
-    if (ch == 't') {
-      if (!MatchLiteral("true")) {
-        return JsonValue{};
-      }
-      JsonValue value;
-      value.type = JsonValue::Type::Bool;
-      value.boolean = true;
-      return value;
-    }
-    if (ch == 'f') {
-      if (!MatchLiteral("false")) {
-        return JsonValue{};
-      }
-      JsonValue value;
-      value.type = JsonValue::Type::Bool;
-      value.boolean = false;
-      return value;
-    }
-    if (ch == 'n') {
-      if (!MatchLiteral("null")) {
-        return JsonValue{};
-      }
-      JsonValue value;
-      value.type = JsonValue::Type::Null;
-      return value;
-    }
-    if (ch == '-' || std::isdigit(static_cast<unsigned char>(ch))) {
-      JsonValue value;
-      value.type = JsonValue::Type::Number;
-      value.number = ParseNumber();
-      return value;
-    }
-    SetError("unexpected token");
-    return JsonValue{};
-  }
-
-  JsonValue ParseObject() {
-    JsonValue value;
-    value.type = JsonValue::Type::Object;
-    ExpectChar('{');
-    SkipWs();
-    if (PeekChar('}')) {
-      Advance();
-      return value;
-    }
-    while (cur_ < end_) {
-      SkipWs();
-      if (!PeekChar('"')) {
-        SetError("object key must be string");
-        return JsonValue{};
-      }
-      std::string key = ParseString();
-      SkipWs();
-      if (!ExpectChar(':')) {
-        return JsonValue{};
-      }
-      SkipWs();
-      JsonValue child = ParseValue();
-      if (HasError()) {
-        return JsonValue{};
-      }
-      value.object.emplace(std::move(key), std::move(child));
-      SkipWs();
-      if (PeekChar(',')) {
-        Advance();
-        continue;
-      }
-      if (PeekChar('}')) {
-        Advance();
-        return value;
-      }
-      SetError("expected ',' or '}'");
-      return JsonValue{};
-    }
-    SetError("unexpected end of object");
-    return JsonValue{};
-  }
-
-  JsonValue ParseArray() {
-    JsonValue value;
-    value.type = JsonValue::Type::Array;
-    ExpectChar('[');
-    SkipWs();
-    if (PeekChar(']')) {
-      Advance();
-      return value;
-    }
-    while (cur_ < end_) {
-      SkipWs();
-      JsonValue child = ParseValue();
-      if (HasError()) {
-        return JsonValue{};
-      }
-      value.array.emplace_back(std::move(child));
-      SkipWs();
-      if (PeekChar(',')) {
-        Advance();
-        continue;
-      }
-      if (PeekChar(']')) {
-        Advance();
-        return value;
-      }
-      SetError("expected ',' or ']'");
-      return JsonValue{};
-    }
-    SetError("unexpected end of array");
-    return JsonValue{};
-  }
-
-  std::string ParseString() {
-    if (!ExpectChar('"')) {
-      return "";
-    }
-    std::string out;
-    while (cur_ < end_) {
-      char ch = *cur_++;
-      if (ch == '"') {
-        return out;
-      }
-      if (ch == '\\') {
-        if (cur_ >= end_) {
-          SetError("invalid escape sequence");
-          return "";
-        }
-        char esc = *cur_++;
-        switch (esc) {
-          case '"':
-            out.push_back('"');
-            break;
-          case '\\':
-            out.push_back('\\');
-            break;
-          case '/':
-            out.push_back('/');
-            break;
-          case 'b':
-            out.push_back('\b');
-            break;
-          case 'f':
-            out.push_back('\f');
-            break;
-          case 'n':
-            out.push_back('\n');
-            break;
-          case 'r':
-            out.push_back('\r');
-            break;
-          case 't':
-            out.push_back('\t');
-            break;
-          case 'u': {
-            int code = ParseHex4();
-            if (code < 0) {
-              return "";
-            }
-            AppendUtf8(out, static_cast<unsigned int>(code));
-            break;
-          }
-          default:
-            SetError("invalid escape sequence");
-            return "";
-        }
-        continue;
-      }
-      if (static_cast<unsigned char>(ch) < 0x20) {
-        SetError("invalid control character");
-        return "";
-      }
-      out.push_back(ch);
-    }
-    SetError("unterminated string");
-    return "";
-  }
-
-  double ParseNumber() {
-    const char *start = cur_;
-    char *endptr = nullptr;
-    double value = std::strtod(start, &endptr);
-    if (endptr == start) {
-      SetError("invalid number");
-      return 0.0;
-    }
-    cur_ = endptr;
-    return value;
-  }
-
-  bool MatchLiteral(const char *literal) {
-    size_t len = std::strlen(literal);
-    if (static_cast<size_t>(end_ - cur_) < len) {
-      SetError("unexpected end of literal");
-      return false;
-    }
-    if (std::strncmp(cur_, literal, len) != 0) {
-      SetError("invalid literal");
-      return false;
-    }
-    cur_ += len;
-    return true;
-  }
-
-  bool ExpectChar(char expected) {
-    if (cur_ >= end_ || *cur_ != expected) {
-      std::string message = "expected '";
-      message.push_back(expected);
-      message.push_back('\'');
-      SetError(message);
-      return false;
-    }
-    ++cur_;
-    return true;
-  }
-
-  bool PeekChar(char expected) const {
-    return cur_ < end_ && *cur_ == expected;
-  }
-
-  void Advance() {
-    if (cur_ < end_) {
-      ++cur_;
-    }
-  }
-
-  void SkipWs() {
-    while (cur_ < end_ && std::isspace(static_cast<unsigned char>(*cur_))) {
-      ++cur_;
-    }
-  }
-
-  void SetError(const std::string &message) {
-    if (error_.empty()) {
-      error_ = message;
-    }
-  }
-
-  int ParseHex4() {
-    int value = 0;
-    for (int i = 0; i < 4; ++i) {
-      if (cur_ >= end_) {
-        SetError("invalid unicode escape");
-        return -1;
-      }
-      char ch = *cur_++;
-      value <<= 4;
-      if (ch >= '0' && ch <= '9') {
-        value += ch - '0';
-      } else if (ch >= 'a' && ch <= 'f') {
-        value += 10 + (ch - 'a');
-      } else if (ch >= 'A' && ch <= 'F') {
-        value += 10 + (ch - 'A');
-      } else {
-        SetError("invalid unicode escape");
-        return -1;
-      }
-    }
-    return value;
-  }
-
-  void AppendUtf8(std::string &out, unsigned int code) {
-    if (code <= 0x7F) {
-      out.push_back(static_cast<char>(code));
-    } else if (code <= 0x7FF) {
-      out.push_back(static_cast<char>(0xC0 | ((code >> 6) & 0x1F)));
-      out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-    } else if (code <= 0xFFFF) {
-      out.push_back(static_cast<char>(0xE0 | ((code >> 12) & 0x0F)));
-      out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-      out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-    } else if (code <= 0x10FFFF) {
-      out.push_back(static_cast<char>(0xF0 | ((code >> 18) & 0x07)));
-      out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
-      out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-      out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-    } else {
-      unsigned int replacement = 0xFFFD;
-      out.push_back(static_cast<char>(0xE0 | ((replacement >> 12) & 0x0F)));
-      out.push_back(static_cast<char>(0x80 | ((replacement >> 6) & 0x3F)));
-      out.push_back(static_cast<char>(0x80 | (replacement & 0x3F)));
-    }
-  }
-
-  const char *start_;
-  const char *cur_;
-  const char *end_;
-  std::string error_;
-};
-
-const JsonValue *GetField(const JsonValue &value, const std::string &key) {
-  if (value.type != JsonValue::Type::Object) {
-    return nullptr;
-  }
-  auto it = value.object.find(key);
-  if (it == value.object.end()) {
-    return nullptr;
-  }
-  return &it->second;
-}
-
-bool GetString(const JsonValue &value, std::string &out) {
-  if (value.type != JsonValue::Type::String) {
+bool ReadString(duckdb_yyjson::yyjson_val *val, std::string &out, std::string &err) {
+  if (!val || !duckdb_yyjson::yyjson_is_str(val)) {
+    err = "expected string";
     return false;
   }
-  out = value.string;
+  const char *ptr = duckdb_yyjson::yyjson_get_str(val);
+  if (!ptr) {
+    err = "string value is null";
+    return false;
+  }
+  auto len = duckdb_yyjson::yyjson_get_len(val);
+  out.assign(ptr, len);
   return true;
 }
 
-bool GetBool(const JsonValue &value, bool &out) {
-  if (value.type != JsonValue::Type::Bool) {
+bool ReadBool(duckdb_yyjson::yyjson_val *val, bool &out, std::string &err) {
+  if (!val || !duckdb_yyjson::yyjson_is_bool(val)) {
+    err = "expected bool";
     return false;
   }
-  out = value.boolean;
+  out = duckdb_yyjson::yyjson_get_bool(val);
   return true;
 }
 
-bool GetNumber(const JsonValue &value, double &out) {
-  if (value.type != JsonValue::Type::Number) {
+bool ReadIndex(duckdb_yyjson::yyjson_val *val, uint64_t &out, std::string &err) {
+  if (!val || !duckdb_yyjson::yyjson_is_int(val)) {
+    err = "expected integer";
     return false;
   }
-  out = value.number;
+  if (duckdb_yyjson::yyjson_is_sint(val)) {
+    auto value = duckdb_yyjson::yyjson_get_sint(val);
+    if (value < 0) {
+      err = "integer must be non-negative";
+      return false;
+    }
+    out = static_cast<uint64_t>(value);
+    return true;
+  }
+  out = duckdb_yyjson::yyjson_get_uint(val);
   return true;
 }
 
-bool GetArray(const JsonValue &value, const std::vector<JsonValue> *&out) {
-  if (value.type != JsonValue::Type::Array) {
+bool ReadStringArray(duckdb_yyjson::yyjson_val *val, std::vector<std::string> &out, std::string &err) {
+  if (!val || !duckdb_yyjson::yyjson_is_arr(val)) {
+    err = "expected array";
     return false;
   }
-  out = &value.array;
+  auto count = duckdb_yyjson::yyjson_arr_size(val);
+  out.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    auto item = duckdb_yyjson::yyjson_arr_get(val, i);
+    std::string value;
+    if (!ReadString(item, value, err)) {
+      err = "array element must be string";
+      return false;
+    }
+    out.push_back(std::move(value));
+  }
   return true;
 }
 
@@ -457,28 +144,28 @@ struct PlanIr {
   size_t root = 0;
 };
 
-bool ParseOrderItem(const JsonValue &value, OrderItem &out, std::string &err) {
-  if (value.type != JsonValue::Type::Object) {
+bool ParseOrderItem(duckdb_yyjson::yyjson_val *value, OrderItem &out, std::string &err) {
+  if (!value || !duckdb_yyjson::yyjson_is_obj(value)) {
     err = "order item must be object";
     return false;
   }
-  auto expr_val = GetField(value, "expr");
-  auto asc_val = GetField(value, "asc");
-  auto nulls_val = GetField(value, "nulls_first");
-  if (!expr_val || !GetString(*expr_val, out.expr)) {
+  auto expr_val = duckdb_yyjson::yyjson_obj_get(value, "expr");
+  auto asc_val = duckdb_yyjson::yyjson_obj_get(value, "asc");
+  auto nulls_val = duckdb_yyjson::yyjson_obj_get(value, "nulls_first");
+  if (!ReadString(expr_val, out.expr, err)) {
     err = "order item expr is required";
     return false;
   }
-  if (!asc_val || !GetBool(*asc_val, out.asc)) {
+  if (!ReadBool(asc_val, out.asc, err)) {
     err = "order item asc is required";
     return false;
   }
   if (nulls_val) {
-    if (nulls_val->type == JsonValue::Type::Null) {
+    if (duckdb_yyjson::yyjson_is_null(nulls_val)) {
       out.nulls_first.reset();
     } else {
       bool flag = false;
-      if (!GetBool(*nulls_val, flag)) {
+      if (!ReadBool(nulls_val, flag, err)) {
         err = "order item nulls_first must be bool or null";
         return false;
       }
@@ -488,34 +175,22 @@ bool ParseOrderItem(const JsonValue &value, OrderItem &out, std::string &err) {
   return true;
 }
 
-bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
-  if (value.type != JsonValue::Type::Object) {
+bool ParseNode(duckdb_yyjson::yyjson_val *value, PlanNode &out, std::string &err) {
+  if (!value || !duckdb_yyjson::yyjson_is_obj(value)) {
     err = "plan node must be object";
     return false;
   }
-  auto type_val = GetField(value, "type");
+  auto type_val = duckdb_yyjson::yyjson_obj_get(value, "type");
   std::string type;
-  if (!type_val || !GetString(*type_val, type)) {
+  if (!ReadString(type_val, type, err)) {
     err = "plan node missing type";
     return false;
   }
-  auto num_field = [&](const char *key, uint64_t &target) -> bool {
-    auto field = GetField(value, key);
-    double number = 0.0;
-    if (!field || !GetNumber(*field, number)) {
-      return false;
-    }
-    if (number < 0 || std::floor(number) != number) {
-      return false;
-    }
-    target = static_cast<uint64_t>(number);
-    return true;
-  };
 
   if (type == "table_scan") {
     out.kind = NodeKind::TableScan;
-    auto table_val = GetField(value, "table");
-    if (!table_val || !GetString(*table_val, out.table)) {
+    auto table_val = duckdb_yyjson::yyjson_obj_get(value, "table");
+    if (!ReadString(table_val, out.table, err)) {
       err = "table_scan missing table";
       return false;
     }
@@ -523,18 +198,18 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   }
   if (type == "index_scan") {
     out.kind = NodeKind::IndexScan;
-    auto table_val = GetField(value, "table");
-    auto index_val = GetField(value, "index");
-    auto pred_val = GetField(value, "predicate");
-    if (!table_val || !GetString(*table_val, out.table)) {
+    auto table_val = duckdb_yyjson::yyjson_obj_get(value, "table");
+    auto index_val = duckdb_yyjson::yyjson_obj_get(value, "index");
+    auto pred_val = duckdb_yyjson::yyjson_obj_get(value, "predicate");
+    if (!ReadString(table_val, out.table, err)) {
       err = "index_scan missing table";
       return false;
     }
-    if (!index_val || !GetString(*index_val, out.index)) {
+    if (!ReadString(index_val, out.index, err)) {
       err = "index_scan missing index";
       return false;
     }
-    if (!pred_val || !GetString(*pred_val, out.predicate)) {
+    if (!ReadString(pred_val, out.predicate, err)) {
       err = "index_scan missing predicate";
       return false;
     }
@@ -542,8 +217,8 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   }
   if (type == "dml") {
     out.kind = NodeKind::Dml;
-    auto sql_val = GetField(value, "sql");
-    if (!sql_val || !GetString(*sql_val, out.sql)) {
+    auto sql_val = duckdb_yyjson::yyjson_obj_get(value, "sql");
+    if (!ReadString(sql_val, out.sql, err)) {
       err = "dml missing sql";
       return false;
     }
@@ -552,23 +227,24 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "derived") {
     out.kind = NodeKind::Derived;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "derived missing input";
       return false;
     }
     out.input = static_cast<size_t>(input);
-    auto alias_val = GetField(value, "alias");
-    if (alias_val && alias_val->type == JsonValue::Type::String) {
-      out.alias = alias_val->string;
+    auto alias_val = duckdb_yyjson::yyjson_obj_get(value, "alias");
+    if (alias_val && !duckdb_yyjson::yyjson_is_null(alias_val)) {
+      if (!ReadString(alias_val, out.alias, err)) {
+        err = "derived alias must be string";
+        return false;
+      }
     }
-    auto cols_val = GetField(value, "column_aliases");
-    if (cols_val && cols_val->type == JsonValue::Type::Array) {
-      for (const auto &col_val : cols_val->array) {
-        if (col_val.type != JsonValue::Type::String) {
-          err = "derived column_aliases must be strings";
-          return false;
-        }
-        out.column_aliases.push_back(col_val.string);
+    auto cols_val = duckdb_yyjson::yyjson_obj_get(value, "column_aliases");
+    if (cols_val && !duckdb_yyjson::yyjson_is_null(cols_val)) {
+      if (!ReadStringArray(cols_val, out.column_aliases, err)) {
+        err = "derived column_aliases must be strings";
+        return false;
       }
     }
     return true;
@@ -576,12 +252,13 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "filter") {
     out.kind = NodeKind::Filter;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "filter missing input";
       return false;
     }
-    auto pred_val = GetField(value, "predicate");
-    if (!pred_val || !GetString(*pred_val, out.predicate)) {
+    auto pred_val = duckdb_yyjson::yyjson_obj_get(value, "predicate");
+    if (!ReadString(pred_val, out.predicate, err)) {
       err = "filter missing predicate";
       return false;
     }
@@ -591,22 +268,15 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "projection") {
     out.kind = NodeKind::Projection;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "projection missing input";
       return false;
     }
-    const std::vector<JsonValue> *exprs_val = nullptr;
-    auto exprs_field = GetField(value, "exprs");
-    if (!exprs_field || !GetArray(*exprs_field, exprs_val)) {
+    auto exprs_field = duckdb_yyjson::yyjson_obj_get(value, "exprs");
+    if (!ReadStringArray(exprs_field, out.exprs, err)) {
       err = "projection missing exprs";
       return false;
-    }
-    for (const auto &expr_val : *exprs_val) {
-      if (expr_val.type != JsonValue::Type::String) {
-        err = "projection exprs must be strings";
-        return false;
-      }
-      out.exprs.push_back(expr_val.string);
     }
     out.input = static_cast<size_t>(input);
     return true;
@@ -615,17 +285,19 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
     out.kind = NodeKind::Join;
     uint64_t left = 0;
     uint64_t right = 0;
-    if (!num_field("left", left) || !num_field("right", right)) {
+    auto left_val = duckdb_yyjson::yyjson_obj_get(value, "left");
+    auto right_val = duckdb_yyjson::yyjson_obj_get(value, "right");
+    if (!ReadIndex(left_val, left, err) || !ReadIndex(right_val, right, err)) {
       err = "join missing left/right";
       return false;
     }
-    auto join_val = GetField(value, "join_type");
-    auto on_val = GetField(value, "on");
-    if (!join_val || !GetString(*join_val, out.join_type)) {
+    auto join_val = duckdb_yyjson::yyjson_obj_get(value, "join_type");
+    auto on_val = duckdb_yyjson::yyjson_obj_get(value, "on");
+    if (!ReadString(join_val, out.join_type, err)) {
       err = "join missing join_type";
       return false;
     }
-    if (!on_val || !GetString(*on_val, out.on)) {
+    if (!ReadString(on_val, out.on, err)) {
       err = "join missing on";
       return false;
     }
@@ -636,35 +308,20 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "aggregate") {
     out.kind = NodeKind::Aggregate;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "aggregate missing input";
       return false;
     }
-    const std::vector<JsonValue> *groups_val = nullptr;
-    const std::vector<JsonValue> *aggr_val = nullptr;
-    auto groups_field = GetField(value, "group_exprs");
-    auto aggr_field = GetField(value, "aggr_exprs");
-    if (!groups_field || !GetArray(*groups_field, groups_val)) {
+    auto groups_field = duckdb_yyjson::yyjson_obj_get(value, "group_exprs");
+    auto aggr_field = duckdb_yyjson::yyjson_obj_get(value, "aggr_exprs");
+    if (!ReadStringArray(groups_field, out.group_exprs, err)) {
       err = "aggregate missing group_exprs";
       return false;
     }
-    if (!aggr_field || !GetArray(*aggr_field, aggr_val)) {
+    if (!ReadStringArray(aggr_field, out.aggr_exprs, err)) {
       err = "aggregate missing aggr_exprs";
       return false;
-    }
-    for (const auto &expr_val : *groups_val) {
-      if (expr_val.type != JsonValue::Type::String) {
-        err = "aggregate group_exprs must be strings";
-        return false;
-      }
-      out.group_exprs.push_back(expr_val.string);
-    }
-    for (const auto &expr_val : *aggr_val) {
-      if (expr_val.type != JsonValue::Type::String) {
-        err = "aggregate aggr_exprs must be strings";
-        return false;
-      }
-      out.aggr_exprs.push_back(expr_val.string);
     }
     out.input = static_cast<size_t>(input);
     return true;
@@ -672,7 +329,8 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "distinct") {
     out.kind = NodeKind::Distinct;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "distinct missing input";
       return false;
     }
@@ -682,22 +340,25 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "top_n") {
     out.kind = NodeKind::TopN;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "top_n missing input";
       return false;
     }
     uint64_t limit = 0;
-    if (!num_field("limit", limit)) {
+    auto limit_val = duckdb_yyjson::yyjson_obj_get(value, "limit");
+    if (!ReadIndex(limit_val, limit, err)) {
       err = "top_n missing limit";
       return false;
     }
-    const std::vector<JsonValue> *order_val = nullptr;
-    auto order_field = GetField(value, "order_by");
-    if (!order_field || !GetArray(*order_field, order_val)) {
+    auto order_field = duckdb_yyjson::yyjson_obj_get(value, "order_by");
+    if (!order_field || !duckdb_yyjson::yyjson_is_arr(order_field)) {
       err = "top_n missing order_by";
       return false;
     }
-    for (const auto &item_val : *order_val) {
+    auto order_count = duckdb_yyjson::yyjson_arr_size(order_field);
+    for (size_t i = 0; i < order_count; ++i) {
+      auto item_val = duckdb_yyjson::yyjson_arr_get(order_field, i);
       OrderItem item;
       if (!ParseOrderItem(item_val, item, err)) {
         return false;
@@ -711,17 +372,19 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "sort") {
     out.kind = NodeKind::Sort;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "sort missing input";
       return false;
     }
-    const std::vector<JsonValue> *order_val = nullptr;
-    auto order_field = GetField(value, "order_by");
-    if (!order_field || !GetArray(*order_field, order_val)) {
+    auto order_field = duckdb_yyjson::yyjson_obj_get(value, "order_by");
+    if (!order_field || !duckdb_yyjson::yyjson_is_arr(order_field)) {
       err = "sort missing order_by";
       return false;
     }
-    for (const auto &item_val : *order_val) {
+    auto order_count = duckdb_yyjson::yyjson_arr_size(order_field);
+    for (size_t i = 0; i < order_count; ++i) {
+      auto item_val = duckdb_yyjson::yyjson_arr_get(order_field, i);
       OrderItem item;
       if (!ParseOrderItem(item_val, item, err)) {
         return false;
@@ -734,27 +397,28 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
   if (type == "limit") {
     out.kind = NodeKind::Limit;
     uint64_t input = 0;
-    if (!num_field("input", input)) {
+    auto input_val = duckdb_yyjson::yyjson_obj_get(value, "input");
+    if (!ReadIndex(input_val, input, err)) {
       err = "limit missing input";
       return false;
     }
-    auto limit_val = GetField(value, "limit");
-    if (limit_val && limit_val->type != JsonValue::Type::Null) {
-      double number = 0.0;
-      if (!GetNumber(*limit_val, number) || number < 0 || std::floor(number) != number) {
+    auto limit_val = duckdb_yyjson::yyjson_obj_get(value, "limit");
+    if (limit_val && !duckdb_yyjson::yyjson_is_null(limit_val)) {
+      uint64_t limit = 0;
+      if (!ReadIndex(limit_val, limit, err)) {
         err = "limit must be integer or null";
         return false;
       }
-      out.limit = static_cast<uint64_t>(number);
+      out.limit = limit;
     }
-    auto offset_val = GetField(value, "offset");
-    if (offset_val && offset_val->type != JsonValue::Type::Null) {
-      double number = 0.0;
-      if (!GetNumber(*offset_val, number) || number < 0 || std::floor(number) != number) {
+    auto offset_val = duckdb_yyjson::yyjson_obj_get(value, "offset");
+    if (offset_val && !duckdb_yyjson::yyjson_is_null(offset_val)) {
+      uint64_t offset = 0;
+      if (!ReadIndex(offset_val, offset, err)) {
         err = "offset must be integer or null";
         return false;
       }
-      out.offset = static_cast<uint64_t>(number);
+      out.offset = offset;
     }
     out.input = static_cast<size_t>(input);
     return true;
@@ -765,33 +429,35 @@ bool ParseNode(const JsonValue &value, PlanNode &out, std::string &err) {
 }
 
 bool ParsePlan(const std::string &payload, PlanIr &out, std::string &err) {
-  JsonParser parser(payload.data(), payload.size());
-  JsonValue root;
-  if (!parser.Parse(root)) {
-    err = parser.Error();
+  duckdb_yyjson::yyjson_read_flag flags = duckdb_yyjson::YYJSON_READ_ALLOW_INVALID_UNICODE;
+  std::unique_ptr<duckdb_yyjson::yyjson_doc, JsonDocDeleter> doc(
+      duckdb_yyjson::yyjson_read(payload.data(), payload.size(), flags));
+  if (!doc) {
+    err = "json parse failed";
     return false;
   }
-  if (root.type != JsonValue::Type::Object) {
+  auto root = duckdb_yyjson::yyjson_doc_get_root(doc.get());
+  if (!root || !duckdb_yyjson::yyjson_is_obj(root)) {
     err = "plan root must be object";
     return false;
   }
-  auto nodes_val = GetField(root, "nodes");
-  auto root_val = GetField(root, "root");
-  const std::vector<JsonValue> *nodes = nullptr;
-  if (!nodes_val || !GetArray(*nodes_val, nodes)) {
+  auto nodes_val = duckdb_yyjson::yyjson_obj_get(root, "nodes");
+  auto root_val = duckdb_yyjson::yyjson_obj_get(root, "root");
+  if (!nodes_val || !duckdb_yyjson::yyjson_is_arr(nodes_val)) {
     err = "plan missing nodes";
     return false;
   }
-  double root_num = 0.0;
-  if (!root_val || !GetNumber(*root_val, root_num) || root_num < 0 ||
-      std::floor(root_num) != root_num) {
+  uint64_t root_index = 0;
+  if (!ReadIndex(root_val, root_index, err)) {
     err = "plan root must be integer";
     return false;
   }
-  out.root = static_cast<size_t>(root_num);
+  out.root = static_cast<size_t>(root_index);
   out.nodes.clear();
-  out.nodes.reserve(nodes->size());
-  for (const auto &node_val : *nodes) {
+  auto node_count = duckdb_yyjson::yyjson_arr_size(nodes_val);
+  out.nodes.reserve(node_count);
+  for (size_t i = 0; i < node_count; ++i) {
+    auto node_val = duckdb_yyjson::yyjson_arr_get(nodes_val, i);
     PlanNode node;
     if (!ParseNode(node_val, node, err)) {
       return false;
@@ -1172,8 +838,16 @@ int chryso_duckdb_plan_execute(
   }
 }
 
-const char *chryso_duckdb_last_error() {
-  return g_last_error.c_str();
+char *chryso_duckdb_last_error() {
+  if (g_last_error.empty()) {
+    return nullptr;
+  }
+  char *buffer = static_cast<char *>(std::malloc(g_last_error.size() + 1));
+  if (!buffer) {
+    return nullptr;
+  }
+  std::memcpy(buffer, g_last_error.c_str(), g_last_error.size() + 1);
+  return buffer;
 }
 
 void chryso_duckdb_string_free(char *value) {
