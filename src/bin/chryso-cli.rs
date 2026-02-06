@@ -1,10 +1,14 @@
 use chryso::adapter::ExecutorAdapter;
 use chryso::planner::{ExplainConfig, ExplainFormatter};
 use chryso::{
-    CascadesOptimizer, Dialect, DuckDbAdapter, MockAdapter, OptimizerConfig, ParserConfig,
-    PlanBuilder, SqlParser, Statement, metadata::StatsCache, parser::SimpleParser,
-    sql_utils::split_sql_with_tail,
+    Authorizer, CascadesOptimizer, Dialect, DdlHandler, DdlResult, DuckDbAdapter, MockAdapter,
+    NoExtension, OptimizerConfig, ParserConfig, PlanBuilder, PlanOutcome, SqlParser,
+    SessionContext, Statement, StatementCategory, StatementContext, StatementEnvelope,
+    plan_with_hooks,
+    metadata::StatsCache, parser::SimpleParser, sql_utils::split_sql_with_tail,
 };
+#[cfg(feature = "duckdb-ops-ffi")]
+use chryso::DuckDbOpsAdapter;
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
@@ -20,23 +24,34 @@ use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
 fn main() {
-    let mut runner = PipelineRunner::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.is_empty() {
-        let mut dump_memo = false;
-        let mut memo_best_only = false;
-        let mut sql_parts = Vec::new();
-        for arg in args {
-            match arg.as_str() {
-                "--dump-memo" => dump_memo = true,
-                "--memo-best-only" => memo_best_only = true,
-                _ => sql_parts.push(arg),
-            }
+    let cli_args = match CliArgs::parse(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return;
         }
-        let sql = sql_parts.join(" ");
-        if let Err(err) =
-            execute_non_interactive_with_memo(&sql, &mut runner, dump_memo, memo_best_only)
-        {
+    };
+    let mut runner = match PipelineRunner::new(cli_args.engine) {
+        Ok(runner) => runner,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return;
+        }
+    };
+    runner.context = SessionContext::new(
+        cli_args.database,
+        cli_args.user,
+        cli_args.default_schema,
+    );
+    if !cli_args.sql_parts.is_empty() {
+        let sql = cli_args.sql_parts.join(" ");
+        if let Err(err) = execute_non_interactive_with_memo(
+            &sql,
+            &mut runner,
+            cli_args.dump_memo,
+            cli_args.memo_best_only,
+        ) {
             eprintln!("error: {err}");
         }
         return;
@@ -55,6 +70,104 @@ fn main() {
 
     if let Err(err) = run_tui(&mut runner) {
         eprintln!("error: {err}");
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CliArgs {
+    dump_memo: bool,
+    memo_best_only: bool,
+    engine: EngineMode,
+    database: String,
+    user: String,
+    default_schema: String,
+    sql_parts: Vec<String>,
+}
+
+impl CliArgs {
+    fn parse(args: Vec<String>) -> chryso::ChrysoResult<Self> {
+        let mut dump_memo = false;
+        let mut memo_best_only = false;
+        let mut engine = EngineMode::Ops;
+        let mut database = "default".to_string();
+        let mut user = "default".to_string();
+        let mut default_schema = "main".to_string();
+        let mut sql_parts = Vec::new();
+
+        let mut iter = args.into_iter().peekable();
+        while let Some(arg) = iter.next() {
+            match arg.as_str() {
+                "--dump-memo" => dump_memo = true,
+                "--memo-best-only" => memo_best_only = true,
+                "--engine" => {
+                    let Some(value) = iter.next() else {
+                        return Err(chryso::ChrysoError::new("--engine expects a value"));
+                    };
+                    engine = EngineMode::parse(&value)?;
+                }
+                "--db" | "--database" => {
+                    let Some(value) = iter.next() else {
+                        return Err(chryso::ChrysoError::new("--db expects a value"));
+                    };
+                    database = value;
+                }
+                "--user" => {
+                    let Some(value) = iter.next() else {
+                        return Err(chryso::ChrysoError::new("--user expects a value"));
+                    };
+                    user = value;
+                }
+                "--schema" => {
+                    let Some(value) = iter.next() else {
+                        return Err(chryso::ChrysoError::new("--schema expects a value"));
+                    };
+                    default_schema = value;
+                }
+                _ => {
+                    if let Some(value) = arg.strip_prefix("--db=") {
+                        database = value.to_string();
+                    } else if let Some(value) = arg.strip_prefix("--engine=") {
+                        engine = EngineMode::parse(value)?;
+                    } else if let Some(value) = arg.strip_prefix("--user=") {
+                        user = value.to_string();
+                    } else if let Some(value) = arg.strip_prefix("--schema=") {
+                        default_schema = value.to_string();
+                    } else {
+                        sql_parts.push(arg);
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            dump_memo,
+            memo_best_only,
+            engine,
+            database,
+            user,
+            default_schema,
+            sql_parts,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EngineMode {
+    Ops,
+    Sql,
+    Mock,
+}
+
+impl EngineMode {
+    fn parse(value: &str) -> chryso::ChrysoResult<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "ops" => Ok(Self::Ops),
+            "sql" => Ok(Self::Sql),
+            "mock" => Ok(Self::Mock),
+            _ => Err(chryso::ChrysoError::new(
+                "--engine expects ops, sql, or mock",
+            )),
+        }
     }
 }
 
@@ -498,26 +611,30 @@ struct PipelineRunner {
     parser: SimpleParser,
     optimizer: CascadesOptimizer,
     stats: StatsCache,
+    context: SessionContext,
 }
 
 impl PipelineRunner {
     const BRIEF_EXPLAIN_MAX_EXPR_LENGTH: usize = 60;
     const VERBOSE_EXPLAIN_MAX_EXPR_LENGTH: usize = 80;
 
-    fn new() -> Self {
-        let adapter = DuckDbAdapter::try_new()
-            .map(Adapter::Duck)
-            .unwrap_or_else(|_| Adapter::Mock(MockAdapter::new()));
+    fn new(engine: EngineMode) -> chryso::ChrysoResult<Self> {
+        let adapter = build_adapter(engine)?;
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
-        let optimizer = CascadesOptimizer::new(OptimizerConfig::default());
-        Self {
+        let mut config = OptimizerConfig::default();
+        if let Adapter::Duck(adapter) = &adapter {
+            config.stats_provider = Some(adapter.clone());
+        }
+        let optimizer = CascadesOptimizer::new(config);
+        Ok(Self {
             adapter,
             parser,
             optimizer,
             stats: StatsCache::new(),
-        }
+            context: SessionContext::default(),
+        })
     }
 
     fn execute_line(&mut self, sql: &str) -> chryso::ChrysoResult<Vec<String>> {
@@ -577,10 +694,17 @@ impl PipelineRunner {
                 Ok(lines)
             }
             _ => {
-                let logical = PlanBuilder::build(statement)?;
-                let physical = self.optimizer.optimize(&logical, &mut self.stats);
-                let result = self.adapter.execute(&physical)?;
-                Ok(format_result(&result, state))
+                let env = StatementEnvelope::new(statement, StatementContext::new(sql));
+                let authorizer = CliAuthorizer;
+                let ddl_handler = ddl_handler(&self.adapter);
+                match plan_with_hooks(&self.context, &env, &authorizer, ddl_handler)? {
+                    PlanOutcome::DdlHandled { result } => Ok(format_ddl_result(&result)),
+                    PlanOutcome::Planned { logical } => {
+                        let physical = self.optimizer.optimize(&logical, &mut self.stats);
+                        let result = self.adapter.execute(&physical)?;
+                        Ok(format_result(&result, state))
+                    }
+                }
             }
         }?;
         if state.timing {
@@ -596,29 +720,87 @@ impl PipelineRunner {
         best_only: bool,
     ) -> chryso::ChrysoResult<Vec<String>> {
         let statement = self.parser.parse(sql)?;
-        let logical = PlanBuilder::build(statement)?;
-        let (physical, memo) = self
-            .optimizer
-            .optimize_with_memo_trace(&logical, &mut self.stats);
-        let trace = if best_only {
-            memo.format_best_only()
-        } else {
-            memo.format_full()
-        };
-        let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
-        let physical_output = physical.explain_costed(0, &cost_model);
-        let mut lines = Vec::new();
-        lines.extend(trace.lines().map(|line| line.to_string()));
-        if !physical_output.is_empty() {
-            lines.push(String::new());
-            lines.extend(physical_output.lines().map(|line| line.to_string()));
+        match statement {
+            Statement::Explain(inner) => {
+                let logical = PlanBuilder::build(*inner)?;
+                let physical = self.optimizer.optimize(&logical, &mut self.stats);
+                let config = ExplainConfig {
+                    show_types: true,
+                    show_costs: true,
+                    show_cardinality: false,
+                    compact: true,
+                    max_expr_length: Self::BRIEF_EXPLAIN_MAX_EXPR_LENGTH,
+                };
+                let formatter = ExplainFormatter::new(config);
+                let logical_output = formatter.format_logical_plan(
+                    &logical,
+                    &chryso_metadata::type_inference::SimpleTypeInferencer,
+                );
+                let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
+                let physical_output = formatter.format_physical_plan(&physical, &cost_model);
+                let mut lines = Vec::new();
+                lines.extend(logical_output.lines().map(|line| line.to_string()));
+                lines.push(String::new());
+                lines.extend(physical_output.lines().map(|line| line.to_string()));
+                Ok(lines)
+            }
+            other => {
+                let env = StatementEnvelope::new(other, StatementContext::new(sql));
+                let authorizer = CliAuthorizer;
+                let ddl_handler = ddl_handler(&self.adapter);
+                match plan_with_hooks(&self.context, &env, &authorizer, ddl_handler)? {
+                    PlanOutcome::DdlHandled { result } => Ok(format_ddl_result(&result)),
+                    PlanOutcome::Planned { logical } => {
+                        let (physical, memo) = self
+                            .optimizer
+                            .optimize_with_memo_trace(&logical, &mut self.stats);
+                        let trace = if best_only {
+                            memo.format_best_only()
+                        } else {
+                            memo.format_full()
+                        };
+                        let cost_model = chryso::optimizer::cost::StatsCostModel::new(&self.stats);
+                        let physical_output = physical.explain_costed(0, &cost_model);
+                        let mut lines = Vec::new();
+                        lines.extend(trace.lines().map(|line| line.to_string()));
+                        if !physical_output.is_empty() {
+                            lines.push(String::new());
+                            lines.extend(physical_output.lines().map(|line| line.to_string()));
+                        }
+                        Ok(lines)
+                    }
+                }
+            }
         }
-        Ok(lines)
+    }
+}
+
+fn build_adapter(engine: EngineMode) -> chryso::ChrysoResult<Adapter> {
+    match engine {
+        EngineMode::Ops => build_ops_adapter(),
+        EngineMode::Sql => DuckDbAdapter::try_new()
+            .map(|duck| Adapter::Duck(std::sync::Arc::new(duck))),
+        EngineMode::Mock => Ok(Adapter::Mock(MockAdapter::new())),
+    }
+}
+
+fn build_ops_adapter() -> chryso::ChrysoResult<Adapter> {
+    #[cfg(feature = "duckdb-ops-ffi")]
+    {
+        DuckDbOpsAdapter::try_new().map(Adapter::DuckOps)
+    }
+    #[cfg(not(feature = "duckdb-ops-ffi"))]
+    {
+        Err(chryso::ChrysoError::new(
+            "engine=ops requires feature \"duckdb-ops-ffi\"",
+        ))
     }
 }
 
 enum Adapter {
-    Duck(DuckDbAdapter),
+    Duck(std::sync::Arc<DuckDbAdapter>),
+    #[cfg(feature = "duckdb-ops-ffi")]
+    DuckOps(DuckDbOpsAdapter),
     Mock(MockAdapter),
 }
 
@@ -626,8 +808,77 @@ impl Adapter {
     fn execute(&self, plan: &chryso::PhysicalPlan) -> chryso::ChrysoResult<chryso::QueryResult> {
         match self {
             Adapter::Duck(adapter) => adapter.execute(plan),
+            #[cfg(feature = "duckdb-ops-ffi")]
+            Adapter::DuckOps(adapter) => adapter.execute(plan),
             Adapter::Mock(adapter) => adapter.execute(plan),
         }
+    }
+}
+
+impl DdlHandler<SessionContext, NoExtension> for Adapter {
+    fn supports(&self, _ctx: &SessionContext, env: &StatementEnvelope<NoExtension>) -> bool {
+        if env.category != StatementCategory::Ddl {
+            return false;
+        }
+        match self {
+            Adapter::Duck(_) => true,
+            #[cfg(feature = "duckdb-ops-ffi")]
+            Adapter::DuckOps(_) => true,
+            Adapter::Mock(_) => false,
+        }
+    }
+
+    fn handle(
+        &self,
+        _ctx: &SessionContext,
+        env: &StatementEnvelope<NoExtension>,
+    ) -> chryso::ChrysoResult<DdlResult> {
+        let sql = env.context.original_sql();
+        match self {
+            Adapter::Duck(_) => {
+                let plan = chryso::PhysicalPlan::Dml {
+                    sql: sql.to_string(),
+                };
+                let _ = self.execute(&plan)?;
+                Ok(DdlResult { detail: None })
+            }
+            #[cfg(feature = "duckdb-ops-ffi")]
+            Adapter::DuckOps(_) => {
+                let plan = chryso::PhysicalPlan::Dml {
+                    sql: sql.to_string(),
+                };
+                let _ = self.execute(&plan)?;
+                Ok(DdlResult { detail: None })
+            }
+            Adapter::Mock(_) => Err(chryso::ChrysoError::new(
+                "ddl requires duckdb adapter",
+            )),
+        }
+    }
+}
+
+fn ddl_handler(
+    adapter: &Adapter,
+) -> Option<&dyn DdlHandler<SessionContext, NoExtension>> {
+    Some(adapter)
+}
+
+struct CliAuthorizer;
+
+impl Authorizer<SessionContext, NoExtension> for CliAuthorizer {
+    fn authorize_statement(
+        &self,
+        _ctx: &SessionContext,
+        _env: &StatementEnvelope<NoExtension>,
+    ) -> chryso::ChrysoResult<()> {
+        Ok(())
+    }
+}
+
+fn format_ddl_result(result: &DdlResult) -> Vec<String> {
+    match result.detail.as_deref() {
+        Some(detail) if !detail.is_empty() => vec![detail.to_string()],
+        _ => vec!["ok".to_string()],
     }
 }
 
@@ -745,5 +996,30 @@ mod tests {
         }
         assert_eq!(runner.executed.len(), 2);
         assert_eq!(state.headers, true);
+    }
+
+    #[test]
+    fn parse_engine_flag() {
+        let args = vec![
+            "--engine".to_string(),
+            "sql".to_string(),
+            "select".to_string(),
+            "1".to_string(),
+        ];
+        let parsed = CliArgs::parse(args).expect("parse");
+        match parsed.engine {
+            EngineMode::Sql => {}
+            other => panic!("unexpected engine: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_engine_default_ops() {
+        let args = vec!["select".to_string(), "1".to_string()];
+        let parsed = CliArgs::parse(args).expect("parse");
+        match parsed.engine {
+            EngineMode::Ops => {}
+            other => panic!("unexpected engine: {other:?}"),
+        }
     }
 }

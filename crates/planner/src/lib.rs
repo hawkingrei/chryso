@@ -1,6 +1,7 @@
 use chryso_core::ChrysoResult;
 use chryso_core::ast::Literal;
 use chryso_core::ast::{Expr, JoinType, OrderByExpr, SelectStatement, Statement};
+use chryso_core::statement::StatementEnvelope;
 use chryso_metadata::type_inference::TypeInferencer;
 
 pub mod cost;
@@ -157,6 +158,10 @@ impl PlanBuilder {
             }
         }?;
         Ok(simplify_plan(plan))
+    }
+
+    pub fn build_from_envelope<E>(envelope: &StatementEnvelope<E>) -> ChrysoResult<LogicalPlan> {
+        Self::build(envelope.statement.clone())
     }
 }
 

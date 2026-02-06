@@ -84,6 +84,40 @@ jobs:
           CHRYSO_VELOX_FFI_DIR: ${{ github.workspace }}/ffi/velox/build
           LD_LIBRARY_PATH: ${{ github.workspace }}/ffi/velox/build
         run: cargo test -p chryso-adapter-velox --features velox-ffi
+
+  duckdb-ops-ffi:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+          components: rustfmt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build DuckDB FFI
+        run: |
+          cmake -S ffi/duckdb -B ffi/duckdb/build -DCHRYSO_DUCKDB_USE_SUBMODULE=ON
+          cmake --build ffi/duckdb/build -j
+      - name: Test DuckDB ops adapter (linux)
+        if: runner.os == 'Linux'
+        env:
+          CHRYSO_DUCKDB_FFI_DIR: ${{ github.workspace }}/ffi/duckdb/build
+          LD_LIBRARY_PATH: ${{ github.workspace }}/ffi/duckdb/build
+        run: cargo test --features duckdb-ops-ffi
+      - name: Test DuckDB ops adapter (macos)
+        if: runner.os == 'macOS'
+        env:
+          CHRYSO_DUCKDB_FFI_DIR: ${{ github.workspace }}/ffi/duckdb/build
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/duckdb/build
+        run: cargo test --features duckdb-ops-ffi
       - name: Test velox adapter (macos)
         if: runner.os == 'macOS'
         env:
