@@ -63,12 +63,12 @@ mod tests {
         execute(
             &adapter,
             &parser,
-            "create table regions (id integer, name varchar)",
+            "create table regions (region_id integer, name varchar)",
         );
         execute(
             &adapter,
             &parser,
-            "create table sales (id integer, amount integer, region_id integer)",
+            "create table sales (sale_id integer, amount integer, sales_region_id integer)",
         );
         execute(
             &adapter,
@@ -84,7 +84,7 @@ mod tests {
         let result = execute(
             &adapter,
             &parser,
-            "select regions.name, sum(sales.amount) as total from sales join regions on sales.region_id = regions.id group by regions.name order by regions.name",
+            "select name, sum(amount) as total from sales join regions on sales_region_id = region_id group by name order by name",
         );
 
         assert_eq!(
