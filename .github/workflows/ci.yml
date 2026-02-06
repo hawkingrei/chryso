@@ -105,7 +105,7 @@ jobs:
       - name: Build DuckDB FFI
         run: |
           cmake -S ffi/duckdb -B ffi/duckdb/build -DCHRYSO_DUCKDB_USE_SUBMODULE=ON
-          cmake --build ffi/duckdb/build -j
+          cmake --build ffi/duckdb/build --parallel 2
       - name: Test DuckDB ops adapter (linux)
         if: runner.os == 'Linux'
         env:
