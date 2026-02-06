@@ -16,12 +16,12 @@
 #include <utility>
 #include <vector>
 
-namespace {
-
 struct DuckDbSession {
   std::unique_ptr<duckdb::DuckDB> db;
   std::unique_ptr<duckdb::Connection> conn;
 };
+
+namespace {
 
 thread_local std::string g_last_error;
 
@@ -883,16 +883,16 @@ duckdb::JoinType ParseJoinType(const std::string &value) {
     return duckdb::JoinType::RIGHT;
   }
   if (value == "full") {
-    return duckdb::JoinType::FULL;
+    return duckdb::JoinType::OUTER;
   }
   return duckdb::JoinType::INNER;
 }
 
-std::shared_ptr<duckdb::Relation> BuildRelation(
+duckdb::shared_ptr<duckdb::Relation> BuildRelation(
     const PlanIr &plan,
     size_t index,
     duckdb::Connection &conn,
-    std::vector<std::shared_ptr<duckdb::Relation>> &cache,
+    std::vector<duckdb::shared_ptr<duckdb::Relation>> &cache,
     std::vector<bool> &built,
     std::string &err) {
   if (index >= plan.nodes.size()) {
@@ -903,7 +903,7 @@ std::shared_ptr<duckdb::Relation> BuildRelation(
     return cache[index];
   }
   const PlanNode &node = plan.nodes[index];
-  std::shared_ptr<duckdb::Relation> rel;
+  duckdb::shared_ptr<duckdb::Relation> rel;
   switch (node.kind) {
     case NodeKind::TableScan:
       rel = conn.Table(node.table);
@@ -922,7 +922,7 @@ std::shared_ptr<duckdb::Relation> BuildRelation(
       }
       rel = input;
       if (!node.column_aliases.empty()) {
-        auto columns = rel->Columns();
+        const auto &columns = rel->Columns();
         if (columns.size() != node.column_aliases.size()) {
           err = "derived column_aliases size mismatch";
           return nullptr;
@@ -931,7 +931,8 @@ std::shared_ptr<duckdb::Relation> BuildRelation(
         projections.reserve(columns.size());
         for (size_t i = 0; i < columns.size(); ++i) {
           projections.push_back(
-              QuoteIdent(columns[i]) + " AS " + QuoteIdent(node.column_aliases[i]));
+              QuoteIdent(columns[i].Name()) + " AS " +
+              QuoteIdent(node.column_aliases[i]));
         }
         rel = rel->Project(JoinExprs(projections));
       }
@@ -1125,11 +1126,11 @@ int chryso_duckdb_plan_execute(
   }
 
   const PlanNode &root = plan.nodes[plan.root];
-  std::unique_ptr<duckdb::QueryResult> result;
+  duckdb::unique_ptr<duckdb::QueryResult> result;
   if (root.kind == NodeKind::Dml) {
     result = session->conn->Query(root.sql);
   } else {
-    std::vector<std::shared_ptr<duckdb::Relation>> cache(plan.nodes.size());
+    std::vector<duckdb::shared_ptr<duckdb::Relation>> cache(plan.nodes.size());
     std::vector<bool> built(plan.nodes.size(), false);
     auto rel = BuildRelation(plan, plan.root, *session->conn, cache, built, err);
     if (!rel) {
