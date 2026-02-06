@@ -2,7 +2,9 @@ mod ffi;
 mod plan;
 
 use chryso_adapter::{AdapterCapabilities, ExecutorAdapter, QueryResult};
-use chryso_core::error::{ChrysoError, ChrysoResult};
+#[cfg(not(feature = "duckdb-ops-ffi"))]
+use chryso_core::error::ChrysoError;
+use chryso_core::error::ChrysoResult;
 use chryso_planner::PhysicalPlan;
 
 #[derive(Debug)]

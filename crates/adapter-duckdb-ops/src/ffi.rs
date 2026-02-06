@@ -14,7 +14,7 @@ mod native {
         _private: [u8; 0],
     }
 
-    extern "C" {
+    unsafe extern "C" {
         pub fn chryso_duckdb_session_new() -> *mut DuckDbSession;
         pub fn chryso_duckdb_session_free(session: *mut DuckDbSession);
         pub fn chryso_duckdb_plan_execute(
@@ -81,20 +81,22 @@ mod native {
         if ptr.is_null() {
             return Err(ChrysoError::new("duckdb ops returned null result"));
         }
-        let text = CStr::from_ptr(ptr)
-            .to_str()
-            .map_err(|err| ChrysoError::new(format!("duckdb ops utf8 error: {err}")))?
-            .to_string();
-        chryso_duckdb_string_free(ptr);
+        let text = unsafe {
+            CStr::from_ptr(ptr)
+                .to_str()
+                .map_err(|err| ChrysoError::new(format!("duckdb ops utf8 error: {err}")))?
+                .to_string()
+        };
+        unsafe { chryso_duckdb_string_free(ptr) };
         Ok(text)
     }
 
     unsafe fn last_error_message() -> String {
-        let ptr = chryso_duckdb_last_error();
+        let ptr = unsafe { chryso_duckdb_last_error() };
         if ptr.is_null() {
             return "duckdb ops error".to_string();
         }
-        let c_str = CStr::from_ptr(ptr);
+        let c_str = unsafe { CStr::from_ptr(ptr) };
         c_str.to_string_lossy().to_string()
     }
 
@@ -102,7 +104,6 @@ mod native {
     fn _to_c_string(value: &str) -> CString {
         CString::new(value).unwrap_or_else(|_| CString::new("").expect("empty cstring"))
     }
-    pub use DuckDbOpsSession;
 }
 
 #[cfg(feature = "duckdb-ops-ffi")]
