@@ -128,8 +128,19 @@ fn lower_plan(plan: &PhysicalPlan, nodes: &mut Vec<PlanNode>) -> usize {
             )
         }
         PhysicalPlan::Projection { exprs, input } => {
+            let input_is_aggregate = matches!(input.as_ref(), PhysicalPlan::Aggregate { .. });
             let input = lower_plan(input, nodes);
-            let exprs = exprs.iter().map(|expr| expr.to_sql()).collect();
+            let exprs = exprs
+                .iter()
+                .map(|expr| {
+                    let raw = expr.to_sql();
+                    if input_is_aggregate {
+                        quote_ident(&raw)
+                    } else {
+                        raw
+                    }
+                })
+                .collect();
             push_node(nodes, PlanNode::Projection { exprs, input })
         }
         PhysicalPlan::Join {
@@ -234,6 +245,19 @@ fn join_type_label(join_type: JoinType) -> String {
         JoinType::Right => "right".to_string(),
         JoinType::Full => "full".to_string(),
     }
+}
+
+fn quote_ident(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        if ch == '"' {
+            out.push('"');
+        }
+        out.push(ch);
+    }
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
