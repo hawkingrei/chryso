@@ -1,3 +1,6 @@
 [submodule "ffi/velox/velox"]
 	path = ffi/velox/velox
 	url = https://github.com/facebookincubator/velox.git
+[submodule "ffi/duckdb/duckdb"]
+	path = ffi/duckdb/duckdb
+	url = https://github.com/duckdb/duckdb.git
