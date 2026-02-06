@@ -84,7 +84,7 @@ mod tests {
         let result = execute(
             &adapter,
             &parser,
-            "select r.name, sum(s.amount) as total from sales s join regions r on s.region_id = r.id group by r.name order by r.name",
+            "select regions.name, sum(sales.amount) as total from sales join regions on sales.region_id = regions.id group by regions.name order by regions.name",
         );
 
         assert_eq!(
