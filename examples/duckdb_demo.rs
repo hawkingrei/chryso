@@ -1,10 +1,10 @@
 #[cfg(feature = "duckdb")]
 fn main() {
-    use chryso::adapter::{DuckDbAdapter, ExecutorAdapter};
     use chryso::metadata::StatsCache;
     use chryso::optimizer::{CascadesOptimizer, OptimizerConfig};
     use chryso::parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso::planner::PlanBuilder;
+    use chryso::{DuckDbAdapter, ExecutorAdapter};
 
     let adapter = std::sync::Arc::new(DuckDbAdapter::new());
     let mut stats = StatsCache::new();

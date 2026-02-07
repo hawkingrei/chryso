@@ -2,6 +2,10 @@ pub mod config;
 pub mod adapter {
     pub use chryso_adapter::*;
 }
+#[cfg(feature = "duckdb")]
+pub mod adapter_duckdb {
+    pub use chryso_adapter_duckdb::*;
+}
 #[cfg(feature = "velox")]
 pub mod adapter_velox {
     pub use chryso_adapter_velox::*;
@@ -49,9 +53,9 @@ pub mod sql_utils;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;
 
-pub use adapter::{
-    AdapterCapabilities, DuckDbAdapter, ExecutorAdapter, MockAdapter, ParamValue, QueryResult,
-};
+pub use adapter::{AdapterCapabilities, ExecutorAdapter, MockAdapter, ParamValue, QueryResult};
+#[cfg(feature = "duckdb")]
+pub use adapter_duckdb::DuckDbAdapter;
 #[cfg(feature = "duckdb-ops")]
 pub use adapter_duckdb_ops::DuckDbOpsAdapter;
 #[cfg(feature = "velox")]

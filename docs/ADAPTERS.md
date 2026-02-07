@@ -14,7 +14,7 @@ Adapters translate physical plans into engine-specific execution. The trait live
 
 ## Adding an Adapter
 1. Implement `ExecutorAdapter` for your engine.
-2. Provide plan lowering in `adapter::physical_to_sql` or engine APIs.
+2. Provide plan lowering in `chryso-adapter-duckdb::physical_to_sql` or engine APIs.
 3. Add feature flags if the adapter brings heavy dependencies.
 
 ## DuckDB Operator Adapter
