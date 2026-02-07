@@ -26,6 +26,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-targets: false
       - name: Format
         run: cargo fmt --all -- --check
       - name: Build
@@ -58,6 +59,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-targets: false
       - name: Restore velox build dir
         id: velox-ffi-build-cache
         uses: actions/cache/restore@v4
@@ -108,6 +110,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-targets: false
       - name: Build DuckDB FFI
         run: |
           cmake -S ffi/duckdb -B ffi/duckdb/build -DCHRYSO_DUCKDB_USE_SUBMODULE=ON
