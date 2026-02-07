@@ -6,6 +6,10 @@ pub mod adapter {
 pub mod adapter_velox {
     pub use chryso_adapter_velox::*;
 }
+#[cfg(feature = "duckdb-ops")]
+pub mod adapter_duckdb_ops {
+    pub use chryso_adapter_duckdb_ops::*;
+}
 pub mod ast {
     pub use chryso_core::ast::*;
 }
@@ -36,6 +40,11 @@ pub mod serde {
 pub mod sql_format {
     pub use chryso_core::sql_format::*;
 }
+pub mod statement {
+    pub use chryso_core::statement::*;
+}
+pub mod pipeline;
+pub mod session;
 pub mod sql_utils;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;
@@ -43,10 +52,15 @@ pub mod test_support;
 pub use adapter::{
     AdapterCapabilities, DuckDbAdapter, ExecutorAdapter, MockAdapter, ParamValue, QueryResult,
 };
+#[cfg(feature = "duckdb-ops")]
+pub use adapter_duckdb_ops::DuckDbOpsAdapter;
 #[cfg(feature = "velox")]
 pub use adapter_velox::VeloxAdapter;
-pub use ast::{Expr, Statement};
+pub use ast::{Expr, Statement, StatementCategory};
 pub use error::{ChrysoError, ChrysoResult};
 pub use optimizer::{CascadesOptimizer, OptimizerConfig};
 pub use parser::{Dialect, ParserConfig, SqlParser};
+pub use pipeline::{Authorizer, DdlHandler, DdlResult, PlanOutcome, plan_with_hooks};
 pub use planner::{LogicalPlan, PhysicalPlan, PlanBuilder};
+pub use session::SessionContext;
+pub use statement::{NoExtension, StatementContext, StatementEnvelope};

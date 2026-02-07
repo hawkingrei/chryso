@@ -17,6 +17,30 @@ pub enum Statement {
     Delete(DeleteStatement),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatementCategory {
+    Query,
+    Dml,
+    Ddl,
+    Utility,
+}
+
+impl Statement {
+    pub fn category(&self) -> StatementCategory {
+        match self {
+            Statement::With(with) => with.statement.category(),
+            Statement::Select(_) | Statement::SetOp { .. } => StatementCategory::Query,
+            Statement::Explain(_) | Statement::Analyze(_) => StatementCategory::Utility,
+            Statement::CreateTable(_) | Statement::DropTable(_) | Statement::Truncate(_) => {
+                StatementCategory::Ddl
+            }
+            Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) => {
+                StatementCategory::Dml
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CreateTableStatement {
     pub name: String,
@@ -265,7 +289,9 @@ impl Expr {
     pub fn to_sql(&self) -> String {
         match self {
             Expr::Identifier(name) => name.clone(),
-            Expr::Literal(Literal::String(value)) => format!("'{}'", value),
+            Expr::Literal(Literal::String(value)) => {
+                format!("'{}'", escape_sql_string(value))
+            }
             Expr::Literal(Literal::Number(value)) => value.to_string(),
             Expr::Literal(Literal::Bool(value)) => {
                 if *value {
@@ -606,6 +632,10 @@ impl Expr {
         };
         rewrite_strong_expr(normalized)
     }
+}
+
+fn escape_sql_string(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
 fn rewrite_strong_expr(expr: Expr) -> Expr {

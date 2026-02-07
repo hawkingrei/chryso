@@ -72,10 +72,16 @@ fn prune_plan_with_required(plan: &LogicalPlan, required: Option<&HashSet<String
                 join_required.extend(required.iter().cloned());
             }
             join_required.extend(collect_identifiers(on));
-            let left_tables = collect_tables(left.as_ref());
-            let right_tables = collect_tables(right.as_ref());
-            let (left_required, right_required) =
-                split_required(&join_required, &left_tables, &right_tables);
+            let has_unqualified = join_required
+                .iter()
+                .any(|ident| table_prefix(ident).is_none());
+            let (left_required, right_required) = if has_unqualified {
+                (None, None)
+            } else {
+                let left_tables = collect_tables(left.as_ref());
+                let right_tables = collect_tables(right.as_ref());
+                split_required(&join_required, &left_tables, &right_tables)
+            };
             LogicalPlan::Join {
                 join_type: *join_type,
                 left: Box::new(prune_plan_with_required(
