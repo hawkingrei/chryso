@@ -31,22 +31,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Build
         run: cargo build --workspace --exclude chryso-adapter-duckdb
-      - name: Build CLI
-        if: runner.os == 'macOS'
-        run: cargo build -p chryso --bin chryso-cli --features duckdb
       - name: Build examples
         run: cargo build --examples
       - name: Test
         run: cargo test --workspace --exclude chryso-adapter-duckdb
-      - name: Build examples (duckdb)
-        if: runner.os == 'macOS'
-        run: cargo build -p chryso --examples --features duckdb
-      - name: Test (duckdb)
-        if: runner.os == 'macOS'
-        run: cargo test -p chryso --features duckdb
-      - name: Test (duckdb adapter)
-        if: runner.os == 'macOS'
-        run: cargo test -p chryso-adapter-duckdb --features bundled
 
   velox-ffi:
     runs-on: ${{ matrix.os }}
@@ -150,6 +138,20 @@ jobs:
         with:
           cache-on-failure: true
           cache-targets: false
+      - name: Build DuckDB CLI (linux)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo build -p chryso --bin chryso-cli --features duckdb
+      - name: Build DuckDB examples (linux)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo build -p chryso --examples --features duckdb
       - name: Test DuckDB pipeline (linux)
         env:
           CARGO_PROFILE_DEV_DEBUG: 0
@@ -158,6 +160,50 @@ jobs:
           CXXFLAGS: "-g0"
         run: cargo test -p chryso --features duckdb
       - name: Test DuckDB adapter (linux)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo test -p chryso-adapter-duckdb --features bundled
+
+  duckdb-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+          components: rustfmt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-targets: false
+      - name: Build DuckDB CLI (macos)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo build -p chryso --bin chryso-cli --features duckdb
+      - name: Build DuckDB examples (macos)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo build -p chryso --examples --features duckdb
+      - name: Test DuckDB pipeline (macos)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo test -p chryso --features duckdb
+      - name: Test DuckDB adapter (macos)
         env:
           CARGO_PROFILE_DEV_DEBUG: 0
           RUSTFLAGS: "-C debuginfo=0"
