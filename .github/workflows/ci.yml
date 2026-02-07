@@ -134,3 +134,33 @@ jobs:
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/ffi/duckdb/build
         run: cargo test --features duckdb-ops-ffi
       # Velox adapter tests are handled by the dedicated velox-ffi job.
+
+  duckdb-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+          components: rustfmt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-targets: false
+      - name: Test DuckDB pipeline (linux)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo test -p chryso --features duckdb
+      - name: Test DuckDB adapter (linux)
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          RUSTFLAGS: "-C debuginfo=0"
+          CFLAGS: "-g0"
+          CXXFLAGS: "-g0"
+        run: cargo test -p chryso-adapter-duckdb --features bundled
