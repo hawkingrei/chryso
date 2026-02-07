@@ -22,6 +22,8 @@ The `chryso-adapter-duckdb-ops` crate defines a JSON plan IR and a C++ FFI bridg
 that builds DuckDB relational operators directly (no SQL). The FFI library lives
 under `ffi/duckdb` and expects a DuckDB submodule by default.
 
+当前 `IndexScan` 在 DuckDB ops 路径中会退化为 `TableScan + Filter`，`index` 字段是可选的，仅用于表达规划意图，尚未映射为 DuckDB 的索引访问算子。
+
 ## Testing
 Use `MockAdapter` to validate plan generation and to test fallback behavior.
 
