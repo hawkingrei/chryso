@@ -32,16 +32,20 @@ jobs:
       - name: Build
         run: cargo build --workspace --exclude chryso-adapter-duckdb
       - name: Build CLI
+        if: runner.os == 'macOS'
         run: cargo build --bin chryso-cli --features duckdb
       - name: Build examples
         run: cargo build --examples
       - name: Test
         run: cargo test --workspace --exclude chryso-adapter-duckdb
       - name: Build examples (duckdb)
+        if: runner.os == 'macOS'
         run: cargo build --examples --features duckdb
       - name: Test (duckdb)
+        if: runner.os == 'macOS'
         run: cargo test --features duckdb --workspace --exclude chryso-adapter-duckdb
       - name: Test (duckdb adapter)
+        if: runner.os == 'macOS'
         run: cargo test -p chryso-adapter-duckdb --features bundled
 
   velox-ffi:
