@@ -24,7 +24,6 @@ path = "crates/parser_yacc"
 members = [
   "crates/adapter",
   "crates/adapter-duckdb",
-  "crates/adapter-duckdb-ops",
   "crates/adapter-velox",
   "crates/core",
   "crates/metadata",
@@ -38,8 +37,6 @@ members = [
 [features]
 default = []
 duckdb = [ "dep:chryso-adapter-duckdb", "chryso-adapter-duckdb/bundled",]
-duckdb-ops = [ "dep:chryso-adapter-duckdb-ops",]
-duckdb-ops-ffi = [ "duckdb-ops", "chryso-adapter-duckdb-ops/duckdb-ops-ffi",]
 velox = [ "dep:chryso-adapter-velox", "chryso-adapter-velox/velox-ffi",]
 test-utils = []
 
@@ -62,11 +59,6 @@ default-features = false
 [dependencies.chryso-adapter-velox]
 version = "0.0.2"
 path = "crates/adapter-velox"
-optional = true
-
-[dependencies.chryso-adapter-duckdb-ops]
-version = "0.0.2"
-path = "crates/adapter-duckdb-ops"
 optional = true
 
 [dependencies.chryso-core]

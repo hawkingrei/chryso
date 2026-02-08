@@ -9,6 +9,8 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-adapter-duckdb"
 
 [features]
+# TODO: Consider enabling `bundled` by default so `cargo test --features duckdb`
+# works without a system libduckdb on workspace builds.
 default = []
 bundled = [ "duckdb/bundled",]
 

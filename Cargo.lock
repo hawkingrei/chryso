@@ -428,7 +428,7 @@ name = "chryso"
 version = "0.0.2"
 dependencies = [
  "chryso-adapter",
- "chryso-adapter-duckdb-ops",
+ "chryso-adapter-duckdb",
  "chryso-adapter-velox",
  "chryso-core",
  "chryso-metadata",
@@ -447,23 +447,20 @@ name = "chryso-adapter"
 version = "0.0.2"
 dependencies = [
  "chryso-core",
+ "chryso-planner",
+]
+
+[[package]]
+name = "chryso-adapter-duckdb"
+version = "0.0.2"
+dependencies = [
+ "chryso-adapter",
+ "chryso-core",
  "chryso-metadata",
  "chryso-parser",
  "chryso-parser-yacc",
  "chryso-planner",
  "duckdb",
-]
-
-[[package]]
-name = "chryso-adapter-duckdb-ops"
-version = "0.0.2"
-dependencies = [
- "bincode",
- "chryso-adapter",
- "chryso-core",
- "chryso-planner",
- "serde",
- "serde_json",
 ]
 
 [[package]]
