@@ -1,5 +1,3 @@
-#[cfg(feature = "duckdb-ops-ffi")]
-use chryso::DuckDbOpsAdapter;
 use chryso::adapter::ExecutorAdapter;
 use chryso::planner::{ExplainConfig, ExplainFormatter};
 use chryso::{
@@ -83,7 +81,7 @@ impl CliArgs {
     fn parse(args: Vec<String>) -> chryso::ChrysoResult<Self> {
         let mut dump_memo = false;
         let mut memo_best_only = false;
-        let mut engine = EngineMode::Ops;
+        let mut engine = EngineMode::Sql;
         let mut database = "default".to_string();
         let mut user = "default".to_string();
         let mut default_schema = "main".to_string();
@@ -148,7 +146,6 @@ impl CliArgs {
 
 #[derive(Debug, Clone, Copy)]
 enum EngineMode {
-    Ops,
     Sql,
     Mock,
 }
@@ -156,12 +153,9 @@ enum EngineMode {
 impl EngineMode {
     fn parse(value: &str) -> chryso::ChrysoResult<Self> {
         match value.to_ascii_lowercase().as_str() {
-            "ops" => Ok(Self::Ops),
             "sql" => Ok(Self::Sql),
             "mock" => Ok(Self::Mock),
-            _ => Err(chryso::ChrysoError::new(
-                "--engine expects ops, sql, or mock",
-            )),
+            _ => Err(chryso::ChrysoError::new("--engine expects sql or mock")),
         }
     }
 }
@@ -772,7 +766,6 @@ impl PipelineRunner {
 
 fn build_adapter(engine: EngineMode) -> chryso::ChrysoResult<Adapter> {
     match engine {
-        EngineMode::Ops => build_ops_adapter(),
         EngineMode::Sql => {
             DuckDbAdapter::try_new().map(|duck| Adapter::Duck(std::sync::Arc::new(duck)))
         }
@@ -780,23 +773,8 @@ fn build_adapter(engine: EngineMode) -> chryso::ChrysoResult<Adapter> {
     }
 }
 
-fn build_ops_adapter() -> chryso::ChrysoResult<Adapter> {
-    #[cfg(feature = "duckdb-ops-ffi")]
-    {
-        DuckDbOpsAdapter::try_new().map(Adapter::DuckOps)
-    }
-    #[cfg(not(feature = "duckdb-ops-ffi"))]
-    {
-        Err(chryso::ChrysoError::new(
-            "engine=ops requires feature \"duckdb-ops-ffi\"",
-        ))
-    }
-}
-
 enum Adapter {
     Duck(std::sync::Arc<DuckDbAdapter>),
-    #[cfg(feature = "duckdb-ops-ffi")]
-    DuckOps(DuckDbOpsAdapter),
     Mock(MockAdapter),
 }
 
@@ -804,8 +782,6 @@ impl Adapter {
     fn execute(&self, plan: &chryso::PhysicalPlan) -> chryso::ChrysoResult<chryso::QueryResult> {
         match self {
             Adapter::Duck(adapter) => adapter.execute(plan),
-            #[cfg(feature = "duckdb-ops-ffi")]
-            Adapter::DuckOps(adapter) => adapter.execute(plan),
             Adapter::Mock(adapter) => adapter.execute(plan),
         }
     }
@@ -818,8 +794,6 @@ impl DdlHandler<SessionContext, NoExtension> for Adapter {
         }
         match self {
             Adapter::Duck(_) => true,
-            #[cfg(feature = "duckdb-ops-ffi")]
-            Adapter::DuckOps(_) => true,
             Adapter::Mock(_) => false,
         }
     }
@@ -832,12 +806,6 @@ impl DdlHandler<SessionContext, NoExtension> for Adapter {
         let sql = chryso::sql_format::format_statement(&env.statement);
         match self {
             Adapter::Duck(_) => {
-                let plan = chryso::PhysicalPlan::Dml { sql: sql.clone() };
-                let _ = self.execute(&plan)?;
-                Ok(DdlResult { detail: None })
-            }
-            #[cfg(feature = "duckdb-ops-ffi")]
-            Adapter::DuckOps(_) => {
                 let plan = chryso::PhysicalPlan::Dml { sql: sql.clone() };
                 let _ = self.execute(&plan)?;
                 Ok(DdlResult { detail: None })
@@ -1002,11 +970,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_engine_default_ops() {
+    fn parse_engine_default_sql() {
         let args = vec!["select".to_string(), "1".to_string()];
         let parsed = CliArgs::parse(args).expect("parse");
         match parsed.engine {
-            EngineMode::Ops => {}
+            EngineMode::Sql => {}
             other => panic!("unexpected engine: {other:?}"),
         }
     }

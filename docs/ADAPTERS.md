@@ -17,12 +17,11 @@ Adapters translate physical plans into engine-specific execution. The trait live
 2. Provide plan lowering in `chryso-adapter-duckdb::physical_to_sql` or engine APIs.
 3. Add feature flags if the adapter brings heavy dependencies.
 
-## DuckDB Operator Adapter
-The `chryso-adapter-duckdb-ops` crate defines a JSON plan IR and a C++ FFI bridge
-that builds DuckDB relational operators directly (no SQL). The FFI library lives
-under `ffi/duckdb` and expects a DuckDB submodule by default.
-
-In the DuckDB ops path, `IndexScan` currently degrades to `TableScan + Filter`. The `index` field is optional and only expresses planning intent; it is not mapped to a DuckDB index access path yet.
+## DuckDB Adapter
+The `chryso-adapter-duckdb` crate lowers physical plans into SQL and executes them in DuckDB.
+Operator-level FFI is not exposed; DuckDB integration is only available through the adapter.
+`IndexScan` currently degrades to `TableScan + Filter` by emitting a `WHERE` predicate. The `index`
+field is optional and only expresses planning intent; it is not mapped to a DuckDB index access path yet.
 
 ## Testing
 Use `MockAdapter` to validate plan generation and to test fallback behavior.
