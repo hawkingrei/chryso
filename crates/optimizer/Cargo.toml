@@ -28,7 +28,7 @@ features = ["derive"]
 version = "1"
 
 [dependencies.toml]
-version = "0.8"
+version = "0.9"
 
 [dev-dependencies.chryso-parser]
 version = "0.0.2"
