@@ -10,7 +10,7 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso"
 
 [dependencies]
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 
 [dev-dependencies]
