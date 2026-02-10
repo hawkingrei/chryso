@@ -56,7 +56,7 @@ jobs:
           cache-targets: false
       - name: Restore velox build dir
         id: velox-ffi-build-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ffi/velox/build
           key: ${{ runner.os }}-velox-ffi-build-${{ hashFiles('ffi/velox/CMakeLists.txt', 'ffi/velox/src/**', 'ffi/velox/include/**', 'ffi/velox/tests/**') }}
@@ -68,7 +68,7 @@ jobs:
           cmake --build ffi/velox/build -j
       - name: Save velox build dir
         if: ${{ always() }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ffi/velox/build
           key: ${{ runner.os }}-velox-ffi-build-${{ hashFiles('ffi/velox/CMakeLists.txt', 'ffi/velox/src/**', 'ffi/velox/include/**', 'ffi/velox/tests/**') }}

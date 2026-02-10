@@ -32,7 +32,7 @@ jobs:
           cache-on-failure: true
           cache-targets: false
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.ccache
           key: ${{ runner.os }}-ccache-velox-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
@@ -40,7 +40,7 @@ jobs:
             ${{ runner.os }}-ccache-velox-
       - name: Restore velox build dir
         id: velox-build-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ffi/velox/build
           key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}
@@ -48,7 +48,7 @@ jobs:
             ${{ runner.os }}-velox-build-
       - name: Restore velox deps cache
         id: velox-deps-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             deps-install
@@ -97,7 +97,7 @@ jobs:
           echo "${INSTALL_PREFIX}/bin" >> "$GITHUB_PATH"
       - name: Save velox deps cache
         if: ${{ always() }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             deps-install
@@ -123,7 +123,7 @@ jobs:
           CCACHE_DIR: ~/.ccache
       - name: Save velox build dir
         if: ${{ always() }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ffi/velox/build
           key: ${{ runner.os }}-velox-build-${{ hashFiles('ffi/velox/velox/**', 'ffi/velox/CMakeLists.txt') }}-${{ github.run_id }}
