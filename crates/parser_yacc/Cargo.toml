@@ -9,7 +9,7 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso-parser-yacc"
 
 [dependencies]
-cfgrammar = "0.13"
+cfgrammar = "0.14"
 lrlex = "0.13"
 lrpar = "0.13"
 
@@ -24,4 +24,4 @@ path = "../parser"
 [build-dependencies]
 lrlex = "0.13"
 lrpar = "0.13"
-cfgrammar = "0.13"
+cfgrammar = "0.14"

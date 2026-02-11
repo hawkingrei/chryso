@@ -452,6 +452,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cfgrammar"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3efdd8f0bddcc9e33f4a664d0f28bc4e51cd5367c16284087a95313104371865"
+dependencies = [
+ "indexmap",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "vob",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -559,7 +573,7 @@ dependencies = [
 name = "chryso-parser-yacc"
 version = "0.0.2"
 dependencies = [
- "cfgrammar",
+ "cfgrammar 0.14.1",
  "chryso-core",
  "chryso-parser",
  "lrlex",
@@ -1635,7 +1649,7 @@ version = "0.13.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c71364e868116ee891b0f93559eb9eca5675bec28b22d33c58481e66c3951d7e"
 dependencies = [
- "cfgrammar",
+ "cfgrammar 0.13.10",
  "getopts",
  "lazy_static",
  "lrpar",
@@ -1655,7 +1669,7 @@ checksum = "51b265a81193d94c92d1c9c715498d6fa505bce3f789ceecb24ab5d6fa2dbc71"
 dependencies = [
  "bincode",
  "cactus",
- "cfgrammar",
+ "cfgrammar 0.13.10",
  "filetime",
  "indexmap",
  "lazy_static",
@@ -1675,7 +1689,7 @@ version = "0.13.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc36d15214ca997a5097845be1f932b7ee6125c36f5c5e55f6c49e027ddeb6de"
 dependencies = [
- "cfgrammar",
+ "cfgrammar 0.13.10",
  "fnv",
  "num-traits",
  "serde",
