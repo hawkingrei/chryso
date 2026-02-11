@@ -35,7 +35,7 @@ version = "0.0.2"
 path = "../parser"
 
 [dependencies.duckdb]
-version = "1.4.3"
+version = "1.4.4"
 
 [dev-dependencies.chryso-parser-yacc]
 version = "0.0.2"
