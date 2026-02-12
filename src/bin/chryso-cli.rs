@@ -493,6 +493,7 @@ fn handle_meta_command(
                 .map_err(|err| chryso::ChrysoError::new(format!("read failed: {err}")))?;
             execute_script(&content, runner, state)
         }
+        ".stats" => Ok(format_stats_status(&runner.stats.status())),
         ".explain" => {
             let rest = parts.collect::<Vec<_>>().join(" ");
             if rest.trim().is_empty() {
@@ -915,12 +916,54 @@ fn help_lines() -> Vec<String> {
         ".tables".to_string(),
         ".schema [table]".to_string(),
         ".read <path>".to_string(),
+        ".stats".to_string(),
         ".explain <sql>".to_string(),
         ".explain-mode brief|verbose".to_string(),
         ".headers on|off".to_string(),
         ".mode table|csv|tsv".to_string(),
         ".timing on|off".to_string(),
         ".exit|\\q".to_string(),
+    ]
+}
+
+fn format_stats_status(status: &chryso::metadata::StatsCacheStatus) -> Vec<String> {
+    let total_hits = status.table_hits + status.column_hits;
+    let total_misses = status.table_misses + status.column_misses;
+    let total_lookups = total_hits + total_misses;
+    let hit_rate = if total_lookups == 0 {
+        0.0
+    } else {
+        (total_hits as f64 / total_lookups as f64) * 100.0
+    };
+    let loaded_capacity = status.max_table_entries + status.max_column_entries;
+    vec![
+        "stats cache".to_string(),
+        format!(
+            "tables: {}/{} | columns: {}/{}",
+            status.table_entries,
+            status.max_table_entries,
+            status.column_entries,
+            status.max_column_entries
+        ),
+        format!(
+            "loaded={} of {} | missing_lookups={}",
+            status.loaded_entries(),
+            loaded_capacity,
+            status.missing_lookups()
+        ),
+        format!(
+            "hits={} misses={} hit_rate={:.2}%",
+            total_hits, total_misses, hit_rate
+        ),
+        format!(
+            "table_hits={} table_misses={} column_hits={} column_misses={}",
+            status.table_hits, status.table_misses, status.column_hits, status.column_misses
+        ),
+        format!(
+            "approx_memory={} bytes ({:.2} KiB)",
+            status.estimated_memory_bytes,
+            status.estimated_memory_bytes as f64 / 1024.0
+        ),
     ]
 }
 
@@ -994,5 +1037,11 @@ mod tests {
             EngineMode::Sql => {}
             other => panic!("unexpected engine: {other:?}"),
         }
+    }
+
+    #[test]
+    fn help_lists_stats_meta_command() {
+        let lines = help_lines();
+        assert!(lines.iter().any(|line| line == ".stats"));
     }
 }

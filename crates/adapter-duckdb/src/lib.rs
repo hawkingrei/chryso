@@ -7,6 +7,7 @@ use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
 use chryso_planner::PhysicalPlan;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 pub struct DuckDbAdapter {
     conn: RefCell<::duckdb::Connection>,
@@ -45,24 +46,13 @@ impl DuckDbAdapter {
             },
         );
         let columns = fetch_columns(&conn, table)?;
+        let summarized = try_summarize_column_stats(&conn, table, row_count).unwrap_or_default();
         for column in columns {
-            let sql = format!(
-                "select count(distinct {column}), coalesce(sum(case when {column} is null then 1 else 0 end), 0) from {table}"
-            );
-            let (distinct_count, nulls) = query_i64_pair(&conn, &sql)?;
-            let null_fraction = if row_count == 0 {
-                0.0
-            } else {
-                nulls as f64 / row_count as f64
+            let stats = match summarized.get(&column) {
+                Some(stats) => stats.clone(),
+                None => load_column_stats_fallback(&conn, table, &column, row_count)?,
             };
-            cache.insert_column_stats(
-                table,
-                &column,
-                ColumnStats {
-                    distinct_count: distinct_count.max(1) as f64,
-                    null_fraction,
-                },
-            );
+            cache.insert_column_stats(table, &column, stats);
         }
         Ok(())
     }
@@ -338,6 +328,185 @@ fn query_i64_pair(conn: &::duckdb::Connection, sql: &str) -> ChrysoResult<(i64, 
         Ok((a, b))
     })
     .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))
+}
+
+fn load_column_stats_fallback(
+    conn: &::duckdb::Connection,
+    table: &str,
+    column: &str,
+    row_count: i64,
+) -> ChrysoResult<ColumnStats> {
+    let sql = format!(
+        "select count(distinct {column}), coalesce(sum(case when {column} is null then 1 else 0 end), 0) from {table}"
+    );
+    let (distinct_count, nulls) = query_i64_pair(conn, &sql)?;
+    let null_fraction = if row_count == 0 {
+        0.0
+    } else {
+        nulls as f64 / row_count as f64
+    };
+    Ok(ColumnStats {
+        distinct_count: distinct_count.max(1) as f64,
+        null_fraction,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SummarizeColumnIndexes {
+    column_name: usize,
+    approx_unique: Option<usize>,
+    null_percentage: Option<usize>,
+    non_null_count: Option<usize>,
+}
+
+fn try_summarize_column_stats(
+    conn: &::duckdb::Connection,
+    table: &str,
+    row_count: i64,
+) -> ChrysoResult<HashMap<String, ColumnStats>> {
+    let mut stmt = conn
+        .prepare(&format!("summarize {table}"))
+        .map_err(|err| ChrysoError::new(format!("duckdb prepare failed: {err}")))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| ChrysoError::new(format!("duckdb query failed: {err}")))?;
+    let column_names = rows
+        .as_ref()
+        .map(|statement| statement.column_names())
+        .unwrap_or_default();
+    let indexes = match infer_summarize_column_indexes(&column_names) {
+        Some(indexes) => indexes,
+        None => return Ok(HashMap::new()),
+    };
+    let mut stats = HashMap::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| ChrysoError::new(format!("duckdb row error: {err}")))?
+    {
+        let column_value: DuckValue = row
+            .get(indexes.column_name)
+            .map_err(|err| ChrysoError::new(format!("duckdb value error: {err}")))?;
+        let Some(column_name) = duck_value_to_text(&column_value) else {
+            continue;
+        };
+        let column_name = column_name.trim();
+        if column_name.is_empty() {
+            continue;
+        }
+
+        let distinct_count = indexes
+            .approx_unique
+            .and_then(|index| row.get::<usize, DuckValue>(index).ok())
+            .and_then(|value| duck_value_to_f64(&value));
+
+        let null_fraction = if row_count == 0 {
+            Some(0.0)
+        } else if let Some(index) = indexes.null_percentage {
+            row.get::<usize, DuckValue>(index)
+                .ok()
+                .and_then(|value| parse_null_fraction(&value))
+        } else if let Some(index) = indexes.non_null_count {
+            row.get::<usize, DuckValue>(index)
+                .ok()
+                .and_then(|value| duck_value_to_f64(&value))
+                .map(|non_null| {
+                    let value = (row_count as f64 - non_null) / row_count as f64;
+                    value.clamp(0.0, 1.0)
+                })
+        } else {
+            None
+        };
+
+        if let (Some(distinct_count), Some(null_fraction)) = (distinct_count, null_fraction) {
+            stats.insert(
+                column_name.to_string(),
+                ColumnStats {
+                    distinct_count: distinct_count.max(1.0),
+                    null_fraction: null_fraction.clamp(0.0, 1.0),
+                },
+            );
+        }
+    }
+    Ok(stats)
+}
+
+fn infer_summarize_column_indexes(column_names: &[String]) -> Option<SummarizeColumnIndexes> {
+    let mut column_name = None;
+    let mut approx_unique = None;
+    let mut null_percentage = None;
+    let mut non_null_count = None;
+
+    for (index, name) in column_names.iter().enumerate() {
+        let normalized = name.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "column_name" | "column" | "columnname" => column_name = Some(index),
+            "approx_unique" | "approx_count_distinct" | "distinct_count" | "unique" => {
+                approx_unique = Some(index)
+            }
+            "null_percentage" | "null_percent" | "null_fraction" => null_percentage = Some(index),
+            "count" | "non_null" | "nonnull_count" | "non_null_count" => {
+                non_null_count = Some(index)
+            }
+            _ => {}
+        }
+    }
+
+    column_name.map(|column_name| SummarizeColumnIndexes {
+        column_name,
+        approx_unique,
+        null_percentage,
+        non_null_count,
+    })
+}
+
+fn duck_value_to_text(value: &DuckValue) -> Option<String> {
+    match value {
+        DuckValue::Null => None,
+        DuckValue::Text(text) | DuckValue::Enum(text) => Some(text.clone()),
+        other => Some(format_duck_value(other)),
+    }
+}
+
+fn duck_value_to_f64(value: &DuckValue) -> Option<f64> {
+    match value {
+        DuckValue::Null => None,
+        DuckValue::Boolean(value) => Some(if *value { 1.0 } else { 0.0 }),
+        DuckValue::TinyInt(value) => Some(*value as f64),
+        DuckValue::SmallInt(value) => Some(*value as f64),
+        DuckValue::Int(value) => Some(*value as f64),
+        DuckValue::BigInt(value) => Some(*value as f64),
+        DuckValue::HugeInt(value) => Some(*value as f64),
+        DuckValue::UTinyInt(value) => Some(*value as f64),
+        DuckValue::USmallInt(value) => Some(*value as f64),
+        DuckValue::UInt(value) => Some(*value as f64),
+        DuckValue::UBigInt(value) => Some(*value as f64),
+        DuckValue::Float(value) => Some(*value as f64),
+        DuckValue::Double(value) => Some(*value),
+        DuckValue::Decimal(value) => value.to_string().parse::<f64>().ok(),
+        DuckValue::Text(value) | DuckValue::Enum(value) => parse_numeric_text(value),
+        _ => None,
+    }
+}
+
+fn parse_numeric_text(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed
+        .trim_end_matches('%')
+        .replace(',', "")
+        .replace('_', "");
+    normalized.parse::<f64>().ok()
+}
+
+fn parse_null_fraction(value: &DuckValue) -> Option<f64> {
+    let raw = duck_value_to_f64(value)?;
+    if raw.is_nan() {
+        return None;
+    }
+    let fraction = if raw > 1.0 { raw / 100.0 } else { raw };
+    Some(fraction.clamp(0.0, 1.0))
 }
 
 impl ExecutorAdapter for DuckDbAdapter {

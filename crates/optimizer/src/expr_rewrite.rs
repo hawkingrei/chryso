@@ -179,6 +179,12 @@ fn rewrite_binary(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
     if let Some(expr) = fold_comparison(&left, op, &right) {
         return expr;
     }
+    if let Some(expr) = fold_null_aware_binary(&left, op, &right) {
+        return expr;
+    }
+    if let Some(expr) = fold_self_comparison(&left, op, &right) {
+        return expr;
+    }
     if matches!(op, BinaryOperator::And | BinaryOperator::Or) && left.structural_eq(&right) {
         return left;
     }
@@ -291,6 +297,110 @@ fn fold_comparison(left: &Expr, op: BinaryOperator, right: &Expr) -> Option<Expr
             result.map(|value| Expr::Literal(Literal::Bool(value)))
         }
         _ => None,
+    }
+}
+
+fn fold_null_aware_binary(left: &Expr, op: BinaryOperator, right: &Expr) -> Option<Expr> {
+    match op {
+        BinaryOperator::And | BinaryOperator::Or => {
+            let (Some((left_expr, left_negated)), Some((right_expr, right_negated))) =
+                (as_is_null(left), as_is_null(right))
+            else {
+                return None;
+            };
+            if !left_expr.structural_eq(right_expr) {
+                return None;
+            }
+            if left_negated == right_negated {
+                return None;
+            }
+            Some(match op {
+                BinaryOperator::And => Expr::Literal(Literal::Bool(false)),
+                BinaryOperator::Or => Expr::Literal(Literal::Bool(true)),
+                _ => unreachable!(),
+            })
+        }
+        BinaryOperator::Eq | BinaryOperator::NotEq => {
+            if let Some(expr) = fold_is_null_vs_bool(left, op, right) {
+                return Some(expr);
+            }
+            if let Some(expr) = fold_is_null_vs_bool(right, op, left) {
+                return Some(expr);
+            }
+            let (Some((left_expr, left_negated)), Some((right_expr, right_negated))) =
+                (as_is_null(left), as_is_null(right))
+            else {
+                return None;
+            };
+            if !left_expr.structural_eq(right_expr) {
+                return None;
+            }
+            let equal = left_negated == right_negated;
+            let value = match op {
+                BinaryOperator::Eq => equal,
+                BinaryOperator::NotEq => !equal,
+                _ => unreachable!(),
+            };
+            Some(Expr::Literal(Literal::Bool(value)))
+        }
+        _ => None,
+    }
+}
+
+fn fold_is_null_vs_bool(left: &Expr, op: BinaryOperator, right: &Expr) -> Option<Expr> {
+    let (expr, negated) = as_is_null(left)?;
+    let bool_value = match right {
+        Expr::Literal(Literal::Bool(value)) => *value,
+        _ => return None,
+    };
+    let keep_original = match op {
+        BinaryOperator::Eq => bool_value,
+        BinaryOperator::NotEq => !bool_value,
+        _ => return None,
+    };
+    Some(Expr::IsNull {
+        expr: Box::new(expr.clone()),
+        negated: if keep_original { negated } else { !negated },
+    })
+}
+
+fn fold_self_comparison(left: &Expr, op: BinaryOperator, right: &Expr) -> Option<Expr> {
+    if !left.structural_eq(right) {
+        return None;
+    }
+    if !expr_is_definitely_non_null(left) {
+        return None;
+    }
+    match op {
+        BinaryOperator::Eq | BinaryOperator::LtEq | BinaryOperator::GtEq => {
+            Some(Expr::Literal(Literal::Bool(true)))
+        }
+        BinaryOperator::NotEq | BinaryOperator::Lt | BinaryOperator::Gt => {
+            Some(Expr::Literal(Literal::Bool(false)))
+        }
+        _ => None,
+    }
+}
+
+fn as_is_null(expr: &Expr) -> Option<(&Expr, bool)> {
+    match expr {
+        Expr::IsNull { expr, negated } => Some((expr.as_ref(), *negated)),
+        _ => None,
+    }
+}
+
+fn expr_is_definitely_non_null(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(_) | Expr::IsNull { .. } => true,
+        Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr,
+        }
+        | Expr::UnaryOp {
+            op: UnaryOperator::Neg,
+            expr,
+        } => expr_is_definitely_non_null(expr),
+        _ => false,
     }
 }
 
@@ -442,6 +552,90 @@ mod tests {
         match rewritten {
             Expr::Identifier(name) => assert_eq!(name, "a"),
             other => panic!("expected identifier, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_nullable_self_comparison() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier("a".to_string())),
+        };
+        let rewritten = rewrite_expr(&expr);
+        match rewritten {
+            Expr::BinaryOp {
+                op: BinaryOperator::Eq,
+                ..
+            } => {}
+            other => panic!("expected nullable self comparison to remain, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folds_non_null_self_comparison() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::IsNull {
+                expr: Box::new(Expr::Identifier("a".to_string())),
+                negated: false,
+            }),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::IsNull {
+                expr: Box::new(Expr::Identifier("a".to_string())),
+                negated: false,
+            }),
+        };
+        let rewritten = rewrite_expr(&expr);
+        match rewritten {
+            Expr::Literal(Literal::Bool(value)) => assert!(value),
+            other => panic!("expected literal true, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folds_null_check_contradictions() {
+        let left = Expr::IsNull {
+            expr: Box::new(Expr::Identifier("a".to_string())),
+            negated: false,
+        };
+        let right = Expr::IsNull {
+            expr: Box::new(Expr::Identifier("a".to_string())),
+            negated: true,
+        };
+        let and_expr = Expr::BinaryOp {
+            left: Box::new(left.clone()),
+            op: BinaryOperator::And,
+            right: Box::new(right.clone()),
+        };
+        let or_expr = Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinaryOperator::Or,
+            right: Box::new(right),
+        };
+        match rewrite_expr(&and_expr) {
+            Expr::Literal(Literal::Bool(value)) => assert!(!value),
+            other => panic!("expected false, got {other:?}"),
+        }
+        match rewrite_expr(&or_expr) {
+            Expr::Literal(Literal::Bool(value)) => assert!(value),
+            other => panic!("expected true, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folds_is_null_bool_comparison() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::IsNull {
+                expr: Box::new(Expr::Identifier("a".to_string())),
+                negated: false,
+            }),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Literal(Literal::Bool(false))),
+        };
+        let rewritten = rewrite_expr(&expr);
+        match rewritten {
+            Expr::IsNull { negated, .. } => assert!(negated),
+            other => panic!("expected `is not null`, got {other:?}"),
         }
     }
 

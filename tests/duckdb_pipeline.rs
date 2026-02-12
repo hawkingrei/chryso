@@ -57,6 +57,28 @@ mod tests {
     }
 
     #[test]
+    fn duckdb_analyze_populates_distinct_and_null_fraction() {
+        let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
+        adapter
+            .execute_sql("create table metrics (v integer)")
+            .expect("create table");
+        adapter
+            .execute_sql("insert into metrics values (1), (1), (2), (null)")
+            .expect("insert");
+
+        let mut stats = StatsCache::new();
+        adapter
+            .analyze_table("metrics", &mut stats)
+            .expect("analyze");
+        let table = stats.table_stats("metrics").expect("table stats");
+        assert_eq!(table.row_count, 4.0);
+        let column = stats.column_stats("metrics", "v").expect("column stats");
+        assert!(column.distinct_count >= 2.0);
+        assert!(column.null_fraction > 0.0);
+        assert!(column.null_fraction < 1.0);
+    }
+
+    #[test]
     fn duckdb_pipeline_executes_optimized_plan() {
         let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
         setup_sales_table(&adapter);
