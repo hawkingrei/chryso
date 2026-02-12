@@ -796,16 +796,10 @@ impl Adapter {
         }
     }
 
-    fn analyze_table(
-        &self,
-        table: &str,
-        stats: &mut StatsCache,
-    ) -> chryso::ChrysoResult<()> {
+    fn analyze_table(&self, table: &str, stats: &mut StatsCache) -> chryso::ChrysoResult<()> {
         match self {
             Adapter::Duck(adapter) => adapter.analyze_table(table, stats),
-            Adapter::Mock(_) => Err(chryso::ChrysoError::new(
-                "analyze requires duckdb adapter",
-            )),
+            Adapter::Mock(_) => Err(chryso::ChrysoError::new("analyze requires duckdb adapter")),
         }
     }
 }
