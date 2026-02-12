@@ -47,6 +47,16 @@ mod tests {
     }
 
     #[test]
+    fn duckdb_analyze_populates_stats_cache() {
+        let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
+        setup_sales_table(&adapter);
+        let mut stats = StatsCache::new();
+        adapter.analyze_table("sales", &mut stats).expect("analyze");
+        assert!(stats.table_stats("sales").is_some());
+        assert!(stats.column_stats("sales", "id").is_some());
+    }
+
+    #[test]
     fn duckdb_pipeline_executes_optimized_plan() {
         let adapter = DuckDbAdapter::try_new().expect("duckdb adapter");
         setup_sales_table(&adapter);
