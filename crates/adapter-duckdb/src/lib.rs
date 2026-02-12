@@ -1,7 +1,7 @@
 use ::duckdb::params_from_iter;
 use ::duckdb::types::Value as DuckValue;
 use chryso_adapter::{ExecutorAdapter, ParamValue, QueryResult};
-use chryso_core::ast::Statement;
+use chryso_core::ast::{OrderByExpr, Statement};
 use chryso_core::error::{ChrysoError, ChrysoResult};
 use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
 use chryso_parser::{ParserConfig, SimpleParser, SqlParser};
@@ -356,7 +356,197 @@ impl ExecutorAdapter for DuckDbAdapter {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SelectSql {
+    select_list: Vec<String>,
+    from: String,
+    where_clause: Option<String>,
+    order_by: Vec<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+    distinct: bool,
+}
+
+impl SelectSql {
+    fn new(from: String) -> Self {
+        Self {
+            select_list: vec!["*".to_string()],
+            from,
+            where_clause: None,
+            order_by: Vec::new(),
+            limit: None,
+            offset: None,
+            distinct: false,
+        }
+    }
+
+    fn is_wildcard_select(&self) -> bool {
+        self.select_list.len() == 1 && self.select_list[0] == "*"
+    }
+
+    fn has_limit_or_offset(&self) -> bool {
+        self.limit.is_some() || self.offset.is_some()
+    }
+
+    fn render(&self) -> String {
+        let select_list = if self.select_list.is_empty() {
+            "*".to_string()
+        } else {
+            self.select_list.join(", ")
+        };
+        let distinct = if self.distinct { "distinct " } else { "" };
+        let mut sql = format!("select {distinct}{select_list} from {}", self.from);
+        if let Some(where_clause) = &self.where_clause {
+            sql.push_str(&format!(" where {where_clause}"));
+        }
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" order by {}", self.order_by.join(", ")));
+        }
+        if let Some(limit) = self.limit {
+            sql.push_str(&format!(" limit {limit}"));
+        }
+        if let Some(offset) = self.offset {
+            sql.push_str(&format!(" offset {offset}"));
+        }
+        sql
+    }
+}
+
+fn render_order_by(order_by: &[OrderByExpr]) -> Vec<String> {
+    order_by
+        .iter()
+        .map(|item| {
+            let dir = if item.asc { "asc" } else { "desc" };
+            let mut rendered = format!("{} {dir}", item.expr.to_sql());
+            if let Some(nulls_first) = item.nulls_first {
+                if nulls_first {
+                    rendered.push_str(" nulls first");
+                } else {
+                    rendered.push_str(" nulls last");
+                }
+            }
+            rendered
+        })
+        .collect()
+}
+
+fn lower_select_chain(plan: &PhysicalPlan) -> Option<SelectSql> {
+    match plan {
+        PhysicalPlan::TableScan { table } => Some(SelectSql::new(table.clone())),
+        PhysicalPlan::IndexScan {
+            table,
+            index: _,
+            predicate,
+        } => {
+            let mut select = SelectSql::new(table.clone());
+            select.where_clause = Some(predicate.to_sql());
+            Some(select)
+        }
+        PhysicalPlan::Derived {
+            input,
+            alias,
+            column_aliases,
+        } => {
+            let base = physical_to_sql(input);
+            let from = if column_aliases.is_empty() {
+                format!("({base}) as {alias}")
+            } else {
+                format!("({base}) as {alias} ({})", column_aliases.join(", "))
+            };
+            Some(SelectSql::new(from))
+        }
+        PhysicalPlan::Join {
+            join_type,
+            algorithm: _,
+            left,
+            right,
+            on,
+        } => {
+            let left_sql = physical_to_sql(left);
+            let right_sql = physical_to_sql(right);
+            let join = match join_type {
+                chryso_core::ast::JoinType::Inner => "join",
+                chryso_core::ast::JoinType::Left => "left join",
+                chryso_core::ast::JoinType::Right => "right join",
+                chryso_core::ast::JoinType::Full => "full join",
+            };
+            let from = format!(
+                "({left_sql}) as l {join} ({right_sql}) as r on {}",
+                on.to_sql()
+            );
+            Some(SelectSql::new(from))
+        }
+        PhysicalPlan::Filter { predicate, input } => {
+            let mut select = lower_select_chain(input)?;
+            if select.distinct || select.has_limit_or_offset() {
+                return None;
+            }
+            let rendered = predicate.to_sql();
+            select.where_clause = Some(match select.where_clause {
+                Some(existing) => format!("({existing}) and ({rendered})"),
+                None => rendered,
+            });
+            Some(select)
+        }
+        PhysicalPlan::Projection { exprs, input } => {
+            let mut select = lower_select_chain(input)?;
+            if select.distinct || select.has_limit_or_offset() || !select.is_wildcard_select() {
+                return None;
+            }
+            select.select_list = exprs.iter().map(|expr| expr.to_sql()).collect();
+            Some(select)
+        }
+        PhysicalPlan::Distinct { input } => {
+            let mut select = lower_select_chain(input)?;
+            select.distinct = true;
+            Some(select)
+        }
+        PhysicalPlan::Sort { order_by, input } => {
+            let mut select = lower_select_chain(input)?;
+            if select.has_limit_or_offset() {
+                return None;
+            }
+            select.order_by = render_order_by(order_by);
+            Some(select)
+        }
+        PhysicalPlan::TopN {
+            order_by,
+            limit,
+            input,
+        } => {
+            let mut select = lower_select_chain(input)?;
+            if select.has_limit_or_offset() || !select.order_by.is_empty() {
+                return None;
+            }
+            select.order_by = render_order_by(order_by);
+            select.limit = Some(*limit);
+            Some(select)
+        }
+        PhysicalPlan::Limit {
+            limit,
+            offset,
+            input,
+        } => {
+            let mut select = lower_select_chain(input)?;
+            if select.has_limit_or_offset() {
+                return None;
+            }
+            select.limit = *limit;
+            select.offset = *offset;
+            Some(select)
+        }
+        PhysicalPlan::Aggregate { .. } | PhysicalPlan::Dml { .. } => None,
+    }
+}
+
 pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
+    if let Some(select) = lower_select_chain(plan) {
+        return select.render();
+    }
+    physical_to_sql_fallback(plan)
+}
+
+fn physical_to_sql_fallback(plan: &PhysicalPlan) -> String {
     match plan {
         PhysicalPlan::TableScan { table } => format!("select * from {table}"),
         PhysicalPlan::IndexScan {
@@ -382,7 +572,7 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
         }
         PhysicalPlan::Filter { predicate, input } => {
             let base = physical_to_sql(input);
-            format!("{base} where {}", predicate.to_sql())
+            format!("select * from ({base}) as t where {}", predicate.to_sql())
         }
         PhysicalPlan::Projection { exprs, input } => {
             let base = physical_to_sql(input);
@@ -448,42 +638,12 @@ pub fn physical_to_sql(plan: &PhysicalPlan) -> String {
             input,
         } => {
             let base = physical_to_sql(input);
-            let order_list = order_by
-                .iter()
-                .map(|item| {
-                    let dir = if item.asc { "asc" } else { "desc" };
-                    let mut rendered = format!("{} {dir}", item.expr.to_sql());
-                    if let Some(nulls_first) = item.nulls_first {
-                        if nulls_first {
-                            rendered.push_str(" nulls first");
-                        } else {
-                            rendered.push_str(" nulls last");
-                        }
-                    }
-                    rendered
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let order_list = render_order_by(order_by).join(", ");
             format!("select * from ({base}) as t order by {order_list} limit {limit}")
         }
         PhysicalPlan::Sort { order_by, input } => {
             let base = physical_to_sql(input);
-            let order_list = order_by
-                .iter()
-                .map(|item| {
-                    let dir = if item.asc { "asc" } else { "desc" };
-                    let mut rendered = format!("{} {dir}", item.expr.to_sql());
-                    if let Some(nulls_first) = item.nulls_first {
-                        if nulls_first {
-                            rendered.push_str(" nulls first");
-                        } else {
-                            rendered.push_str(" nulls last");
-                        }
-                    }
-                    rendered
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let order_list = render_order_by(order_by).join(", ");
             format!("select * from ({base}) as t order by {order_list}")
         }
         PhysicalPlan::Limit {

@@ -682,6 +682,11 @@ impl PipelineRunner {
                 lines.extend(physical_output.lines().map(|line: &str| line.to_string()));
                 Ok(lines)
             }
+            Statement::Analyze(analyze) => {
+                self.adapter
+                    .analyze_table(&analyze.table, &mut self.stats)?;
+                Ok(vec!["ok".to_string()])
+            }
             _ => {
                 let env = StatementEnvelope::new(statement, StatementContext::new(sql));
                 let authorizer = CliAuthorizer;
@@ -733,6 +738,11 @@ impl PipelineRunner {
                 lines.extend(physical_output.lines().map(|line| line.to_string()));
                 Ok(lines)
             }
+            Statement::Analyze(analyze) => {
+                self.adapter
+                    .analyze_table(&analyze.table, &mut self.stats)?;
+                Ok(vec!["ok".to_string()])
+            }
             other => {
                 let env = StatementEnvelope::new(other, StatementContext::new(sql));
                 let authorizer = CliAuthorizer;
@@ -783,6 +793,13 @@ impl Adapter {
         match self {
             Adapter::Duck(adapter) => adapter.execute(plan),
             Adapter::Mock(adapter) => adapter.execute(plan),
+        }
+    }
+
+    fn analyze_table(&self, table: &str, stats: &mut StatsCache) -> chryso::ChrysoResult<()> {
+        match self {
+            Adapter::Duck(adapter) => adapter.analyze_table(table, stats),
+            Adapter::Mock(_) => Err(chryso::ChrysoError::new("analyze requires duckdb adapter")),
         }
     }
 }
