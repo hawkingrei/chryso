@@ -10,3 +10,4 @@ paper/
 .cache
 deps-download/
 deps-install/
+bazel-*
