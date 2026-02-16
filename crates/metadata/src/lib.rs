@@ -7,6 +7,8 @@ pub struct StatsCache {
     column_stats: HashMap<(String, String), ColumnStats>,
     table_hits: RefCell<HashMap<String, usize>>,
     column_hits: RefCell<HashMap<(String, String), usize>>,
+    table_misses: RefCell<usize>,
+    column_misses: RefCell<usize>,
     max_table_entries: usize,
     max_column_entries: usize,
 }
@@ -18,6 +20,8 @@ impl StatsCache {
             column_stats: HashMap::new(),
             table_hits: RefCell::new(HashMap::new()),
             column_hits: RefCell::new(HashMap::new()),
+            table_misses: RefCell::new(0),
+            column_misses: RefCell::new(0),
             max_table_entries: 128,
             max_column_entries: 1024,
         }
@@ -29,6 +33,8 @@ impl StatsCache {
             column_stats: HashMap::new(),
             table_hits: RefCell::new(HashMap::new()),
             column_hits: RefCell::new(HashMap::new()),
+            table_misses: RefCell::new(0),
+            column_misses: RefCell::new(0),
             max_table_entries,
             max_column_entries,
         }
@@ -53,12 +59,15 @@ impl StatsCache {
     }
 
     pub fn table_stats(&self, table: &str) -> Option<&TableStats> {
-        if self.table_stats.contains_key(table) {
+        if let Some(stats) = self.table_stats.get(table) {
             let mut hits = self.table_hits.borrow_mut();
             let entry = hits.entry(table.to_string()).or_insert(0);
             *entry += 1;
+            Some(stats)
+        } else {
+            *self.table_misses.borrow_mut() += 1;
+            None
         }
-        self.table_stats.get(table)
     }
 
     pub fn insert_column_stats(
@@ -75,12 +84,31 @@ impl StatsCache {
 
     pub fn column_stats(&self, table: &str, column: &str) -> Option<&ColumnStats> {
         let key = (table.to_string(), column.to_string());
-        if self.column_stats.contains_key(&key) {
+        if let Some(stats) = self.column_stats.get(&key) {
             let mut hits = self.column_hits.borrow_mut();
             let entry = hits.entry(key.clone()).or_insert(0);
             *entry += 1;
+            Some(stats)
+        } else {
+            *self.column_misses.borrow_mut() += 1;
+            None
         }
-        self.column_stats.get(&key)
+    }
+
+    pub fn status(&self) -> StatsCacheStatus {
+        let table_hits = self.table_hits.borrow().values().copied().sum();
+        let column_hits = self.column_hits.borrow().values().copied().sum();
+        StatsCacheStatus {
+            table_entries: self.table_stats.len(),
+            column_entries: self.column_stats.len(),
+            max_table_entries: self.max_table_entries,
+            max_column_entries: self.max_column_entries,
+            table_hits,
+            table_misses: *self.table_misses.borrow(),
+            column_hits,
+            column_misses: *self.column_misses.borrow(),
+            estimated_memory_bytes: self.estimated_memory_bytes(),
+        }
     }
 
     fn evict_tables_if_needed(&mut self) {
@@ -116,6 +144,47 @@ impl StatsCache {
             }
         }
     }
+
+    fn estimated_memory_bytes(&self) -> usize {
+        let mut bytes = std::mem::size_of::<Self>();
+        bytes += self
+            .table_stats
+            .iter()
+            .map(|(table, _)| {
+                std::mem::size_of::<String>() + table.len() + std::mem::size_of::<TableStats>()
+            })
+            .sum::<usize>();
+        bytes += self
+            .column_stats
+            .iter()
+            .map(|((table, column), _)| {
+                std::mem::size_of::<String>() * 2
+                    + table.len()
+                    + column.len()
+                    + std::mem::size_of::<ColumnStats>()
+            })
+            .sum::<usize>();
+        bytes += self
+            .table_hits
+            .borrow()
+            .iter()
+            .map(|(table, _)| {
+                std::mem::size_of::<String>() + table.len() + std::mem::size_of::<usize>()
+            })
+            .sum::<usize>();
+        bytes += self
+            .column_hits
+            .borrow()
+            .iter()
+            .map(|((table, column), _)| {
+                std::mem::size_of::<String>() * 2
+                    + table.len()
+                    + column.len()
+                    + std::mem::size_of::<usize>()
+            })
+            .sum::<usize>();
+        bytes
+    }
 }
 
 impl Default for StatsCache {
@@ -133,6 +202,29 @@ pub struct TableStats {
 pub struct ColumnStats {
     pub distinct_count: f64,
     pub null_fraction: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatsCacheStatus {
+    pub table_entries: usize,
+    pub column_entries: usize,
+    pub max_table_entries: usize,
+    pub max_column_entries: usize,
+    pub table_hits: usize,
+    pub table_misses: usize,
+    pub column_hits: usize,
+    pub column_misses: usize,
+    pub estimated_memory_bytes: usize,
+}
+
+impl StatsCacheStatus {
+    pub fn loaded_entries(&self) -> usize {
+        self.table_entries + self.column_entries
+    }
+
+    pub fn missing_lookups(&self) -> usize {
+        self.table_misses + self.column_misses
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -307,5 +399,35 @@ mod tests {
 
         assert_eq!(tables, vec!["a", "b"]);
         assert_eq!(columns, vec![("a", "b"), ("a", "z"), ("b", "y")]);
+    }
+
+    #[test]
+    fn stats_cache_status_tracks_hits_and_misses() {
+        let mut cache = StatsCache::new_with_capacity(2, 2);
+        cache.insert_table_stats("users", TableStats { row_count: 3.0 });
+        cache.insert_column_stats(
+            "users",
+            "id",
+            ColumnStats {
+                distinct_count: 3.0,
+                null_fraction: 0.0,
+            },
+        );
+
+        let _ = cache.table_stats("users");
+        let _ = cache.table_stats("missing_table");
+        let _ = cache.column_stats("users", "id");
+        let _ = cache.column_stats("users", "missing_col");
+
+        let status = cache.status();
+        assert_eq!(status.table_entries, 1);
+        assert_eq!(status.column_entries, 1);
+        assert_eq!(status.table_hits, 1);
+        assert_eq!(status.table_misses, 1);
+        assert_eq!(status.column_hits, 1);
+        assert_eq!(status.column_misses, 1);
+        assert_eq!(status.loaded_entries(), 2);
+        assert_eq!(status.missing_lookups(), 2);
+        assert!(status.estimated_memory_bytes > 0);
     }
 }

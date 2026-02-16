@@ -37,6 +37,12 @@ Run the CLI (requires DuckDB feature):
 cargo run --bin chryso-cli --features duckdb
 ```
 
+Build with Bazel:
+```bash
+bazel build //:chryso
+bazel build //:chryso_cli
+```
+
 Run the DuckDB demo:
 ```bash
 cargo run --example duckdb_demo --features duckdb
@@ -78,6 +84,7 @@ CHRYSO_RECORD=1 cargo test --test plan_snapshot
 - `docs/ARCHITECTURE.md` for the planning pipeline and module overview
 - `docs/RULES.md` for rule conventions and current rule set
 - `docs/ADAPTERS.md` for adapter design
+- `docs/BAZEL.md` for Bazel targets and scope
 - `docs/ROADMAP.md` for milestones and TODOs
 
 ## Roadmap (Highlights)

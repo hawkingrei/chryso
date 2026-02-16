@@ -1,0 +1,54 @@
+load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+aliases(
+    name = "aliases",
+)
+
+rust_library(
+    name = "chryso",
+    crate_name = "chryso",
+    crate_root = "src/lib.rs",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin/**"],
+    ),
+    edition = "2024",
+    deps = all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+)
+
+rust_library(
+    name = "chryso_duckdb",
+    crate_name = "chryso",
+    crate_features = ["duckdb"],
+    crate_root = "src/lib.rs",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin/**"],
+    ),
+    edition = "2024",
+    deps = all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+)
+
+rust_binary(
+    name = "chryso_tune",
+    crate_name = "chryso_tune",
+    srcs = ["src/bin/chryso-tune.rs"],
+    edition = "2024",
+    deps = [":chryso"] + all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+)
+
+rust_binary(
+    name = "chryso_cli",
+    crate_name = "chryso_cli",
+    srcs = ["src/bin/chryso-cli.rs"],
+    edition = "2024",
+    deps = [":chryso_duckdb"] + all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+)
+

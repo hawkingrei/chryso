@@ -1,0 +1,30 @@
+module(
+    name = "chryso",
+    version = "0.0.2",
+)
+
+bazel_dep(name = "rules_rust", version = "0.58.0")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(edition = "2024")
+use_repo(rust, "rust_toolchains")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crate_index",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = [
+        "//:Cargo.toml",
+        "//crates/adapter:Cargo.toml",
+        "//crates/adapter-duckdb:Cargo.toml",
+        "//crates/adapter-velox:Cargo.toml",
+        "//crates/core:Cargo.toml",
+        "//crates/metadata:Cargo.toml",
+        "//crates/optimizer:Cargo.toml",
+        "//crates/parser:Cargo.toml",
+        "//:crates/parser_yacc/Cargo.toml",
+        "//crates/planner:Cargo.toml",
+        "//:ffi/Cargo.toml",
+    ],
+)
+use_repo(crate, "crate_index")
