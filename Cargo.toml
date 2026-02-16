@@ -10,8 +10,8 @@ homepage = "https://github.com/hawkingrei/chryso"
 documentation = "https://docs.rs/chryso"
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 [dev-dependencies]
 serde_json = "1"
