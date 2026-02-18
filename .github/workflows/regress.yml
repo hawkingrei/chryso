@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   parser-postgres-regress-subset:
@@ -14,14 +18,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly-2026-01-19
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
           cache-targets: false
+
       - name: Run postgres regress subset parser test
         run: cargo test --test postgres_regress_subset -- --nocapture
