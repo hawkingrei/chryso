@@ -5,3 +5,6 @@ select_distinct.sql
 select_distinct_on.sql
 select_having.sql
 union.sql
+boolean.sql
+case.sql
+join.sql
