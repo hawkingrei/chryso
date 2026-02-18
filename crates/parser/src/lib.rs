@@ -1237,27 +1237,16 @@ impl Parser {
             } else if self.consume_keyword(Keyword::In) {
                 return Ok(self.parse_in_payload(expr)?);
             } else if self.consume_keyword(Keyword::Is) {
+                let not = self.consume_keyword(Keyword::Not);
                 if self.consume_keyword(Keyword::Distinct) {
                     self.expect_keyword(Keyword::From)?;
                     let rhs = self.parse_additive()?;
-                    return Ok(build_is_distinct_from_expr(expr, rhs, false));
-                }
-                if self.consume_keyword(Keyword::Not) {
-                    if self.consume_keyword(Keyword::Distinct) {
-                        self.expect_keyword(Keyword::From)?;
-                        let rhs = self.parse_additive()?;
-                        return Ok(build_is_distinct_from_expr(expr, rhs, true));
-                    }
-                    self.expect_keyword(Keyword::Null)?;
-                    return Ok(Expr::IsNull {
-                        expr: Box::new(expr),
-                        negated: true,
-                    });
+                    return Ok(build_is_distinct_from_expr(expr, rhs, not));
                 }
                 self.expect_keyword(Keyword::Null)?;
                 return Ok(Expr::IsNull {
                     expr: Box::new(expr),
-                    negated: false,
+                    negated: not,
                 });
             } else if self.consume_keyword(Keyword::Like) {
                 return Ok(self.parse_like_payload(expr, "like")?);
@@ -1901,38 +1890,59 @@ fn rewrite_in_list(expr: Expr, list: Vec<Expr>) -> Expr {
 }
 
 fn build_is_distinct_from_expr(left: Expr, right: Expr, negated: bool) -> Expr {
+    // a IS DISTINCT FROM b
+    // = (a IS NULL AND b IS NOT NULL)
+    //   OR (a IS NOT NULL AND b IS NULL)
+    //   OR (a IS NOT NULL AND b IS NOT NULL AND a != b)
+    let left_is_null = Expr::IsNull {
+        expr: Box::new(left.clone()),
+        negated: false,
+    };
+    let left_is_not_null = Expr::IsNull {
+        expr: Box::new(left.clone()),
+        negated: true,
+    };
+    let right_is_null = Expr::IsNull {
+        expr: Box::new(right.clone()),
+        negated: false,
+    };
+    let right_is_not_null = Expr::IsNull {
+        expr: Box::new(right.clone()),
+        negated: true,
+    };
+
+    let null_mismatch_left = Expr::BinaryOp {
+        left: Box::new(left_is_null),
+        op: BinaryOperator::And,
+        right: Box::new(right_is_not_null.clone()),
+    };
+    let null_mismatch_right = Expr::BinaryOp {
+        left: Box::new(left_is_not_null.clone()),
+        op: BinaryOperator::And,
+        right: Box::new(right_is_null),
+    };
+    let neq_when_both_not_null = Expr::BinaryOp {
+        left: Box::new(Expr::BinaryOp {
+            left: Box::new(left_is_not_null),
+            op: BinaryOperator::And,
+            right: Box::new(right_is_not_null),
+        }),
+        op: BinaryOperator::And,
+        right: Box::new(Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinaryOperator::NotEq,
+            right: Box::new(right),
+        }),
+    };
+
     let distinct = Expr::BinaryOp {
         left: Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
-                left: Box::new(left.clone()),
-                op: BinaryOperator::NotEq,
-                right: Box::new(right.clone()),
-            }),
+            left: Box::new(null_mismatch_left),
             op: BinaryOperator::Or,
-            right: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::IsNull {
-                    expr: Box::new(left.clone()),
-                    negated: false,
-                }),
-                op: BinaryOperator::And,
-                right: Box::new(Expr::IsNull {
-                    expr: Box::new(right.clone()),
-                    negated: true,
-                }),
-            }),
+            right: Box::new(null_mismatch_right),
         }),
         op: BinaryOperator::Or,
-        right: Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::IsNull {
-                expr: Box::new(left),
-                negated: true,
-            }),
-            op: BinaryOperator::And,
-            right: Box::new(Expr::IsNull {
-                expr: Box::new(right),
-                negated: false,
-            }),
-        }),
+        right: Box::new(neq_when_both_not_null),
     };
     if negated {
         Expr::UnaryOp {
