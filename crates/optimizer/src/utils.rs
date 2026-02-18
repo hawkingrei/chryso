@@ -48,6 +48,10 @@ fn collect_identifiers_inner(expr: &Expr, idents: &mut HashSet<String>) {
             collect_identifiers_inner(left, idents);
             collect_identifiers_inner(right, idents);
         }
+        Expr::IsDistinctFrom { left, right, .. } => {
+            collect_identifiers_inner(left, idents);
+            collect_identifiers_inner(right, idents);
+        }
         Expr::IsNull { expr, .. } => {
             collect_identifiers_inner(expr, idents);
         }

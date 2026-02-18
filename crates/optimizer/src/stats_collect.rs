@@ -124,6 +124,10 @@ fn collect_expr_columns(
             collect_expr_columns(left, tables, columns);
             collect_expr_columns(right, tables, columns);
         }
+        Expr::IsDistinctFrom { left, right, .. } => {
+            collect_expr_columns(left, tables, columns);
+            collect_expr_columns(right, tables, columns);
+        }
         Expr::IsNull { expr, .. } => {
             collect_expr_columns(expr, tables, columns);
         }
