@@ -488,51 +488,8 @@ impl Parser {
                 Some(token) => token,
                 None => break,
             };
-            if depth == 0 {
-                if matches!(
-                    token,
-                    Token::Comma
-                        | Token::RParen
-                        | Token::Eq
-                        | Token::NotEq
-                        | Token::Lt
-                        | Token::LtEq
-                        | Token::Gt
-                        | Token::GtEq
-                        | Token::Plus
-                        | Token::Minus
-                        | Token::Star
-                        | Token::Slash
-                        | Token::DoubleColon
-                ) || matches!(
-                    token,
-                    Token::Keyword(
-                        Keyword::From
-                            | Keyword::Where
-                            | Keyword::Group
-                            | Keyword::Having
-                            | Keyword::Qualify
-                            | Keyword::Order
-                            | Keyword::Offset
-                            | Keyword::Limit
-                            | Keyword::Fetch
-                            | Keyword::Join
-                            | Keyword::Left
-                            | Keyword::Cross
-                            | Keyword::Natural
-                            | Keyword::Right
-                            | Keyword::Full
-                            | Keyword::And
-                            | Keyword::Or
-                            | Keyword::When
-                            | Keyword::Then
-                            | Keyword::Else
-                            | Keyword::End
-                            | Keyword::On
-                    )
-                ) {
-                    break;
-                }
+            if depth == 0 && is_type_name_terminator(&token) {
+                break;
             }
             let part = match self.next() {
                 Some(Token::Ident(name)) => name,
@@ -1903,6 +1860,51 @@ fn table_ref_name(table: &TableRef) -> ChrysoResult<String> {
             Err(ChrysoError::new("subquery in FROM requires alias"))
         }
     }
+}
+
+fn is_type_name_terminator(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Comma
+            | Token::RParen
+            | Token::Eq
+            | Token::NotEq
+            | Token::Lt
+            | Token::LtEq
+            | Token::Gt
+            | Token::GtEq
+            | Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::DoubleColon
+    ) || matches!(
+        token,
+        Token::Keyword(
+            Keyword::From
+                | Keyword::Where
+                | Keyword::Group
+                | Keyword::Having
+                | Keyword::Qualify
+                | Keyword::Order
+                | Keyword::Offset
+                | Keyword::Limit
+                | Keyword::Fetch
+                | Keyword::Join
+                | Keyword::Left
+                | Keyword::Cross
+                | Keyword::Natural
+                | Keyword::Right
+                | Keyword::Full
+                | Keyword::And
+                | Keyword::Or
+                | Keyword::When
+                | Keyword::Then
+                | Keyword::Else
+                | Keyword::End
+                | Keyword::On
+        )
+    )
 }
 
 fn build_using_on(left_name: &str, right_name: &str, columns: Vec<String>) -> Expr {
