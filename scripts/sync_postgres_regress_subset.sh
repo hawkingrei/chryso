@@ -9,9 +9,18 @@ dest_dir="$repo_root/crates/parser/tests/testdata/postgres_regress/sql"
 mkdir -p "$dest_dir"
 rm -f "$dest_dir"/*.sql
 
-while IFS= read -r file; do
-  [[ -z "$file" ]] && continue
-  cp "$source_dir/$file" "$dest_dir/$file"
+while IFS= read -r line; do
+  trimmed="${line#"${line%%[![:space:]]*}"}"
+  [[ -z "$trimmed" ]] && continue
+  [[ "$trimmed" == \#* ]] && continue
+
+  src="$source_dir/$trimmed"
+  if [[ ! -f "$src" ]]; then
+    echo "missing source file listed in manifest: $src" >&2
+    exit 1
+  fi
+
+  cp "$src" "$dest_dir/$trimmed"
 done < "$manifest"
 
-echo "synced postgres regress subset into $dest_dir"
+echo "synced postgres regress subset to $dest_dir"

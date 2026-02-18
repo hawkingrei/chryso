@@ -123,6 +123,10 @@ fn validate_expr_functions(
             validate_expr_functions(left, registry)?;
             validate_expr_functions(right, registry)
         }
+        chryso_core::ast::Expr::IsDistinctFrom { left, right, .. } => {
+            validate_expr_functions(left, registry)?;
+            validate_expr_functions(right, registry)
+        }
         chryso_core::ast::Expr::IsNull { expr, .. } => validate_expr_functions(expr, registry),
         chryso_core::ast::Expr::UnaryOp { expr, .. } => validate_expr_functions(expr, registry),
         chryso_core::ast::Expr::Subquery(select) | chryso_core::ast::Expr::Exists(select) => {

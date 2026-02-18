@@ -1,6 +1,6 @@
-# PostgreSQL Regress Subset for Chryso
+# PostgreSQL Regress Subset
 
-This directory stores a curated subset of upstream PostgreSQL regression SQL files
+This directory vendors a curated subset of upstream PostgreSQL regress SQL files
 for parser coverage expansion.
 
 ## Source
@@ -8,6 +8,10 @@ for parser coverage expansion.
 Default source path in this repository:
 
 `.cache/postgres/src/test/regress/sql`
+
+Selection manifest:
+
+`crates/parser/tests/testdata/postgres_regress/files.txt`
 
 ## Sync
 
@@ -25,6 +29,8 @@ Or pass a custom upstream SQL directory:
 
 ## Scope
 
-The corresponding test (`tests/postgres_regress_subset.rs`) currently extracts
-`SELECT`/`WITH` statements and tracks parser coverage against this subset.
-To expand coverage, append more SQL files into `files.txt` and rerun sync.
+The corresponding test (`tests/postgres_regress_subset.rs`) extracts `SELECT` / `WITH`
+statements and tracks parser coverage against this subset.
+
+Some statements are intentionally skipped when current AST shape cannot represent
+them yet (for example expression-based LIMIT/OFFSET values).

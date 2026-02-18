@@ -5,26 +5,11 @@ use std::path::Path;
 
 const FILE_LIST: &str = "crates/parser/tests/testdata/postgres_regress/files.txt";
 const SQL_DIR: &str = "crates/parser/tests/testdata/postgres_regress/sql";
-const MIN_SELECTED_STATEMENTS: usize = 60;
-const MIN_SIMPLE_PARSED: usize = 40;
-const MIN_YACC_PARSED: usize = 30;
 
-const UNSUPPORTED_SNIPPETS: &[&str] = &[
-    "::",
-    " using ",
-    " natural join ",
-    " fetch first ",
-    " for update",
-    " for no key",
-    " skip locked",
-    " distinct on ",
-    " row(",
-    " row_to_json(",
-    " array[",
-    "generate_series(",
-    "pg_typeof(",
-    "\\",
-];
+// These thresholds keep the test stable while still enforcing corpus value.
+const MIN_SELECTED_STATEMENTS: usize = 120;
+const MIN_SIMPLE_PARSED: usize = 90;
+const MIN_YACC_PARSED: usize = 40;
 
 #[test]
 fn postgres_regress_subset_select_with_parseable() {
@@ -39,6 +24,7 @@ fn postgres_regress_subset_select_with_parseable() {
     let mut selected = 0usize;
     let mut simple_parsed = 0usize;
     let mut yacc_parsed = 0usize;
+
     let mut simple_failures = Vec::new();
     let mut yacc_failures = Vec::new();
 
@@ -46,30 +32,30 @@ fn postgres_regress_subset_select_with_parseable() {
         let path = Path::new(SQL_DIR).join(&file);
         let sql = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
+
         for (idx, statement) in split_sql_statements(&sql).into_iter().enumerate() {
             if !is_candidate_statement(&statement) {
                 continue;
             }
             selected += 1;
-            let statement = statement.trim();
 
-            if let Err(err) = simple_parser.parse(statement) {
+            if let Err(err) = simple_parser.parse(&statement) {
                 simple_failures.push(format!(
                     "{}#{} simple parse failed: {err} | {}",
                     file,
                     idx + 1,
-                    abbreviate(statement)
+                    abbreviate(&statement)
                 ));
                 continue;
             }
             simple_parsed += 1;
 
-            if let Err(err) = yacc_parser.parse(statement) {
+            if let Err(err) = yacc_parser.parse(&statement) {
                 yacc_failures.push(format!(
                     "{}#{} yacc parse failed: {err} | {}",
                     file,
                     idx + 1,
-                    abbreviate(statement)
+                    abbreviate(&statement)
                 ));
             } else {
                 yacc_parsed += 1;
@@ -90,7 +76,7 @@ fn postgres_regress_subset_select_with_parseable() {
         "postgres regress subset simple parser coverage too low: simple_parsed={simple_parsed}, expected at least {MIN_SIMPLE_PARSED}\n{}",
         simple_failures
             .iter()
-            .take(20)
+            .take(40)
             .cloned()
             .collect::<Vec<_>>()
             .join("\n")
@@ -100,7 +86,7 @@ fn postgres_regress_subset_select_with_parseable() {
         "postgres regress subset yacc parser coverage too low: yacc_parsed={yacc_parsed}, expected at least {MIN_YACC_PARSED}\n{}",
         yacc_failures
             .iter()
-            .take(20)
+            .take(40)
             .cloned()
             .collect::<Vec<_>>()
             .join("\n")
@@ -113,8 +99,8 @@ fn load_file_list(path: &Path) -> Vec<String> {
     content
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.to_string())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -123,15 +109,29 @@ fn is_candidate_statement(statement: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
+
     let first = first_keyword(trimmed);
     if !matches!(first.as_deref(), Some("select") | Some("with")) {
         return false;
     }
 
     let lowered = trimmed.to_ascii_lowercase();
-    !UNSUPPORTED_SNIPPETS
-        .iter()
-        .any(|snippet| lowered.contains(snippet))
+
+    // Current AST keeps LIMIT/OFFSET as numeric values only.
+    if lowered.contains("limit (") || lowered.contains("offset (") {
+        return false;
+    }
+
+    // Keep this subset focused on query shapes representable by current AST.
+    if lowered.contains("array[") {
+        return false;
+    }
+
+    if lowered.contains("person* ") {
+        return false;
+    }
+
+    true
 }
 
 fn first_keyword(sql: &str) -> Option<String> {
@@ -139,6 +139,7 @@ fn first_keyword(sql: &str) -> Option<String> {
     while matches!(chars.peek(), Some(ch) if ch.is_whitespace()) {
         chars.next();
     }
+
     let mut keyword = String::new();
     while let Some(ch) = chars.peek().copied() {
         if ch.is_ascii_alphabetic() || ch == '_' {
@@ -148,6 +149,7 @@ fn first_keyword(sql: &str) -> Option<String> {
             break;
         }
     }
+
     if keyword.is_empty() {
         None
     } else {
@@ -158,81 +160,153 @@ fn first_keyword(sql: &str) -> Option<String> {
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
-    let mut chars = sql.chars().peekable();
+
+    let chars: Vec<char> = sql.chars().collect();
+    let mut i = 0usize;
+
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut in_line_comment = false;
     let mut in_block_comment = false;
+    let mut dollar_quote_tag: Option<String> = None;
 
-    while let Some(ch) = chars.next() {
+    while i < chars.len() {
+        let ch = chars[i];
+
         if in_line_comment {
             if ch == '\n' {
                 in_line_comment = false;
-                current.push('\n');
             }
+            i += 1;
             continue;
         }
+
         if in_block_comment {
-            if ch == '*' && matches!(chars.peek(), Some('/')) {
-                chars.next();
+            if ch == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
                 in_block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
             }
             continue;
         }
+
+        if let Some(tag) = &dollar_quote_tag {
+            if starts_with_at(&chars, i, tag) {
+                current.push_str(tag);
+                i += tag.len();
+                dollar_quote_tag = None;
+            } else {
+                current.push(ch);
+                i += 1;
+            }
+            continue;
+        }
+
         if !in_single_quote && !in_double_quote {
-            if ch == '-' && matches!(chars.peek(), Some('-')) {
-                chars.next();
+            if ch == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
                 in_line_comment = true;
+                i += 2;
                 continue;
             }
-            if ch == '/' && matches!(chars.peek(), Some('*')) {
-                chars.next();
+
+            if ch == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
                 in_block_comment = true;
+                i += 2;
                 continue;
+            }
+
+            if ch == '$' {
+                if let Some(tag) = read_dollar_tag(&chars, i) {
+                    current.push_str(&tag);
+                    i += tag.len();
+                    dollar_quote_tag = Some(tag);
+                    continue;
+                }
             }
         }
-        if !in_double_quote && ch == '\'' {
+
+        if ch == '\'' && !in_double_quote {
             current.push(ch);
-            if in_single_quote && matches!(chars.peek(), Some('\'')) {
-                current.push(chars.next().expect("peeked quote"));
+            if in_single_quote && i + 1 < chars.len() && chars[i + 1] == '\'' {
+                current.push(chars[i + 1]);
+                i += 2;
             } else {
                 in_single_quote = !in_single_quote;
+                i += 1;
             }
             continue;
         }
-        if !in_single_quote && ch == '"' {
+
+        if ch == '"' && !in_single_quote {
             current.push(ch);
-            if in_double_quote && matches!(chars.peek(), Some('"')) {
-                current.push(chars.next().expect("peeked quote"));
+            if in_double_quote && i + 1 < chars.len() && chars[i + 1] == '"' {
+                current.push(chars[i + 1]);
+                i += 2;
             } else {
                 in_double_quote = !in_double_quote;
+                i += 1;
             }
             continue;
         }
+
         if !in_single_quote && !in_double_quote && ch == ';' {
             let trimmed = current.trim();
             if !trimmed.is_empty() {
                 statements.push(trimmed.to_string());
             }
             current.clear();
+            i += 1;
             continue;
         }
+
         current.push(ch);
+        i += 1;
     }
 
     let trimmed = current.trim();
     if !trimmed.is_empty() {
         statements.push(trimmed.to_string());
     }
+
     statements
 }
 
+fn read_dollar_tag(chars: &[char], start: usize) -> Option<String> {
+    if chars[start] != '$' {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '$' {
+            let tag: String = chars[start..=i].iter().collect();
+            return Some(tag);
+        }
+        if !(ch.is_ascii_alphanumeric() || ch == '_') {
+            return None;
+        }
+        i += 1;
+    }
+    None
+}
+
+fn starts_with_at(chars: &[char], at: usize, pat: &str) -> bool {
+    let pat_chars: Vec<char> = pat.chars().collect();
+    if at + pat_chars.len() > chars.len() {
+        return false;
+    }
+    chars[at..at + pat_chars.len()] == pat_chars
+}
+
 fn abbreviate(statement: &str) -> String {
-    const MAX_LEN: usize = 160;
-    let compact = statement.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.len() <= MAX_LEN {
-        compact
+    const MAX_LEN: usize = 140;
+    let one_line = statement.replace('\n', " ").replace('\t', " ");
+    let collapsed = one_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= MAX_LEN {
+        collapsed
     } else {
-        format!("{}...", &compact[..MAX_LEN])
+        format!("{}...", &collapsed[..MAX_LEN])
     }
 }

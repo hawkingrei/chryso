@@ -42,6 +42,16 @@ pub fn serialize_expr(expr: &Expr) -> String {
         Expr::IsNull { expr, negated } => {
             format!("isnull:{}({})", negated, serialize_expr(expr))
         }
+        Expr::IsDistinctFrom {
+            left,
+            right,
+            negated,
+        } => format!(
+            "isdistinct:{}({},{})",
+            negated,
+            serialize_expr(left),
+            serialize_expr(right)
+        ),
         Expr::BinaryOp { left, op, right } => format!(
             "binop:{:?}({},{})",
             op,

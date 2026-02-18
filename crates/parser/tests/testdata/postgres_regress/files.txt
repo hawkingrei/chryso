@@ -1,4 +1,7 @@
+# PostgreSQL regress SQL files synced into this repo.
+# Keep this list stable for deterministic CI coverage.
 limit.sql
 select_distinct.sql
+select_distinct_on.sql
 select_having.sql
 union.sql

@@ -107,6 +107,18 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
                     expr,
                     negated: !negated,
                 },
+                (
+                    UnaryOperator::Not,
+                    Expr::IsDistinctFrom {
+                        left,
+                        right,
+                        negated,
+                    },
+                ) => Expr::IsDistinctFrom {
+                    left,
+                    right,
+                    negated: !negated,
+                },
                 (UnaryOperator::Not, Expr::BinaryOp { left, op, right }) => match op {
                     BinaryOperator::And => Expr::BinaryOp {
                         left: Box::new(negate_expr(*left)),
@@ -136,6 +148,15 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
         }
         Expr::IsNull { expr, negated } => Expr::IsNull {
             expr: Box::new(rewrite_expr(expr)),
+            negated: *negated,
+        },
+        Expr::IsDistinctFrom {
+            left,
+            right,
+            negated,
+        } => Expr::IsDistinctFrom {
+            left: Box::new(rewrite_expr(left)),
+            right: Box::new(rewrite_expr(right)),
             negated: *negated,
         },
         Expr::FunctionCall { name, args } => Expr::FunctionCall {

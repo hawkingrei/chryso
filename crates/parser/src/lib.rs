@@ -53,6 +53,7 @@ enum Token {
     String(String),
     Comma,
     Dot,
+    DoubleColon,
     Star,
     LParen,
     RParen,
@@ -126,6 +127,7 @@ enum Keyword {
     First,
     Next,
     Only,
+    Ties,
     Top,
     Qualify,
     True,
@@ -486,10 +488,8 @@ impl Parser {
                 Some(token) => token,
                 None => break,
             };
-            if depth == 0 {
-                if matches!(token, Token::Comma | Token::RParen) {
-                    break;
-                }
+            if depth == 0 && is_type_name_terminator(&token) {
+                break;
             }
             let part = match self.next() {
                 Some(Token::Ident(name)) => name,
@@ -768,8 +768,12 @@ impl Parser {
             } else {
                 return Err(ChrysoError::new("FETCH expects ROW or ROWS"));
             };
-            if !self.consume_keyword(Keyword::Only) {
-                return Err(ChrysoError::new("FETCH expects ONLY"));
+            if self.consume_keyword(Keyword::Only) {
+                // no-op
+            } else if self.consume_keyword(Keyword::With) {
+                self.expect_keyword(Keyword::Ties)?;
+            } else {
+                return Err(ChrysoError::new("FETCH expects ONLY or WITH TIES"));
             }
             if limit.is_none() {
                 limit = Some(fetch_value);
@@ -967,7 +971,9 @@ impl Parser {
         let mut items = Vec::new();
         loop {
             let expr = self.parse_expr()?;
-            let asc = if self.consume_keyword(Keyword::Asc) {
+            let asc = if self.consume_keyword(Keyword::Using) {
+                self.parse_order_by_using_operator()?
+            } else if self.consume_keyword(Keyword::Asc) {
                 true
             } else if self.consume_keyword(Keyword::Desc) {
                 false
@@ -995,6 +1001,34 @@ impl Parser {
             }
         }
         Ok(items)
+    }
+
+    fn parse_order_by_using_operator(&mut self) -> ChrysoResult<bool> {
+        match self.next() {
+            Some(Token::Lt) | Some(Token::LtEq) => Ok(true),
+            Some(Token::Gt) | Some(Token::GtEq) => Ok(false),
+            Some(Token::Ident(op)) => {
+                let lower = op.to_ascii_lowercase();
+                match lower.as_str() {
+                    "<" | "<=" => Ok(true),
+                    ">" | ">=" => Ok(false),
+                    _ => Err(ChrysoError::new(format!(
+                        "ORDER BY USING expects < or > operator, found {op}"
+                    ))),
+                }
+            }
+            Some(Token::Keyword(keyword)) => Err(ChrysoError::new(format!(
+                "ORDER BY USING expects operator, found {}",
+                keyword_label(keyword)
+            ))),
+            other => Err(ChrysoError::new(format!(
+                "ORDER BY USING expects operator, found {}",
+                other
+                    .as_ref()
+                    .map(token_label)
+                    .unwrap_or_else(|| "end of input".to_string())
+            ))),
+        }
     }
 
     fn parse_limit_value(&mut self) -> ChrysoResult<u64> {
@@ -1160,11 +1194,20 @@ impl Parser {
             } else if self.consume_keyword(Keyword::In) {
                 return Ok(self.parse_in_payload(expr)?);
             } else if self.consume_keyword(Keyword::Is) {
-                let negated = self.consume_keyword(Keyword::Not);
+                let not = self.consume_keyword(Keyword::Not);
+                if self.consume_keyword(Keyword::Distinct) {
+                    self.expect_keyword(Keyword::From)?;
+                    let rhs = self.parse_additive()?;
+                    return Ok(Expr::IsDistinctFrom {
+                        left: Box::new(expr),
+                        right: Box::new(rhs),
+                        negated: not,
+                    });
+                }
                 self.expect_keyword(Keyword::Null)?;
                 return Ok(Expr::IsNull {
                     expr: Box::new(expr),
-                    negated,
+                    negated: not,
                 });
             } else if self.consume_keyword(Keyword::Like) {
                 return Ok(self.parse_like_payload(expr, "like")?);
@@ -1310,7 +1353,8 @@ impl Parser {
     }
 
     fn parse_multiplicative(&mut self) -> ChrysoResult<Expr> {
-        let mut expr = self.parse_unary()?;
+        let first = self.parse_unary()?;
+        let mut expr = self.parse_postfix(first)?;
         loop {
             let op = if self.consume_token(&Token::Star) {
                 Some(BinaryOperator::Mul)
@@ -1322,7 +1366,8 @@ impl Parser {
             let Some(op) = op else {
                 break;
             };
-            let rhs = self.parse_unary()?;
+            let rhs_unary = self.parse_unary()?;
+            let rhs = self.parse_postfix(rhs_unary)?;
             expr = Expr::BinaryOp {
                 left: Box::new(expr),
                 op,
@@ -1352,6 +1397,24 @@ impl Parser {
             });
         }
         self.parse_primary()
+    }
+
+    fn parse_postfix(&mut self, mut expr: Expr) -> ChrysoResult<Expr> {
+        loop {
+            if self.consume_token(&Token::DoubleColon) {
+                let data_type = self.parse_type_name()?;
+                if data_type.is_empty() {
+                    return Err(ChrysoError::new("cast operator expects a type name"));
+                }
+                expr = Expr::FunctionCall {
+                    name: "cast".to_string(),
+                    args: vec![expr, Expr::Literal(Literal::String(data_type))],
+                };
+                continue;
+            }
+            break;
+        }
+        Ok(expr)
     }
 
     fn parse_primary(&mut self) -> ChrysoResult<Expr> {
@@ -1799,6 +1862,51 @@ fn table_ref_name(table: &TableRef) -> ChrysoResult<String> {
     }
 }
 
+fn is_type_name_terminator(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Comma
+            | Token::RParen
+            | Token::Eq
+            | Token::NotEq
+            | Token::Lt
+            | Token::LtEq
+            | Token::Gt
+            | Token::GtEq
+            | Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::DoubleColon
+    ) || matches!(
+        token,
+        Token::Keyword(
+            Keyword::From
+                | Keyword::Where
+                | Keyword::Group
+                | Keyword::Having
+                | Keyword::Qualify
+                | Keyword::Order
+                | Keyword::Offset
+                | Keyword::Limit
+                | Keyword::Fetch
+                | Keyword::Join
+                | Keyword::Left
+                | Keyword::Cross
+                | Keyword::Natural
+                | Keyword::Right
+                | Keyword::Full
+                | Keyword::And
+                | Keyword::Or
+                | Keyword::When
+                | Keyword::Then
+                | Keyword::Else
+                | Keyword::End
+                | Keyword::On
+        )
+    )
+}
+
 fn build_using_on(left_name: &str, right_name: &str, columns: Vec<String>) -> Expr {
     let mut iter = columns.into_iter();
     let first = iter.next().expect("using columns should be non-empty");
@@ -1829,6 +1937,7 @@ fn token_label(token: &Token) -> String {
         Token::String(value) => format!("string('{value}')"),
         Token::Comma => ",".to_string(),
         Token::Dot => ".".to_string(),
+        Token::DoubleColon => "::".to_string(),
         Token::Star => "*".to_string(),
         Token::LParen => "(".to_string(),
         Token::RParen => ")".to_string(),
@@ -1898,6 +2007,7 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::First => "first",
         Keyword::Next => "next",
         Keyword::Only => "only",
+        Keyword::Ties => "ties",
         Keyword::Top => "top",
         Keyword::Qualify => "qualify",
         Keyword::Analyze => "analyze",
@@ -1958,6 +2068,11 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
         if c == '.' {
             tokens.push(Token::Dot);
             index += 1;
+            continue;
+        }
+        if c == ':' && index + 1 < chars.len() && chars[index + 1] == ':' {
+            tokens.push(Token::DoubleColon);
+            index += 2;
             continue;
         }
         if c == '(' {
@@ -2178,6 +2293,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "first" => Some(Keyword::First),
         "next" => Some(Keyword::Next),
         "only" => Some(Keyword::Only),
+        "ties" => Some(Keyword::Ties),
         "top" => Some(Keyword::Top),
         "qualify" => Some(Keyword::Qualify),
         "in" => Some(Keyword::In),
@@ -4342,5 +4458,85 @@ mod tests {
             panic!("expected values source");
         };
         assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn parse_postgres_double_colon_cast() {
+        let sql = "select ''::text as s, 1::int4 as i";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.projection.len(), 2);
+        for item in &select.projection {
+            let Expr::FunctionCall { name, args } = &item.expr else {
+                panic!("expected cast expression");
+            };
+            assert_eq!(name, "cast");
+            assert_eq!(args.len(), 2);
+        }
+    }
+
+    #[test]
+    fn parse_is_distinct_from() {
+        let sql = "select f1 is distinct from 2 from disttable";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::IsDistinctFrom { negated, .. } = &select.projection[0].expr else {
+            panic!("expected is distinct from expression");
+        };
+        assert!(!negated);
+    }
+
+    #[test]
+    fn parse_is_not_distinct_from() {
+        let sql = "select f1 is not distinct from 2 from disttable";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::IsDistinctFrom { negated, .. } = &select.projection[0].expr else {
+            panic!("expected is distinct from expression");
+        };
+        assert!(*negated);
+    }
+
+    #[test]
+    fn parse_order_by_using_operator() {
+        let sql = "select two, ten from onek order by two using <, ten using >";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 2);
+        assert!(select.order_by[0].asc);
+        assert!(!select.order_by[1].asc);
+    }
+
+    #[test]
+    fn parse_fetch_with_ties() {
+        let sql = "select id from sales order by id fetch first 2 rows with ties";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.limit, Some(2));
     }
 }

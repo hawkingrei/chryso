@@ -200,6 +200,11 @@ pub enum Expr {
         expr: Box<Expr>,
         negated: bool,
     },
+    IsDistinctFrom {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        negated: bool,
+    },
     UnaryOp {
         op: UnaryOperator,
         expr: Box<Expr>,
@@ -322,6 +327,17 @@ impl Expr {
                     format!("{} is not null", expr.to_sql())
                 } else {
                     format!("{} is null", expr.to_sql())
+                }
+            }
+            Expr::IsDistinctFrom {
+                left,
+                right,
+                negated,
+            } => {
+                if *negated {
+                    format!("{} is not distinct from {}", left.to_sql(), right.to_sql())
+                } else {
+                    format!("{} is distinct from {}", left.to_sql(), right.to_sql())
                 }
             }
             Expr::UnaryOp { op, expr } => match op {
@@ -455,6 +471,22 @@ impl Expr {
                 },
             ) => left_negated == right_negated && left.structural_eq(right),
             (
+                Expr::IsDistinctFrom {
+                    left: left_lhs,
+                    right: left_rhs,
+                    negated: left_negated,
+                },
+                Expr::IsDistinctFrom {
+                    left: right_lhs,
+                    right: right_rhs,
+                    negated: right_negated,
+                },
+            ) => {
+                left_negated == right_negated
+                    && left_lhs.structural_eq(right_lhs)
+                    && left_rhs.structural_eq(right_rhs)
+            }
+            (
                 Expr::FunctionCall {
                     name: left_name,
                     args: left_args,
@@ -578,6 +610,15 @@ impl Expr {
                 expr: Box::new(expr.normalize()),
                 negated: *negated,
             },
+            Expr::IsDistinctFrom {
+                left,
+                right,
+                negated,
+            } => Expr::IsDistinctFrom {
+                left: Box::new(left.normalize()),
+                right: Box::new(right.normalize()),
+                negated: *negated,
+            },
             Expr::UnaryOp { op, expr } => Expr::UnaryOp {
                 op: *op,
                 expr: Box::new(expr.normalize()),
@@ -651,6 +692,15 @@ fn rewrite_strong_expr(expr: Expr) -> Expr {
             } => *expr,
             Expr::IsNull { expr, negated } => Expr::IsNull {
                 expr,
+                negated: !negated,
+            },
+            Expr::IsDistinctFrom {
+                left,
+                right,
+                negated,
+            } => Expr::IsDistinctFrom {
+                left,
+                right,
                 negated: !negated,
             },
             Expr::BinaryOp { left, op, right } => match op {
