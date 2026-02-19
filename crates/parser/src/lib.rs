@@ -897,18 +897,8 @@ impl Parser {
                 JoinType::Inner
             } else if self.consume_keyword(Keyword::Natural) {
                 natural_join = true;
-                if self.consume_keyword(Keyword::Left) {
-                    let _ = self.consume_keyword(Keyword::Outer);
-                    self.expect_keyword(Keyword::Join)?;
-                    JoinType::Left
-                } else if self.consume_keyword(Keyword::Right) {
-                    let _ = self.consume_keyword(Keyword::Outer);
-                    self.expect_keyword(Keyword::Join)?;
-                    JoinType::Right
-                } else if self.consume_keyword(Keyword::Full) {
-                    let _ = self.consume_keyword(Keyword::Outer);
-                    self.expect_keyword(Keyword::Join)?;
-                    JoinType::Full
+                if let Some(join_type) = self.parse_left_right_full_join_type()? {
+                    join_type
                 } else if self.consume_keyword(Keyword::Inner) {
                     self.expect_keyword(Keyword::Join)?;
                     JoinType::Inner
@@ -917,18 +907,8 @@ impl Parser {
                 } else {
                     return Err(ChrysoError::new("NATURAL expects JOIN"));
                 }
-            } else if self.consume_keyword(Keyword::Left) {
-                let _ = self.consume_keyword(Keyword::Outer);
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Left
-            } else if self.consume_keyword(Keyword::Right) {
-                let _ = self.consume_keyword(Keyword::Outer);
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Right
-            } else if self.consume_keyword(Keyword::Full) {
-                let _ = self.consume_keyword(Keyword::Outer);
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Full
+            } else if let Some(join_type) = self.parse_left_right_full_join_type()? {
+                join_type
             } else {
                 break;
             };
@@ -959,6 +939,26 @@ impl Parser {
             });
         }
         Ok(table)
+    }
+
+    fn parse_left_right_full_join_type(&mut self) -> ChrysoResult<Option<JoinType>> {
+        let join_type = if self.consume_keyword(Keyword::Left) {
+            Some(JoinType::Left)
+        } else if self.consume_keyword(Keyword::Right) {
+            Some(JoinType::Right)
+        } else if self.consume_keyword(Keyword::Full) {
+            Some(JoinType::Full)
+        } else {
+            None
+        };
+
+        if let Some(join_type) = join_type {
+            let _ = self.consume_keyword(Keyword::Outer);
+            self.expect_keyword(Keyword::Join)?;
+            Ok(Some(join_type))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
