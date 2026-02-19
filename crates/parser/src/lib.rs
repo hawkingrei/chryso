@@ -101,11 +101,13 @@ enum Keyword {
     Not,
     As,
     Join,
+    Inner,
     Cross,
     Natural,
     Left,
     Right,
     Full,
+    Outer,
     On,
     Group,
     By,
@@ -883,6 +885,9 @@ impl Parser {
             let mut natural_join = false;
             let join_type = if self.consume_keyword(Keyword::Join) {
                 JoinType::Inner
+            } else if self.consume_keyword(Keyword::Inner) {
+                self.expect_keyword(Keyword::Join)?;
+                JoinType::Inner
             } else if self.consume_keyword(Keyword::Cross) {
                 self.expect_keyword(Keyword::Join)?;
                 cross_join = true;
@@ -892,29 +897,18 @@ impl Parser {
                 JoinType::Inner
             } else if self.consume_keyword(Keyword::Natural) {
                 natural_join = true;
-                if self.consume_keyword(Keyword::Left) {
+                if let Some(join_type) = self.parse_left_right_full_join_type()? {
+                    join_type
+                } else if self.consume_keyword(Keyword::Inner) {
                     self.expect_keyword(Keyword::Join)?;
-                    JoinType::Left
-                } else if self.consume_keyword(Keyword::Right) {
-                    self.expect_keyword(Keyword::Join)?;
-                    JoinType::Right
-                } else if self.consume_keyword(Keyword::Full) {
-                    self.expect_keyword(Keyword::Join)?;
-                    JoinType::Full
+                    JoinType::Inner
                 } else if self.consume_keyword(Keyword::Join) {
                     JoinType::Inner
                 } else {
                     return Err(ChrysoError::new("NATURAL expects JOIN"));
                 }
-            } else if self.consume_keyword(Keyword::Left) {
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Left
-            } else if self.consume_keyword(Keyword::Right) {
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Right
-            } else if self.consume_keyword(Keyword::Full) {
-                self.expect_keyword(Keyword::Join)?;
-                JoinType::Full
+            } else if let Some(join_type) = self.parse_left_right_full_join_type()? {
+                join_type
             } else {
                 break;
             };
@@ -945,6 +939,26 @@ impl Parser {
             });
         }
         Ok(table)
+    }
+
+    fn parse_left_right_full_join_type(&mut self) -> ChrysoResult<Option<JoinType>> {
+        let join_type = if self.consume_keyword(Keyword::Left) {
+            Some(JoinType::Left)
+        } else if self.consume_keyword(Keyword::Right) {
+            Some(JoinType::Right)
+        } else if self.consume_keyword(Keyword::Full) {
+            Some(JoinType::Full)
+        } else {
+            None
+        };
+
+        if let Some(join_type) = join_type {
+            let _ = self.consume_keyword(Keyword::Outer);
+            self.expect_keyword(Keyword::Join)?;
+            Ok(Some(join_type))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
@@ -1767,6 +1781,7 @@ impl Parser {
                     | Keyword::Limit
                     | Keyword::Fetch
                     | Keyword::Join
+                    | Keyword::Inner
                     | Keyword::Left
                     | Keyword::Cross
                     | Keyword::Natural
@@ -1781,6 +1796,7 @@ impl Parser {
             self.peek(),
             Some(Token::Keyword(
                 Keyword::Join
+                    | Keyword::Inner
                     | Keyword::Left
                     | Keyword::Cross
                     | Keyword::Natural
@@ -1891,11 +1907,13 @@ fn is_type_name_terminator(token: &Token) -> bool {
                 | Keyword::Limit
                 | Keyword::Fetch
                 | Keyword::Join
+                | Keyword::Inner
                 | Keyword::Left
                 | Keyword::Cross
                 | Keyword::Natural
                 | Keyword::Right
                 | Keyword::Full
+                | Keyword::Outer
                 | Keyword::And
                 | Keyword::Or
                 | Keyword::When
@@ -1981,11 +1999,13 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Not => "not",
         Keyword::As => "as",
         Keyword::Join => "join",
+        Keyword::Inner => "inner",
         Keyword::Cross => "cross",
         Keyword::Natural => "natural",
         Keyword::Left => "left",
         Keyword::Right => "right",
         Keyword::Full => "full",
+        Keyword::Outer => "outer",
         Keyword::On => "on",
         Keyword::Group => "group",
         Keyword::By => "by",
@@ -2267,11 +2287,13 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "not" => Some(Keyword::Not),
         "as" => Some(Keyword::As),
         "join" => Some(Keyword::Join),
+        "inner" => Some(Keyword::Inner),
         "cross" => Some(Keyword::Cross),
         "natural" => Some(Keyword::Natural),
         "left" => Some(Keyword::Left),
         "right" => Some(Keyword::Right),
         "full" => Some(Keyword::Full),
+        "outer" => Some(Keyword::Outer),
         "on" => Some(Keyword::On),
         "group" => Some(Keyword::Group),
         "by" => Some(Keyword::By),
@@ -3308,6 +3330,36 @@ mod tests {
     }
 
     #[test]
+    fn parse_inner_join_keyword() {
+        let sql = "select * from t1 inner join t2 on t1.id = t2.id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Inner));
+    }
+
+    #[test]
+    fn parse_left_outer_join() {
+        let sql = "select * from t1 left outer join t2 on t1.id = t2.id";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Left));
+    }
+
+    #[test]
     fn parse_from_subquery() {
         let sql = "select * from (select id from users) as u";
         let parser = SimpleParser::new(ParserConfig {
@@ -3507,6 +3559,21 @@ mod tests {
     #[test]
     fn parse_natural_left_join() {
         let sql = "select * from t1 natural left join t2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert!(matches!(from.joins[0].join_type, JoinType::Left));
+    }
+
+    #[test]
+    fn parse_natural_left_outer_join() {
+        let sql = "select * from t1 natural left outer join t2";
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
