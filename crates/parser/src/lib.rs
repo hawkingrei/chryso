@@ -952,13 +952,13 @@ impl Parser {
             None
         };
 
-        if let Some(join_type) = join_type {
-            let _ = self.consume_keyword(Keyword::Outer);
-            self.expect_keyword(Keyword::Join)?;
-            Ok(Some(join_type))
-        } else {
-            Ok(None)
-        }
+        join_type
+            .map(|join_type| {
+                let _ = self.consume_keyword(Keyword::Outer);
+                self.expect_keyword(Keyword::Join)?;
+                Ok(join_type)
+            })
+            .transpose()
     }
 
     fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
