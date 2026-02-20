@@ -125,6 +125,7 @@ fn table_ref_label(table: &TableRef) -> String {
     match &table.factor {
         TableFactor::Table { name } => name.clone(),
         TableFactor::Derived { .. } => "subquery".to_string(),
+        TableFactor::Values { .. } => "values".to_string(),
     }
 }
 

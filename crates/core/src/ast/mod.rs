@@ -157,6 +157,7 @@ pub struct TableRef {
 pub enum TableFactor {
     Table { name: String },
     Derived { query: Box<Statement> },
+    Values { rows: Vec<Vec<Expr>> },
 }
 
 #[derive(Debug, Clone)]
@@ -1058,6 +1059,12 @@ fn normalize_table_ref(table: &TableRef) -> TableRef {
             TableFactor::Derived { query } => TableFactor::Derived {
                 query: Box::new(normalize_statement(query)),
             },
+            TableFactor::Values { rows } => TableFactor::Values {
+                rows: rows
+                    .iter()
+                    .map(|row| row.iter().map(|expr| expr.normalize()).collect())
+                    .collect(),
+            },
         },
         alias: table.alias.clone(),
         column_aliases: table.column_aliases.clone(),
@@ -1221,6 +1228,21 @@ fn table_ref_to_sql(table: &TableRef) -> String {
     let mut output = match &table.factor {
         TableFactor::Table { name } => name.clone(),
         TableFactor::Derived { query } => format!("({})", statement_to_sql(query)),
+        TableFactor::Values { rows } => {
+            let rows_sql = rows
+                .iter()
+                .map(|row| {
+                    let values = row
+                        .iter()
+                        .map(|expr| expr.to_sql())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("({values})")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("(values {rows_sql})")
+        }
     };
     if let Some(alias) = &table.alias {
         output.push_str(" as ");

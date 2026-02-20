@@ -7,9 +7,9 @@ const FILE_LIST: &str = "crates/parser/tests/testdata/postgres_regress/files.txt
 const SQL_DIR: &str = "crates/parser/tests/testdata/postgres_regress/sql";
 
 // These thresholds keep the test stable while still enforcing corpus value.
-const MIN_SELECTED_STATEMENTS: usize = 420;
-const MIN_SIMPLE_PARSED: usize = 300;
-const MIN_YACC_PARSED: usize = 120;
+const MIN_SELECTED_STATEMENTS: usize = 500;
+const MIN_SIMPLE_PARSED: usize = 360;
+const MIN_YACC_PARSED: usize = 130;
 
 #[test]
 fn postgres_regress_subset_select_with_parseable() {
@@ -119,15 +119,6 @@ fn is_candidate_statement(statement: &str) -> bool {
 
     // Current AST keeps LIMIT/OFFSET as numeric values only.
     if lowered.contains("limit (") || lowered.contains("offset (") {
-        return false;
-    }
-
-    // Keep this subset focused on query shapes representable by current AST.
-    if lowered.contains("array[") {
-        return false;
-    }
-
-    if lowered.contains("person* ") {
         return false;
     }
 
