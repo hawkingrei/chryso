@@ -157,6 +157,7 @@ pub struct TableRef {
 pub enum TableFactor {
     Table { name: String },
     Derived { query: Box<Statement> },
+    Values { rows: Vec<Vec<Expr>> },
 }
 
 #[derive(Debug, Clone)]
@@ -293,7 +294,7 @@ pub struct WindowFrame {
 impl Expr {
     pub fn to_sql(&self) -> String {
         match self {
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name) => format_identifier(name),
             Expr::Literal(Literal::String(value)) => {
                 format!("'{}'", escape_sql_string(value))
             }
@@ -679,6 +680,54 @@ fn escape_sql_string(value: &str) -> String {
     value.replace('\'', "''")
 }
 
+fn is_simple_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+}
+
+fn quote_identifier(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn format_identifier(name: &str) -> String {
+    if name == "*" {
+        return "*".to_string();
+    }
+    if let Some(prefix) = name.strip_suffix(".*") {
+        return format!("{}.*", format_identifier(prefix));
+    }
+    name.split('.')
+        .map(|part| {
+            if is_simple_identifier(part) {
+                part.to_string()
+            } else {
+                quote_identifier(part)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+pub fn values_rows_to_sql(rows: &[Vec<Expr>]) -> String {
+    rows.iter()
+        .map(|row| {
+            let values = row
+                .iter()
+                .map(|expr| expr.to_sql())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({values})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn rewrite_strong_expr(expr: Expr) -> Expr {
     match expr {
         Expr::UnaryOp {
@@ -1058,6 +1107,12 @@ fn normalize_table_ref(table: &TableRef) -> TableRef {
             TableFactor::Derived { query } => TableFactor::Derived {
                 query: Box::new(normalize_statement(query)),
             },
+            TableFactor::Values { rows } => TableFactor::Values {
+                rows: rows
+                    .iter()
+                    .map(|row| row.iter().map(|expr| expr.normalize()).collect())
+                    .collect(),
+            },
         },
         alias: table.alias.clone(),
         column_aliases: table.column_aliases.clone(),
@@ -1219,8 +1274,9 @@ fn frame_bound_eq(left: &WindowFrameBound, right: &WindowFrameBound) -> bool {
 
 fn table_ref_to_sql(table: &TableRef) -> String {
     let mut output = match &table.factor {
-        TableFactor::Table { name } => name.clone(),
+        TableFactor::Table { name } => format_identifier(name),
         TableFactor::Derived { query } => format!("({})", statement_to_sql(query)),
+        TableFactor::Values { rows } => format!("(values {})", values_rows_to_sql(rows)),
     };
     if let Some(alias) = &table.alias {
         output.push_str(" as ");

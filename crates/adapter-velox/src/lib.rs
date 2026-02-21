@@ -102,6 +102,8 @@ mod tests {
         assert_eq!(parsed["type"], "Filter");
         assert_eq!(parsed["input"]["type"], "TableScan");
         assert_eq!(parsed["input"]["table"], "tab\"le");
-        assert!(parsed["predicate"].as_str().unwrap().contains("col\"a"));
+        let predicate = parsed["predicate"].as_str().unwrap();
+        assert!(predicate.contains("\"col\"\"a\""));
+        assert!(predicate.contains("'v\\\"'"));
     }
 }

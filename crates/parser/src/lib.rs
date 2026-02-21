@@ -57,6 +57,8 @@ enum Token {
     Star,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
     Eq,
     NotEq,
     Lt,
@@ -509,6 +511,8 @@ impl Parser {
                     depth -= 1;
                     ")".to_string()
                 }
+                Some(Token::LBracket) => "[".to_string(),
+                Some(Token::RBracket) => "]".to_string(),
                 Some(Token::Keyword(keyword)) => keyword_label(keyword).to_string(),
                 other => {
                     return Err(ChrysoError::new(format!(
@@ -522,7 +526,13 @@ impl Parser {
             };
             if output.is_empty() {
                 output.push_str(&part);
-            } else if part == ")" || part == "(" || part == "," || part == "." {
+            } else if part == ")"
+                || part == "("
+                || part == ","
+                || part == "."
+                || part == "["
+                || part == "]"
+            {
                 output.push_str(&part);
             } else if output.ends_with('(') || output.ends_with('.') || output.ends_with(',') {
                 output.push_str(&part);
@@ -871,7 +881,12 @@ impl Parser {
         } else {
             Vec::new()
         };
-        if matches!(factor, chryso_core::ast::TableFactor::Derived { .. }) && alias.is_none() {
+        if matches!(
+            factor,
+            chryso_core::ast::TableFactor::Derived { .. }
+                | chryso_core::ast::TableFactor::Values { .. }
+        ) && alias.is_none()
+        {
             return Err(ChrysoError::new("subquery in FROM requires alias"));
         }
         let mut table = TableRef {
@@ -963,22 +978,71 @@ impl Parser {
 
     fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
         if self.consume_token(&Token::LParen) {
-            let statement = if self.consume_keyword(Keyword::With) {
-                self.parse_with_statement()?
-            } else if self.consume_keyword(Keyword::Select) {
+            if self.consume_keyword(Keyword::With) {
+                let statement = self.parse_with_statement()?;
+                self.expect_token(Token::RParen)?;
+                return Ok(chryso_core::ast::TableFactor::Derived {
+                    query: Box::new(statement),
+                });
+            }
+            if self.consume_keyword(Keyword::Select) {
                 let select = self.parse_select()?;
-                self.parse_query_tail(select)?
-            } else {
-                return Err(ChrysoError::new("subquery in FROM expects SELECT or WITH"));
-            };
-            self.expect_token(Token::RParen)?;
-            return Ok(chryso_core::ast::TableFactor::Derived {
-                query: Box::new(statement),
-            });
+                let statement = self.parse_query_tail(select)?;
+                self.expect_token(Token::RParen)?;
+                return Ok(chryso_core::ast::TableFactor::Derived {
+                    query: Box::new(statement),
+                });
+            }
+            if self.consume_keyword(Keyword::Values) {
+                let mut rows = Vec::new();
+                loop {
+                    self.expect_token(Token::LParen)?;
+                    let row = self.parse_enclosed_expr_list(Token::RParen)?;
+                    rows.push(row);
+                    if !self.consume_token(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect_token(Token::RParen)?;
+                return Ok(chryso_core::ast::TableFactor::Values { rows });
+            }
+            return Err(ChrysoError::new(
+                "subquery in FROM expects SELECT, WITH, or VALUES",
+            ));
         }
         let first = self.expect_identifier()?;
-        let name = self.parse_qualified_identifier_from(first)?;
+        let mut name = self.parse_qualified_identifier_from(first)?;
+        if self.consume_token(&Token::Star) {
+            name.push('*');
+        }
         Ok(chryso_core::ast::TableFactor::Table { name })
+    }
+
+    fn parse_array_literal(&mut self) -> ChrysoResult<Expr> {
+        let args = self.parse_enclosed_expr_list(Token::RBracket)?;
+        Ok(Expr::FunctionCall {
+            name: "array".to_string(),
+            args,
+        })
+    }
+
+    fn parse_row_constructor(&mut self) -> ChrysoResult<Expr> {
+        self.expect_token(Token::LParen)?;
+        let args = self.parse_enclosed_expr_list(Token::RParen)?;
+        Ok(Expr::FunctionCall {
+            name: "row".to_string(),
+            args,
+        })
+    }
+
+    fn parse_enclosed_expr_list(&mut self, closing_token: Token) -> ChrysoResult<Vec<Expr>> {
+        if self.consume_token(&closing_token) {
+            Ok(Vec::new())
+        } else {
+            let args = self.parse_expr_list()?;
+            self.expect_token(closing_token)?;
+            Ok(args)
+        }
     }
 
     fn parse_order_by_list(&mut self) -> ChrysoResult<Vec<OrderByExpr>> {
@@ -1434,7 +1498,9 @@ impl Parser {
     fn parse_primary(&mut self) -> ChrysoResult<Expr> {
         match self.next() {
             Some(Token::Ident(name)) => {
-                if self.consume_token(&Token::LParen) {
+                if name.eq_ignore_ascii_case("array") && self.consume_token(&Token::LBracket) {
+                    self.parse_array_literal()
+                } else if self.consume_token(&Token::LParen) {
                     let args = if self.consume_token(&Token::RParen) {
                         Vec::new()
                     } else {
@@ -1472,6 +1538,13 @@ impl Parser {
             ))),
             Some(Token::String(value)) => Ok(Expr::Literal(Literal::String(value))),
             Some(Token::Keyword(Keyword::Case)) => self.parse_case_expr(),
+            Some(Token::Keyword(Keyword::Row)) => {
+                if self.peek() == Some(&Token::LParen) {
+                    self.parse_row_constructor()
+                } else {
+                    Ok(Expr::Identifier("row".to_string()))
+                }
+            }
             Some(Token::Star) => Ok(Expr::Wildcard),
             Some(Token::LParen) => {
                 if self.peek_is_keyword(Keyword::Select) {
@@ -1875,6 +1948,9 @@ fn table_ref_name(table: &TableRef) -> ChrysoResult<String> {
         chryso_core::ast::TableFactor::Derived { .. } => {
             Err(ChrysoError::new("subquery in FROM requires alias"))
         }
+        chryso_core::ast::TableFactor::Values { .. } => {
+            Err(ChrysoError::new("VALUES in FROM requires alias"))
+        }
     }
 }
 
@@ -1959,6 +2035,8 @@ fn token_label(token: &Token) -> String {
         Token::Star => "*".to_string(),
         Token::LParen => "(".to_string(),
         Token::RParen => ")".to_string(),
+        Token::LBracket => "[".to_string(),
+        Token::RBracket => "]".to_string(),
         Token::Eq => "=".to_string(),
         Token::NotEq => "!=".to_string(),
         Token::Lt => "<".to_string(),
@@ -2105,6 +2183,16 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
             index += 1;
             continue;
         }
+        if c == '[' {
+            tokens.push(Token::LBracket);
+            index += 1;
+            continue;
+        }
+        if c == ']' {
+            tokens.push(Token::RBracket);
+            index += 1;
+            continue;
+        }
         if c == '*' {
             tokens.push(Token::Star);
             index += 1;
@@ -2156,7 +2244,10 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
             continue;
         }
         if c == '<' {
-            if index + 1 < chars.len() && chars[index + 1] == '=' {
+            if index + 1 < chars.len() && chars[index + 1] == '>' {
+                tokens.push(Token::NotEq);
+                index += 2;
+            } else if index + 1 < chars.len() && chars[index + 1] == '=' {
                 tokens.push(Token::LtEq);
                 index += 2;
             } else {
@@ -3422,6 +3513,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_from_values() {
+        let sql = "select x from (values (1), (2)) as v(x)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.alias.as_deref(), Some("v"));
+        assert_eq!(from.column_aliases, vec!["x"]);
+        let TableFactor::Values { rows } = &from.factor else {
+            panic!("expected values factor");
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].len(), 1);
+        assert_eq!(rows[1].len(), 1);
+    }
+
+    #[test]
+    fn parse_from_values_requires_alias() {
+        let sql = "select * from (values (1), (2))";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let err = parser.parse(sql).expect_err("expected error");
+        assert!(err.to_string().contains("requires alias"));
+    }
+
+    #[test]
     fn parse_table_alias_list_requires_alias() {
         let sql = "select * from users (id)";
         let parser = SimpleParser::new(ParserConfig {
@@ -4411,6 +4533,82 @@ mod tests {
             panic!("expected table factor");
         };
         assert_eq!(name, "public.users");
+    }
+
+    #[test]
+    fn parse_table_inheritance_star() {
+        let sql = "select * from person* p";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = select.from.expect("from");
+        assert_eq!(from.alias.as_deref(), Some("p"));
+        let TableFactor::Table { name } = from.factor else {
+            panic!("expected table factor");
+        };
+        assert_eq!(name, "person*");
+    }
+
+    #[test]
+    fn parse_angle_not_eq_operator() {
+        let sql = "select * from tenk1 where four <> 0";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { op, .. } = select.selection.expect("selection") else {
+            panic!("expected binary op");
+        };
+        assert!(matches!(op, BinaryOperator::NotEq));
+    }
+
+    #[test]
+    fn parse_array_literal() {
+        let sql = "select array[1, 2]::int[]";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = &select.projection[0].expr else {
+            panic!("expected cast");
+        };
+        assert_eq!(name, "cast");
+        let Expr::FunctionCall {
+            name: array_name,
+            args: array_args,
+        } = &args[0]
+        else {
+            panic!("expected array literal");
+        };
+        assert_eq!(array_name, "array");
+        assert_eq!(array_args.len(), 2);
+    }
+
+    #[test]
+    fn parse_row_constructor_expr() {
+        let sql = "select row(1, 2)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = &select.projection[0].expr else {
+            panic!("expected row constructor");
+        };
+        assert_eq!(name, "row");
+        assert_eq!(args.len(), 2);
     }
 
     #[test]

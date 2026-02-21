@@ -251,6 +251,9 @@ fn build_from(table: chryso_core::ast::TableRef) -> ChrysoResult<LogicalPlan> {
                 column_aliases: table.column_aliases.clone(),
             }
         }
+        chryso_core::ast::TableFactor::Values { rows } => LogicalPlan::Dml {
+            sql: format!("values {}", chryso_core::ast::values_rows_to_sql(&rows)),
+        },
     };
     for join in table.joins {
         let right = build_from(join.right)?;

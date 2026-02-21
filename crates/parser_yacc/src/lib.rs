@@ -1155,6 +1155,7 @@ impl<'a> AstBuilder<'a> {
         match &table.factor {
             TableFactor::Table { name } => Ok(name.clone()),
             TableFactor::Derived { .. } => Err(ChrysoError::new("subquery in FROM requires alias")),
+            TableFactor::Values { .. } => Err(ChrysoError::new("VALUES in FROM requires alias")),
         }
     }
 
