@@ -39,6 +39,7 @@ pub fn serialize_expr(expr: &Expr) -> String {
         Expr::Literal(Literal::String(value)) => format!("string:{value}"),
         Expr::Literal(Literal::Number(value)) => format!("number:{value}"),
         Expr::Literal(Literal::Bool(value)) => format!("bool:{value}"),
+        Expr::Literal(Literal::Null) => "null".to_string(),
         Expr::IsNull { expr, negated } => {
             format!("isnull:{}({})", negated, serialize_expr(expr))
         }
@@ -140,6 +141,11 @@ pub fn deserialize_expr(input: &str) -> Option<Expr> {
             .parse()
             .ok()
             .map(|value| Expr::Literal(Literal::Number(value))),
+        "bool" => payload
+            .parse()
+            .ok()
+            .map(|value| Expr::Literal(Literal::Bool(value))),
+        "null" => Some(Expr::Literal(Literal::Null)),
         "wildcard" => Some(Expr::Wildcard),
         _ => None,
     }

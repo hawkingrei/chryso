@@ -8,3 +8,5 @@ union.sql
 boolean.sql
 case.sql
 join.sql
+select.sql
+subselect.sql

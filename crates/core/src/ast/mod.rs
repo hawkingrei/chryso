@@ -237,6 +237,7 @@ pub enum Literal {
     String(String),
     Number(f64),
     Bool(bool),
+    Null,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -306,6 +307,7 @@ impl Expr {
                     "false".to_string()
                 }
             }
+            Expr::Literal(Literal::Null) => "null".to_string(),
             Expr::BinaryOp { left, op, right } => {
                 let op_str = match op {
                     BinaryOperator::Eq => "=",
@@ -433,6 +435,7 @@ impl Expr {
                     }
                 }
                 (Literal::Bool(left), Literal::Bool(right)) => left == right,
+                (Literal::Null, Literal::Null) => true,
                 _ => false,
             },
             (

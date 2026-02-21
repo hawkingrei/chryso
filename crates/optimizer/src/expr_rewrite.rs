@@ -87,6 +87,7 @@ pub fn rewrite_expr(expr: &Expr) -> Expr {
         Expr::Literal(Literal::String(value)) => Expr::Literal(Literal::String(value.clone())),
         Expr::Literal(Literal::Number(value)) => Expr::Literal(Literal::Number(*value)),
         Expr::Literal(Literal::Bool(value)) => Expr::Literal(Literal::Bool(*value)),
+        Expr::Literal(Literal::Null) => Expr::Literal(Literal::Null),
         Expr::UnaryOp { op, expr } => {
             let inner = rewrite_expr(expr);
             match (op, inner) {

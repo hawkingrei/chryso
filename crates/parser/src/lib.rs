@@ -122,6 +122,8 @@ enum Keyword {
     Distinct,
     Union,
     All,
+    Any,
+    Some,
     Intersect,
     Except,
     With,
@@ -131,6 +133,7 @@ enum Keyword {
     First,
     Next,
     Only,
+    Lateral,
     Ties,
     Top,
     Qualify,
@@ -977,38 +980,9 @@ impl Parser {
     }
 
     fn parse_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
+        let _ = self.consume_keyword(Keyword::Lateral);
         if self.consume_token(&Token::LParen) {
-            if self.consume_keyword(Keyword::With) {
-                let statement = self.parse_with_statement()?;
-                self.expect_token(Token::RParen)?;
-                return Ok(chryso_core::ast::TableFactor::Derived {
-                    query: Box::new(statement),
-                });
-            }
-            if self.consume_keyword(Keyword::Select) {
-                let select = self.parse_select()?;
-                let statement = self.parse_query_tail(select)?;
-                self.expect_token(Token::RParen)?;
-                return Ok(chryso_core::ast::TableFactor::Derived {
-                    query: Box::new(statement),
-                });
-            }
-            if self.consume_keyword(Keyword::Values) {
-                let mut rows = Vec::new();
-                loop {
-                    self.expect_token(Token::LParen)?;
-                    let row = self.parse_enclosed_expr_list(Token::RParen)?;
-                    rows.push(row);
-                    if !self.consume_token(&Token::Comma) {
-                        break;
-                    }
-                }
-                self.expect_token(Token::RParen)?;
-                return Ok(chryso_core::ast::TableFactor::Values { rows });
-            }
-            return Err(ChrysoError::new(
-                "subquery in FROM expects SELECT, WITH, or VALUES",
-            ));
+            return self.parse_parenthesized_table_factor();
         }
         let first = self.expect_identifier()?;
         let mut name = self.parse_qualified_identifier_from(first)?;
@@ -1016,6 +990,45 @@ impl Parser {
             name.push('*');
         }
         Ok(chryso_core::ast::TableFactor::Table { name })
+    }
+
+    fn parse_parenthesized_table_factor(&mut self) -> ChrysoResult<chryso_core::ast::TableFactor> {
+        if self.consume_token(&Token::LParen) {
+            let factor = self.parse_parenthesized_table_factor()?;
+            self.expect_token(Token::RParen)?;
+            return Ok(factor);
+        }
+        if self.consume_keyword(Keyword::With) {
+            let statement = self.parse_with_statement()?;
+            self.expect_token(Token::RParen)?;
+            return Ok(chryso_core::ast::TableFactor::Derived {
+                query: Box::new(statement),
+            });
+        }
+        if self.consume_keyword(Keyword::Select) {
+            let select = self.parse_select()?;
+            let statement = self.parse_query_tail(select)?;
+            self.expect_token(Token::RParen)?;
+            return Ok(chryso_core::ast::TableFactor::Derived {
+                query: Box::new(statement),
+            });
+        }
+        if self.consume_keyword(Keyword::Values) {
+            let mut rows = Vec::new();
+            loop {
+                self.expect_token(Token::LParen)?;
+                let row = self.parse_enclosed_expr_list(Token::RParen)?;
+                rows.push(row);
+                if !self.consume_token(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect_token(Token::RParen)?;
+            return Ok(chryso_core::ast::TableFactor::Values { rows });
+        }
+        Err(ChrysoError::new(
+            "subquery in FROM expects SELECT, WITH, or VALUES",
+        ))
     }
 
     fn parse_array_literal(&mut self) -> ChrysoResult<Expr> {
@@ -1317,7 +1330,11 @@ impl Parser {
             let Some(op) = op else {
                 break;
             };
-            let rhs = self.parse_additive()?;
+            let rhs = if let Some(quantifier) = self.consume_quantifier_name() {
+                self.parse_quantified_rhs(quantifier)?
+            } else {
+                self.parse_additive()?
+            };
             expr = Expr::BinaryOp {
                 left: Box::new(expr),
                 op,
@@ -1338,6 +1355,33 @@ impl Parser {
         }
         let list = self.parse_expr_list_in_parens()?;
         Ok(rewrite_in_list(expr, list))
+    }
+
+    fn consume_quantifier_name(&mut self) -> Option<&'static str> {
+        if self.consume_keyword(Keyword::Any) {
+            Some("any")
+        } else if self.consume_keyword(Keyword::All) {
+            Some("all")
+        } else if self.consume_keyword(Keyword::Some) {
+            Some("some")
+        } else {
+            None
+        }
+    }
+
+    fn parse_quantified_rhs(&mut self, quantifier: &'static str) -> ChrysoResult<Expr> {
+        self.expect_token(Token::LParen)?;
+        let payload = if self.peek_is_keyword(Keyword::Select) {
+            Expr::Subquery(Box::new(self.parse_subquery_select_after_lparen()?))
+        } else {
+            let expr = self.parse_expr()?;
+            self.expect_token(Token::RParen)?;
+            expr
+        };
+        Ok(Expr::FunctionCall {
+            name: quantifier.to_string(),
+            args: vec![payload],
+        })
     }
 
     fn parse_like_payload(&mut self, expr: Expr, name: &str) -> ChrysoResult<Expr> {
@@ -1526,6 +1570,7 @@ impl Parser {
             }
             Some(Token::Keyword(Keyword::True)) => Ok(Expr::Literal(Literal::Bool(true))),
             Some(Token::Keyword(Keyword::False)) => Ok(Expr::Literal(Literal::Bool(false))),
+            Some(Token::Keyword(Keyword::Null)) => Ok(Expr::Literal(Literal::Null)),
             Some(Token::Keyword(Keyword::Cast)) => self.parse_cast_expr(),
             Some(Token::Keyword(Keyword::Date)) => self.parse_keyword_literal("date"),
             Some(Token::Keyword(Keyword::Time)) => self.parse_keyword_literal("time"),
@@ -1551,9 +1596,24 @@ impl Parser {
                     let select = self.parse_subquery_select_after_lparen()?;
                     Ok(Expr::Subquery(Box::new(select)))
                 } else {
-                    let expr = self.parse_expr()?;
-                    self.expect_token(Token::RParen)?;
-                    Ok(expr)
+                    let first = self.parse_expr()?;
+                    if self.consume_token(&Token::Comma) {
+                        let mut args = vec![first];
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if !self.consume_token(&Token::Comma) {
+                                break;
+                            }
+                        }
+                        self.expect_token(Token::RParen)?;
+                        Ok(Expr::FunctionCall {
+                            name: "row".to_string(),
+                            args,
+                        })
+                    } else {
+                        self.expect_token(Token::RParen)?;
+                        Ok(first)
+                    }
                 }
             }
             _ => Err(ChrysoError::new("unexpected token in expression")),
@@ -1858,6 +1918,7 @@ impl Parser {
                     | Keyword::Left
                     | Keyword::Cross
                     | Keyword::Natural
+                    | Keyword::Lateral
                     | Keyword::Right
                     | Keyword::Full
             )) | Some(Token::Comma)
@@ -1873,6 +1934,7 @@ impl Parser {
                     | Keyword::Left
                     | Keyword::Cross
                     | Keyword::Natural
+                    | Keyword::Lateral
                     | Keyword::Right
                     | Keyword::Full
                     | Keyword::Where
@@ -2096,6 +2158,8 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Distinct => "distinct",
         Keyword::Union => "union",
         Keyword::All => "all",
+        Keyword::Any => "any",
+        Keyword::Some => "some",
         Keyword::Intersect => "intersect",
         Keyword::Except => "except",
         Keyword::With => "with",
@@ -2105,6 +2169,7 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::First => "first",
         Keyword::Next => "next",
         Keyword::Only => "only",
+        Keyword::Lateral => "lateral",
         Keyword::Ties => "ties",
         Keyword::Top => "top",
         Keyword::Qualify => "qualify",
@@ -2397,6 +2462,8 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "distinct" => Some(Keyword::Distinct),
         "union" => Some(Keyword::Union),
         "all" => Some(Keyword::All),
+        "any" => Some(Keyword::Any),
+        "some" => Some(Keyword::Some),
         "intersect" => Some(Keyword::Intersect),
         "except" => Some(Keyword::Except),
         "with" => Some(Keyword::With),
@@ -2406,6 +2473,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "first" => Some(Keyword::First),
         "next" => Some(Keyword::Next),
         "only" => Some(Keyword::Only),
+        "lateral" => Some(Keyword::Lateral),
         "ties" => Some(Keyword::Ties),
         "top" => Some(Keyword::Top),
         "qualify" => Some(Keyword::Qualify),
@@ -3544,6 +3612,41 @@ mod tests {
     }
 
     #[test]
+    fn parse_lateral_values_factor() {
+        let sql = "select * from users u, lateral (values (u.id)) as v(x)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert_eq!(from.joins.len(), 1);
+        assert_eq!(from.joins[0].right.alias.as_deref(), Some("v"));
+        let TableFactor::Values { rows } = &from.joins[0].right.factor else {
+            panic!("expected lateral values factor");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1);
+    }
+
+    #[test]
+    fn parse_parenthesized_subquery_with_extra_parens() {
+        let sql = "select * from ((select 1 as x)) as ss";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let from = unwrap_from(&select);
+        assert!(matches!(from.factor, TableFactor::Derived { .. }));
+        assert_eq!(from.alias.as_deref(), Some("ss"));
+    }
+
+    #[test]
     fn parse_table_alias_list_requires_alias() {
         let sql = "select * from users (id)";
         let parser = SimpleParser::new(ParserConfig {
@@ -4212,6 +4315,59 @@ mod tests {
         };
         let expr = select.selection.expect("selection");
         assert_eq!(expr.to_sql(), "id = 1 or id = 2 or id = 3");
+    }
+
+    #[test]
+    fn parse_row_tuple_in_list() {
+        let sql = "select * from users where (id, age) in ((1, 2), (3, 4))";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let expr = select.selection.expect("selection");
+        assert_eq!(
+            expr.to_sql(),
+            "row(id, age) = row(1, 2) or row(id, age) = row(3, 4)"
+        );
+    }
+
+    #[test]
+    fn parse_quantified_subquery_comparison() {
+        let sql = "select 1 = all (select 1)";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::BinaryOp { right, .. } = &select.projection[0].expr else {
+            panic!("expected binary comparison");
+        };
+        let Expr::FunctionCall { name, args } = right.as_ref() else {
+            panic!("expected quantified rhs");
+        };
+        assert_eq!(name, "all");
+        assert_eq!(args.len(), 1);
+    }
+
+    #[test]
+    fn parse_null_literal_projection() {
+        let sql = "select null";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert!(matches!(
+            select.projection[0].expr,
+            Expr::Literal(Literal::Null)
+        ));
     }
 
     #[test]
