@@ -210,4 +210,37 @@ mod tests {
         let output = format_statement(&stmt);
         assert_eq!(output, "create table users (id integer, name varchar(20))");
     }
+
+    #[test]
+    fn format_values_table_factor_quotes_unsafe_identifier() {
+        let stmt = Statement::Select(SelectStatement {
+            distinct: false,
+            distinct_on: Vec::new(),
+            projection: vec![SelectItem {
+                expr: crate::ast::Expr::Wildcard,
+                alias: None,
+            }],
+            from: Some(TableRef {
+                factor: TableFactor::Values {
+                    rows: vec![vec![crate::ast::Expr::Identifier(
+                        "a), (select 1)--".to_string(),
+                    )]],
+                },
+                alias: Some("v".to_string()),
+                column_aliases: vec!["c".to_string()],
+                joins: Vec::new(),
+            }),
+            selection: None,
+            group_by: Vec::new(),
+            having: None,
+            qualify: None,
+            order_by: Vec::new(),
+            limit: None,
+            offset: None,
+        });
+
+        let output = format_statement(&stmt);
+        assert!(output.contains("\"a), (select 1)--\""));
+        assert!(!output.contains("values (a), (select 1)--"));
+    }
 }

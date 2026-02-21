@@ -997,13 +997,7 @@ impl Parser {
                 let mut rows = Vec::new();
                 loop {
                     self.expect_token(Token::LParen)?;
-                    let row = if self.consume_token(&Token::RParen) {
-                        Vec::new()
-                    } else {
-                        let row = self.parse_expr_list()?;
-                        self.expect_token(Token::RParen)?;
-                        row
-                    };
+                    let row = self.parse_enclosed_expr_list(Token::RParen)?;
                     rows.push(row);
                     if !self.consume_token(&Token::Comma) {
                         break;
@@ -1025,13 +1019,7 @@ impl Parser {
     }
 
     fn parse_array_literal(&mut self) -> ChrysoResult<Expr> {
-        let args = if self.consume_token(&Token::RBracket) {
-            Vec::new()
-        } else {
-            let args = self.parse_expr_list()?;
-            self.expect_token(Token::RBracket)?;
-            args
-        };
+        let args = self.parse_enclosed_expr_list(Token::RBracket)?;
         Ok(Expr::FunctionCall {
             name: "array".to_string(),
             args,
@@ -1040,17 +1028,21 @@ impl Parser {
 
     fn parse_row_constructor(&mut self) -> ChrysoResult<Expr> {
         self.expect_token(Token::LParen)?;
-        let args = if self.consume_token(&Token::RParen) {
-            Vec::new()
-        } else {
-            let args = self.parse_expr_list()?;
-            self.expect_token(Token::RParen)?;
-            args
-        };
+        let args = self.parse_enclosed_expr_list(Token::RParen)?;
         Ok(Expr::FunctionCall {
             name: "row".to_string(),
             args,
         })
+    }
+
+    fn parse_enclosed_expr_list(&mut self, closing_token: Token) -> ChrysoResult<Vec<Expr>> {
+        if self.consume_token(&closing_token) {
+            Ok(Vec::new())
+        } else {
+            let args = self.parse_expr_list()?;
+            self.expect_token(closing_token)?;
+            Ok(args)
+        }
     }
 
     fn parse_order_by_list(&mut self) -> ChrysoResult<Vec<OrderByExpr>> {
