@@ -598,16 +598,7 @@ impl Parser {
             }));
         }
         let source = if self.consume_keyword(Keyword::Values) {
-            let mut values = Vec::new();
-            loop {
-                self.expect_token(Token::LParen)?;
-                let row = self.parse_expr_list()?;
-                self.expect_token(Token::RParen)?;
-                values.push(row);
-                if !self.consume_token(&Token::Comma) {
-                    break;
-                }
-            }
+            let values = self.parse_values_rows()?;
             chryso_core::ast::InsertSource::Values(values)
         } else if self.consume_keyword(Keyword::Select) {
             let select = self.parse_select()?;
@@ -1014,15 +1005,7 @@ impl Parser {
             });
         }
         if self.consume_keyword(Keyword::Values) {
-            let mut rows = Vec::new();
-            loop {
-                self.expect_token(Token::LParen)?;
-                let row = self.parse_enclosed_expr_list(Token::RParen)?;
-                rows.push(row);
-                if !self.consume_token(&Token::Comma) {
-                    break;
-                }
-            }
+            let rows = self.parse_values_rows()?;
             self.expect_token(Token::RParen)?;
             return Ok(chryso_core::ast::TableFactor::Values { rows });
         }
@@ -1056,6 +1039,19 @@ impl Parser {
             self.expect_token(closing_token)?;
             Ok(args)
         }
+    }
+
+    fn parse_values_rows(&mut self) -> ChrysoResult<Vec<Vec<Expr>>> {
+        let mut rows = Vec::new();
+        loop {
+            self.expect_token(Token::LParen)?;
+            let row = self.parse_enclosed_expr_list(Token::RParen)?;
+            rows.push(row);
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(rows)
     }
 
     fn parse_order_by_list(&mut self) -> ChrysoResult<Vec<OrderByExpr>> {
