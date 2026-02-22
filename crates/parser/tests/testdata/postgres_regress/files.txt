@@ -13,3 +13,5 @@ subselect.sql
 select_implicit.sql
 select_views.sql
 select_parallel.sql
+incremental_sort.sql
+memoize.sql
