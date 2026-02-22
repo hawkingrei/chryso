@@ -32,3 +32,23 @@ jobs:
 
       - name: Run postgres regress subset parser test
         run: cargo test --test postgres_regress_subset -- --nocapture
+
+  postgres-regress-exec-subset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-targets: false
+
+      - name: Run postgres regress execution subset test
+        run: cargo test --features duckdb --test postgres_regress_exec_subset -- --nocapture
