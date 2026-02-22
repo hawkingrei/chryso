@@ -10,3 +10,5 @@ case.sql
 join.sql
 select.sql
 subselect.sql
+select_implicit.sql
+select_views.sql

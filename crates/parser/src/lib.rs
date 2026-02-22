@@ -68,6 +68,7 @@ enum Token {
     Plus,
     Minus,
     Slash,
+    Pound,
     Tilde,
     TildeStar,
     NotTilde,
@@ -150,6 +151,7 @@ enum Keyword {
     Then,
     Else,
     End,
+    Collate,
     Nulls,
     Last,
     Escape,
@@ -545,6 +547,11 @@ impl Parser {
             }
         }
         Ok(output)
+    }
+
+    fn parse_collation_name(&mut self) -> ChrysoResult<String> {
+        let first = self.expect_identifier()?;
+        self.parse_qualified_identifier_from(first)
     }
 
     fn parse_drop_statement(&mut self) -> ChrysoResult<Statement> {
@@ -1500,6 +1507,13 @@ impl Parser {
             let subquery = self.parse_subquery_select()?;
             return Ok(Expr::Exists(Box::new(subquery)));
         }
+        if self.consume_token(&Token::Pound) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::FunctionCall {
+                name: "op_hash".to_string(),
+                args: vec![expr],
+            });
+        }
         if self.consume_keyword(Keyword::Not) {
             let expr = self.parse_unary()?;
             return Ok(Expr::UnaryOp {
@@ -1527,6 +1541,14 @@ impl Parser {
                 expr = Expr::FunctionCall {
                     name: "cast".to_string(),
                     args: vec![expr, Expr::Literal(Literal::String(data_type))],
+                };
+                continue;
+            }
+            if self.consume_keyword(Keyword::Collate) {
+                let collation = self.parse_collation_name()?;
+                expr = Expr::FunctionCall {
+                    name: "collate".to_string(),
+                    args: vec![expr, Expr::Literal(Literal::String(collation))],
                 };
                 continue;
             }
@@ -2104,6 +2126,7 @@ fn token_label(token: &Token) -> String {
         Token::Plus => "+".to_string(),
         Token::Minus => "-".to_string(),
         Token::Slash => "/".to_string(),
+        Token::Pound => "#".to_string(),
         Token::Tilde => "~".to_string(),
         Token::TildeStar => "~*".to_string(),
         Token::NotTilde => "!~".to_string(),
@@ -2187,6 +2210,7 @@ fn keyword_label(keyword: Keyword) -> &'static str {
         Keyword::Then => "then",
         Keyword::Else => "else",
         Keyword::End => "end",
+        Keyword::Collate => "collate",
         Keyword::Nulls => "nulls",
         Keyword::Last => "last",
         Keyword::Escape => "escape",
@@ -2261,6 +2285,11 @@ fn tokenize(input: &str, _dialect: Dialect) -> ChrysoResult<Vec<Token>> {
         }
         if c == '+' {
             tokens.push(Token::Plus);
+            index += 1;
+            continue;
+        }
+        if c == '#' {
+            tokens.push(Token::Pound);
             index += 1;
             continue;
         }
@@ -2487,6 +2516,7 @@ fn keyword_from(raw: &str) -> Option<Keyword> {
         "then" => Some(Keyword::Then),
         "else" => Some(Keyword::Else),
         "end" => Some(Keyword::End),
+        "collate" => Some(Keyword::Collate),
         "nulls" => Some(Keyword::Nulls),
         "last" => Some(Keyword::Last),
         "escape" => Some(Keyword::Escape),
@@ -3447,6 +3477,26 @@ mod tests {
         };
         assert_eq!(select.order_by.len(), 1);
         assert_eq!(select.order_by[0].nulls_first, Some(false));
+    }
+
+    #[test]
+    fn parse_order_by_collate() {
+        let sql = "select name from iexit order by name collate \"C\", 2";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        assert_eq!(select.order_by.len(), 2);
+        let Expr::FunctionCall { name, args } = &select.order_by[0].expr else {
+            panic!("expected collate expression");
+        };
+        assert_eq!(name, "collate");
+        assert_eq!(args.len(), 2);
+        assert!(matches!(args[0], Expr::Identifier(ref ident) if ident == "name"));
+        assert!(matches!(args[1], Expr::Literal(Literal::String(ref value)) if value == "C"));
     }
 
     #[test]
@@ -4761,6 +4811,24 @@ mod tests {
         };
         assert_eq!(name, "row");
         assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn parse_hash_prefix_operator() {
+        let sql = "select #thepath from iexit";
+        let parser = SimpleParser::new(ParserConfig {
+            dialect: Dialect::Postgres,
+        });
+        let stmt = parser.parse(sql).expect("parse");
+        let Statement::Select(select) = stmt else {
+            panic!("expected select");
+        };
+        let Expr::FunctionCall { name, args } = &select.projection[0].expr else {
+            panic!("expected hash operator expression");
+        };
+        assert_eq!(name, "op_hash");
+        assert_eq!(args.len(), 1);
+        assert!(matches!(args[0], Expr::Identifier(ref ident) if ident == "thepath"));
     }
 
     #[test]

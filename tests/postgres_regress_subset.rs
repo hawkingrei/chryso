@@ -7,9 +7,9 @@ const FILE_LIST: &str = "crates/parser/tests/testdata/postgres_regress/files.txt
 const SQL_DIR: &str = "crates/parser/tests/testdata/postgres_regress/sql";
 
 // These thresholds keep the test stable while still enforcing corpus value.
-const MIN_SELECTED_STATEMENTS: usize = 620;
-const MIN_SIMPLE_PARSED: usize = 500;
-const MIN_YACC_PARSED: usize = 160;
+const MIN_SELECTED_STATEMENTS: usize = 680;
+const MIN_SIMPLE_PARSED: usize = 560;
+const MIN_YACC_PARSED: usize = 190;
 
 #[test]
 fn postgres_regress_subset_select_with_parseable() {
