@@ -1562,6 +1562,7 @@ fn literal_eq(left: &Literal, right: &Literal) -> bool {
         (Literal::String(left), Literal::String(right)) => left == right,
         (Literal::Number(left), Literal::Number(right)) => left == right,
         (Literal::Bool(left), Literal::Bool(right)) => left == right,
+        (Literal::Null, Literal::Null) => true,
         _ => false,
     }
 }
