@@ -15,3 +15,4 @@ select_views.sql
 select_parallel.sql
 incremental_sort.sql
 memoize.sql
+select_into.sql
