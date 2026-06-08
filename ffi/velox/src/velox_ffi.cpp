@@ -121,6 +121,9 @@ std::string parse_json_string(const char* data, size_t* cursor) {
           pos += 4;
         } else {
           out.push_back('?');
+          for (size_t i = 0; i < 4 && data[pos] != '\0'; ++i) {
+            ++pos;
+          }
         }
         break;
       }
@@ -211,29 +214,50 @@ std::string extract_field(const char* json, const char* key) {
   if (json == nullptr || key == nullptr) {
     return {};
   }
-  std::string needle = std::string("\"") + key + "\"";
-  const char* cursor = json;
-  while (*cursor != '\0') {
-    const char* found = std::strstr(cursor, needle.c_str());
-    if (found == nullptr) {
-      return {};
+  size_t pos = 0;
+  int depth = 0;
+  while (json[pos] != '\0') {
+    if (json[pos] == '{') {
+      ++depth;
+      ++pos;
+      continue;
     }
-    size_t pos = static_cast<size_t>(found - json);
-    pos += needle.size();
+    if (json[pos] == '}') {
+      if (depth > 0) {
+        --depth;
+      }
+      ++pos;
+      continue;
+    }
+    if (json[pos] != '"') {
+      ++pos;
+      continue;
+    }
+
+    ++pos;
+    std::string candidate = parse_json_string(json, &pos);
+    if (depth != 1) {
+      continue;
+    }
     while (json[pos] != '\0' && std::isspace(static_cast<unsigned char>(json[pos]))) {
       ++pos;
     }
     if (json[pos] != ':') {
-      cursor = found + needle.size();
       continue;
     }
     ++pos;
     while (json[pos] != '\0' && std::isspace(static_cast<unsigned char>(json[pos]))) {
       ++pos;
     }
-    if (json[pos] != '"') {
-      cursor = found + needle.size();
+    if (candidate != key) {
+      if (json[pos] == '"') {
+        ++pos;
+        (void)parse_json_string(json, &pos);
+      }
       continue;
+    }
+    if (json[pos] != '"') {
+      return {};
     }
     ++pos;
     return parse_json_string(json, &pos);

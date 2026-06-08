@@ -125,10 +125,22 @@ fn encode_memory_payload(columns: &[String], rows: &[Vec<String>]) -> ChrysoResu
         }
     }
     let mut payload = String::new();
-    payload.push_str(&columns.join("\t"));
+    if let Some((first, rest)) = columns.split_first() {
+        payload.push_str(first);
+        for col in rest {
+            payload.push('\t');
+            payload.push_str(col);
+        }
+    }
     payload.push('\n');
     for row in rows {
-        payload.push_str(&row.join("\t"));
+        if let Some((first, rest)) = row.split_first() {
+            payload.push_str(first);
+            for cell in rest {
+                payload.push('\t');
+                payload.push_str(cell);
+            }
+        }
         payload.push('\n');
     }
     Ok(payload)

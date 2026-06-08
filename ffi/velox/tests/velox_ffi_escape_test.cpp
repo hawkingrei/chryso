@@ -31,6 +31,16 @@ int main() {
   assert(rc == 0);
   assert(result != nullptr);
   assert(std::string(result) == memory_payload_expected);
+  vx_string_free(result);
+
+  const std::string invalid_unicode_plan =
+      R"({"type":"TableScan","meta":{"table":"wrong"},"table":"bad\u12g3tail"})";
+
+  result = nullptr;
+  rc = vx_plan_execute(session, invalid_unicode_plan.c_str(), &result);
+  assert(rc == 0);
+  assert(result != nullptr);
+  assert(std::string(result) == "table\nbad?tail\n");
 
   vx_string_free(result);
   vx_session_free(session);
