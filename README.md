@@ -16,12 +16,12 @@ into a reusable HTAP planning layer.
 - Dialect-neutral logical planning for scans, filters, projections, joins,
   aggregates, sorting, limits, subqueries, and DML/DDL hooks.
 - Cascades-style optimizer with memo exploration, logical rewrites, physical
-  implementation rules, property enforcement, join ordering, and tracing.
+  implementation rules, physical property tracking, join ordering, and tracing.
 - Cost and statistics hooks via `ANALYZE`, a lightweight catalog, cardinality
   estimation, and cost profiles.
 - Execution-adapter boundary for HTAP backends, starting with DuckDB and Velox.
-- Stable facade API and FFI/bindings scaffolding for embedding the optimizer in
-  other systems.
+- Facade API and FFI/bindings scaffolding for embedding the optimizer in other
+  systems.
 
 ## Status
 - Parser, planner, metadata, and Cascades optimizer crates are implemented.
