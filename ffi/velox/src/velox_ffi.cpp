@@ -2,11 +2,14 @@
 
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <new>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifdef CHRYSO_VELOX_ARROW
 #include <arrow/api.h>
@@ -20,27 +23,188 @@ struct Session {
   int reserved = 0;
 };
 
+std::string extract_field(const char* json, const char* key);
+
+bool parse_hex4(const char* data, size_t cursor, uint32_t* codepoint) {
+  uint32_t value = 0;
+  for (size_t i = 0; i < 4; ++i) {
+    char ch = data[cursor + i];
+    if (ch == '\0') {
+      return false;
+    }
+    value <<= 4;
+    if (ch >= '0' && ch <= '9') {
+      value += static_cast<uint32_t>(ch - '0');
+      continue;
+    }
+    if (ch >= 'a' && ch <= 'f') {
+      value += static_cast<uint32_t>(ch - 'a' + 10);
+      continue;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+      value += static_cast<uint32_t>(ch - 'A' + 10);
+      continue;
+    }
+    return false;
+  }
+  *codepoint = value;
+  return true;
+}
+
+void append_utf8(uint32_t codepoint, std::string* out) {
+  if (codepoint <= 0x7F) {
+    out->push_back(static_cast<char>(codepoint));
+    return;
+  }
+  if (codepoint <= 0x7FF) {
+    out->push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+    out->push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    return;
+  }
+  if (codepoint <= 0xFFFF) {
+    out->push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+    out->push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    return;
+  }
+  if (codepoint <= 0x10FFFF) {
+    out->push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+    out->push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    return;
+  }
+  out->push_back('?');
+}
+
 std::string parse_json_string(const char* data, size_t* cursor) {
   std::string out;
-  bool escape = false;
-  for (; data[*cursor] != '\0'; ++(*cursor)) {
-    char ch = data[*cursor];
-    if (escape) {
-      out.push_back(ch);
-      escape = false;
-      continue;
-    }
-    if (ch == '\\') {
-      escape = true;
-      continue;
-    }
+  size_t pos = *cursor;
+  while (data[pos] != '\0') {
+    char ch = data[pos++];
     if (ch == '"') {
-      ++(*cursor);
       break;
     }
-    out.push_back(ch);
+    if (ch != '\\') {
+      out.push_back(ch);
+      continue;
+    }
+    char escaped = data[pos++];
+    if (escaped == '\0') {
+      break;
+    }
+    switch (escaped) {
+      case '"':
+      case '\\':
+      case '/':
+        out.push_back(escaped);
+        break;
+      case 'b':
+        out.push_back('\b');
+        break;
+      case 'f':
+        out.push_back('\f');
+        break;
+      case 'n':
+        out.push_back('\n');
+        break;
+      case 'r':
+        out.push_back('\r');
+        break;
+      case 't':
+        out.push_back('\t');
+        break;
+      case 'u': {
+        uint32_t codepoint = 0;
+        if (parse_hex4(data, pos, &codepoint)) {
+          append_utf8(codepoint, &out);
+          pos += 4;
+        } else {
+          out.push_back('?');
+        }
+        break;
+      }
+      default:
+        out.push_back(escaped);
+        break;
+    }
   }
+  *cursor = pos;
   return out;
+}
+
+void split_tsv_line(const std::string& line, std::vector<std::string>* fields) {
+  size_t cursor = 0;
+  while (cursor <= line.size()) {
+    size_t next = line.find('\t', cursor);
+    if (next == std::string::npos) {
+      fields->push_back(line.substr(cursor));
+      break;
+    }
+    fields->push_back(line.substr(cursor, next - cursor));
+    cursor = next + 1;
+  }
+}
+
+bool parse_tsv_payload(
+    const std::string& payload,
+    std::vector<std::string>* columns,
+    std::vector<std::vector<std::string>>* rows,
+    std::string* error) {
+  if (payload.empty()) {
+    *error = "empty memory payload";
+    return false;
+  }
+  size_t header_end = payload.find('\n');
+  std::string header =
+      header_end == std::string::npos ? payload : payload.substr(0, header_end);
+  split_tsv_line(header, columns);
+  if (columns->empty()) {
+    *error = "memory payload header is empty";
+    return false;
+  }
+
+  size_t line_start = header_end == std::string::npos ? payload.size() : header_end + 1;
+  while (line_start < payload.size()) {
+    size_t line_end = payload.find('\n', line_start);
+    std::string line = line_end == std::string::npos
+        ? payload.substr(line_start)
+        : payload.substr(line_start, line_end - line_start);
+    std::vector<std::string> row;
+    split_tsv_line(line, &row);
+    if (row.size() != columns->size()) {
+      *error = "memory payload row width mismatch";
+      return false;
+    }
+    rows->push_back(std::move(row));
+    if (line_end == std::string::npos) {
+      break;
+    }
+    line_start = line_end + 1;
+  }
+  return true;
+}
+
+bool resolve_table_scan_payload(
+    const char* plan_json,
+    std::string* payload,
+    std::string* error) {
+  std::string storage = extract_field(plan_json, "storage");
+  if (!storage.empty() && storage != "memory") {
+    *error = "unsupported storage for demo: " + storage;
+    return false;
+  }
+  std::string memory_payload = extract_field(plan_json, "memory_payload");
+  if (!memory_payload.empty()) {
+    *payload = std::move(memory_payload);
+    return true;
+  }
+  std::string table = extract_field(plan_json, "table");
+  if (table.empty()) {
+    table = "unknown";
+  }
+  *payload = "table\n" + table + "\n";
+  return true;
 }
 
 std::string extract_field(const char* json, const char* key) {
@@ -133,11 +297,13 @@ int vx_plan_execute(VxSession* session, const char* plan_json, char** result_out
     return 2;
   }
 
-  std::string table = extract_field(plan_json, "table");
-  if (table.empty()) {
-    table = "unknown";
+  std::string payload;
+  std::string error;
+  if (!resolve_table_scan_payload(plan_json, &payload, &error)) {
+    set_last_error(error);
+    return 2;
   }
-  std::string payload = "table\n" + table + "\n";
+
   char* buffer = static_cast<char*>(std::malloc(payload.size() + 1));
   if (buffer == nullptr) {
     set_last_error("failed to allocate result buffer");
@@ -176,26 +342,47 @@ int vx_plan_execute_arrow(
     set_last_error("demo supports only TableScan");
     return 2;
   }
-  std::string table = extract_field(plan_json, "table");
-  if (table.empty()) {
-    table = "unknown";
-  }
 
-  arrow::StringBuilder builder;
-  auto status = builder.Append(table);
-  if (!status.ok()) {
-    set_last_error(status.ToString());
-    return 2;
-  }
-  std::shared_ptr<arrow::Array> array;
-  status = builder.Finish(&array);
-  if (!status.ok()) {
-    set_last_error(status.ToString());
+  std::string payload;
+  std::string error;
+  if (!resolve_table_scan_payload(plan_json, &payload, &error)) {
+    set_last_error(error);
     return 2;
   }
 
-  auto schema = arrow::schema({arrow::field("table", arrow::utf8(), false)});
-  auto batch = arrow::RecordBatch::Make(schema, 1, {array});
+  std::vector<std::string> columns;
+  std::vector<std::vector<std::string>> rows;
+  if (!parse_tsv_payload(payload, &columns, &rows, &error)) {
+    set_last_error(error);
+    return 2;
+  }
+
+  std::vector<std::shared_ptr<arrow::Field>> fields;
+  std::vector<std::shared_ptr<arrow::Array>> arrays;
+  fields.reserve(columns.size());
+  arrays.reserve(columns.size());
+  for (size_t col_idx = 0; col_idx < columns.size(); ++col_idx) {
+    fields.push_back(arrow::field(columns[col_idx], arrow::utf8(), false));
+    arrow::StringBuilder builder;
+    for (const auto& row : rows) {
+      auto status = builder.Append(row[col_idx]);
+      if (!status.ok()) {
+        set_last_error(status.ToString());
+        return 2;
+      }
+    }
+    std::shared_ptr<arrow::Array> array;
+    auto status = builder.Finish(&array);
+    if (!status.ok()) {
+      set_last_error(status.ToString());
+      return 2;
+    }
+    arrays.push_back(std::move(array));
+  }
+
+  auto schema = arrow::schema(fields);
+  auto batch =
+      arrow::RecordBatch::Make(schema, static_cast<int64_t>(rows.size()), arrays);
   auto sink_result = arrow::io::BufferOutputStream::Create();
   if (!sink_result.ok()) {
     set_last_error(sink_result.status().ToString());
@@ -208,7 +395,7 @@ int vx_plan_execute_arrow(
     return 2;
   }
   std::shared_ptr<arrow::ipc::RecordBatchWriter> writer = *writer_result;
-  status = writer->WriteRecordBatch(*batch);
+  auto status = writer->WriteRecordBatch(*batch);
   if (!status.ok()) {
     set_last_error(status.ToString());
     return 2;

@@ -6,6 +6,16 @@ fn main() {
     use std::fs;
 
     let adapter = VeloxAdapter::try_new().expect("adapter");
+    adapter
+        .register_memory_table(
+            "demo_table",
+            vec!["id".to_string(), "name".to_string()],
+            vec![
+                vec!["1".to_string(), "alice".to_string()],
+                vec!["2".to_string(), "bob".to_string()],
+            ],
+        )
+        .expect("register memory table");
     let plan = PhysicalPlan::TableScan {
         table: "demo_table".to_string(),
     };

@@ -5,6 +5,7 @@ This document describes how to wire Chryso to Velox using a C ABI bridge.
 ## Overview
 
 - Rust builds `PhysicalPlan` and converts it to a minimal JSON plan IR.
+- `TableScan` currently targets `memory` storage and can carry inline TSV payload.
 - The Velox adapter calls a C ABI exposed by `ffi/velox`.
 - The C ABI creates a Velox session, builds a plan, executes, and returns results as TSV.
 
@@ -62,11 +63,11 @@ export LD_LIBRARY_PATH="$CHRYSO_VELOX_FFI_DIR:$LD_LIBRARY_PATH"       # Linux
 cargo run --example velox_demo --features velox
 ```
 
-Expected output (demo stub):
+Expected output (with `register_memory_table` in the demo):
 
 ```
-[["table"]]
-[["demo_table"]]
+[["id", "name"]]
+[["1", "alice"], ["2", "bob"]]
 ```
 
 Arrow IPC output is written to `velox_demo.arrow` in the repo root when Arrow support is enabled.
@@ -133,6 +134,21 @@ The Rust adapter currently emits a JSON-shaped string for the following nodes:
 - `Derived`
 
 This IR is intentionally minimal; the C++ side should parse it and build Velox operators.
+
+### TableScan memory storage payload
+
+When a memory table is registered from Rust, `TableScan` IR includes:
+
+```json
+{
+  "type": "TableScan",
+  "table": "demo_table",
+  "storage": "memory",
+  "memory_payload": "id\tname\n1\talice\n2\tbob\n"
+}
+```
+
+`memory_payload` uses TSV (`\t` between fields and `\n` between rows).
 
 ## Next Steps
 
