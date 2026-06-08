@@ -66,7 +66,7 @@ cargo run --example velox_demo --features velox
 Expected output (with `register_memory_table` in the demo):
 
 ```
-[["id", "name"]]
+["id", "name"]
 [["1", "alice"], ["2", "bob"]]
 ```
 

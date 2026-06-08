@@ -4,7 +4,6 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <mutex>
 #include <new>
 #include <string>
@@ -166,6 +165,12 @@ bool parse_tsv_payload(
     *error = "memory payload header is empty";
     return false;
   }
+  for (const auto& column : *columns) {
+    if (column.empty()) {
+      *error = "memory payload column name is empty";
+      return false;
+    }
+  }
 
   size_t line_start = header_end == std::string::npos ? payload.size() : header_end + 1;
   while (line_start < payload.size()) {
@@ -199,6 +204,11 @@ bool resolve_table_scan_payload(
   }
   std::string memory_payload = extract_field(plan_json, "memory_payload");
   if (!memory_payload.empty()) {
+    std::vector<std::string> columns;
+    std::vector<std::vector<std::string>> rows;
+    if (!parse_tsv_payload(memory_payload, &columns, &rows, error)) {
+      return false;
+    }
     *payload = std::move(memory_payload);
     return true;
   }

@@ -104,6 +104,9 @@ fn encode_memory_payload(columns: &[String], rows: &[Vec<String>]) -> ChrysoResu
         ));
     }
     for col in columns {
+        if col.is_empty() {
+            return Err(ChrysoError::new("memory column names must not be empty"));
+        }
         if col.contains('\t') || col.contains('\n') || col.contains('\r') {
             return Err(ChrysoError::new(
                 "memory column names must not contain tab/newline characters",
@@ -244,5 +247,12 @@ mod tests {
         )
         .expect_err("should fail");
         assert!(err.to_string().contains("tab/newline"));
+    }
+
+    #[test]
+    fn encode_memory_payload_rejects_empty_column_names() {
+        let err = encode_memory_payload(&["".to_string()], &[vec!["1".to_string()]])
+            .expect_err("should fail");
+        assert!(err.to_string().contains("must not be empty"));
     }
 }
