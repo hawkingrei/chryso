@@ -1,18 +1,37 @@
 # Chryso
 
-Chryso is a Calcite-style SQL parser + optimizer engine in Rust. It focuses on a clean, modular pipeline (AST -> logical plan -> Cascades optimizer -> physical plan -> adapter) and keeps the core engine execution-agnostic.
+Chryso is an HTAP optimizer engine in Rust. It aims to provide a Calcite-style
+planning core for hybrid transactional/analytical systems: parse SQL, build a
+dialect-neutral logical plan, explore alternatives with a Cascades optimizer,
+choose a costed physical plan, and lower that plan into execution engines such
+as DuckDB, Velox, or future storage/compute adapters.
+
+The project keeps the optimizer engine execution-agnostic. SQL dialect support,
+statistics collection, cost modeling, physical properties, and executor adapters
+are explicit extension points so Chryso can evolve from a runnable demo pipeline
+into a reusable HTAP planning layer.
 
 ## Features
-- Multi-dialect SQL parsing (Postgres + MySQL first)
-- Cascades optimizer with logical and physical rules
-- Cost and statistics hooks via ANALYZE and a lightweight catalog
-- Adapter-based execution (DuckDB first, Velox next)
+- Multi-dialect SQL front-end, with PostgreSQL and MySQL compatibility first.
+- Dialect-neutral logical planning for scans, filters, projections, joins,
+  aggregates, sorting, limits, subqueries, and DML/DDL hooks.
+- Cascades-style optimizer with memo exploration, logical rewrites, physical
+  implementation rules, physical property tracking, join ordering, and tracing.
+- Cost and statistics hooks via `ANALYZE`, a lightweight catalog, cardinality
+  estimation, and cost profiles.
+- Execution-adapter boundary for HTAP backends, starting with DuckDB and Velox.
+- Facade API and FFI/bindings scaffolding for embedding the optimizer in other
+  systems.
 
 ## Status
-- Parser, planner, and core Cascades skeleton are implemented
-- DuckDB adapter translates physical plans to SQL and executes simple queries/DML
-- CI builds and tests with and without the DuckDB feature
-- Velox CI builds the FFI in exec-only mode (no Arrow) to keep the pipeline lean
+- Parser, planner, metadata, and Cascades optimizer crates are implemented.
+- Logical and physical plans cover the main MVP operators needed for HTAP query
+  planning.
+- DuckDB adapter translates physical plans to SQL and executes simple
+  queries/DML.
+- Velox adapter and FFI are available behind feature gates, with CI coverage for
+  an exec-only build.
+- CI builds and tests the core workspace with and without optional adapters.
 
 ## Workspace Layout
 ```
@@ -88,12 +107,19 @@ CHRYSO_RECORD=1 cargo test --test plan_snapshot
 - `docs/ROADMAP.md` for milestones and TODOs
 
 ## Roadmap (Highlights)
-- Parser: expand dialect coverage and AST compatibility
-- Logical rewrites: constant folding and predicate simplification
-- Cascades: richer rule library and join order enumeration
-- Costing: integrate ANALYZE stats into cost models
-- Physical planning: enforcers and required properties
-- Adapters: stabilize DuckDB, then add Velox
+- HTAP planning model: make transactional and analytical execution trade-offs
+  visible in physical properties, costs, and adapter capabilities.
+- Parser: expand PostgreSQL/MySQL dialect coverage and AST compatibility.
+- Logical rewrites: deepen predicate inference, subquery decorrelation, and
+  projection/column pruning.
+- Cascades: improve rule scheduling, join order enumeration, and explainable
+  optimizer traces.
+- Costing: integrate richer `ANALYZE` statistics, histograms, calibration data,
+  and backend-specific cost profiles.
+- Physical planning: strengthen distribution, ordering, parallelism, and
+  enforcer handling for mixed OLTP/OLAP engines.
+- Adapters: stabilize DuckDB, mature Velox, and keep the adapter API open for
+  future HTAP storage/compute backends.
 
 ## License
 TBD.
