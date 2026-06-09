@@ -10,8 +10,8 @@ documentation = "https://docs.rs/chryso-parser-yacc"
 
 [dependencies]
 cfgrammar = "0.14"
-lrlex = "0.13"
-lrpar = "0.13"
+lrlex = "0.14"
+lrpar = "0.14"
 
 [dependencies.chryso-core]
 version = "0.0.2"
@@ -22,6 +22,6 @@ version = "0.0.2"
 path = "../parser"
 
 [build-dependencies]
-lrlex = "0.13"
-lrpar = "0.13"
+lrlex = "0.14"
+lrpar = "0.14"
 cfgrammar = "0.14"
