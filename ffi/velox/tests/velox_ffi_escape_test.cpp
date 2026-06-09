@@ -42,6 +42,36 @@ int main() {
   assert(std::string(result) == "table\nbad?tail\n");
   vx_string_free(result);
 
+  const std::string truncated_unicode_plan =
+      R"({"type":"TableScan","table":"bad\u12)";
+
+  result = nullptr;
+  rc = vx_plan_execute(session, truncated_unicode_plan.c_str(), &result);
+  assert(rc == 0);
+  assert(result != nullptr);
+  assert(std::string(result) == "table\nbad?\n");
+  vx_string_free(result);
+
+  const std::string surrogate_plan =
+      R"({"type":"TableScan","table":"bad\uD800tail"})";
+
+  result = nullptr;
+  rc = vx_plan_execute(session, surrogate_plan.c_str(), &result);
+  assert(rc == 0);
+  assert(result != nullptr);
+  assert(std::string(result) == "table\nbad?tail\n");
+  vx_string_free(result);
+
+  const std::string trailing_backslash_plan =
+      "{\"type\":\"TableScan\",\"table\":\"bad\\";
+
+  result = nullptr;
+  rc = vx_plan_execute(session, trailing_backslash_plan.c_str(), &result);
+  assert(rc == 0);
+  assert(result != nullptr);
+  assert(std::string(result) == "table\nbad\n");
+  vx_string_free(result);
+
   const std::string empty_header_plan =
       R"({"type":"TableScan","table":"bad","storage":"memory","memory_payload":"\tname\n1\talice\n"})";
 

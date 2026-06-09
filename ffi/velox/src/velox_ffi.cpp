@@ -25,7 +25,10 @@ struct Session {
 
 std::string extract_field(const char* json, const char* key);
 
-bool parse_hex4(const char* data, size_t cursor, uint32_t* codepoint) {
+bool parse_hex4(const char* data, size_t len, size_t cursor, uint32_t* codepoint) {
+  if (cursor > len || len - cursor < 4) {
+    return false;
+  }
   uint32_t value = 0;
   for (size_t i = 0; i < 4; ++i) {
     char ch = data[cursor + i];
@@ -52,6 +55,10 @@ bool parse_hex4(const char* data, size_t cursor, uint32_t* codepoint) {
 }
 
 void append_utf8(uint32_t codepoint, std::string* out) {
+  if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
+    out->push_back('?');
+    return;
+  }
   if (codepoint <= 0x7F) {
     out->push_back(static_cast<char>(codepoint));
     return;
@@ -79,8 +86,9 @@ void append_utf8(uint32_t codepoint, std::string* out) {
 
 std::string parse_json_string(const char* data, size_t* cursor) {
   std::string out;
+  size_t len = std::strlen(data);
   size_t pos = *cursor;
-  while (data[pos] != '\0') {
+  while (pos < len) {
     char ch = data[pos++];
     if (ch == '"') {
       break;
@@ -89,10 +97,10 @@ std::string parse_json_string(const char* data, size_t* cursor) {
       out.push_back(ch);
       continue;
     }
-    char escaped = data[pos++];
-    if (escaped == '\0') {
+    if (pos >= len) {
       break;
     }
+    char escaped = data[pos++];
     switch (escaped) {
       case '"':
       case '\\':
@@ -116,12 +124,12 @@ std::string parse_json_string(const char* data, size_t* cursor) {
         break;
       case 'u': {
         uint32_t codepoint = 0;
-        if (parse_hex4(data, pos, &codepoint)) {
+        if (parse_hex4(data, len, pos, &codepoint)) {
           append_utf8(codepoint, &out);
           pos += 4;
         } else {
           out.push_back('?');
-          for (size_t i = 0; i < 4 && data[pos] != '\0'; ++i) {
+          for (size_t i = 0; i < 4 && pos < len; ++i) {
             ++pos;
           }
         }
