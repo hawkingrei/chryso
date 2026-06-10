@@ -81,6 +81,10 @@ impl RuleSet {
     pub fn iter(&self) -> impl Iterator<Item = &Box<dyn Rule + Send + Sync>> {
         self.rules.iter()
     }
+
+    pub fn names(&self) -> Vec<&str> {
+        self.rules.iter().map(|rule| rule.name()).collect()
+    }
 }
 
 impl Default for RuleSet {

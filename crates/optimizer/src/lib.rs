@@ -109,6 +109,7 @@ fn write_candidate(output: &mut String, candidate: &MemoTraceCandidate) {
 pub struct OptimizerConfig {
     pub enable_cascades: bool,
     pub enable_properties: bool,
+    pub enable_join_reorder: bool,
     pub rules: RuleSet,
     pub rule_config: RuleConfig,
     pub search_budget: SearchBudget,
@@ -125,6 +126,7 @@ impl std::fmt::Debug for OptimizerConfig {
         f.debug_struct("OptimizerConfig")
             .field("enable_cascades", &self.enable_cascades)
             .field("enable_properties", &self.enable_properties)
+            .field("enable_join_reorder", &self.enable_join_reorder)
             .field("rules", &self.rules)
             .field("rule_config", &self.rule_config)
             .field("search_budget", &self.search_budget)
@@ -151,6 +153,19 @@ impl RuleConfig {
         }
         !self.disabled_rules.contains(name)
     }
+}
+
+fn effective_rule_config(config: &OptimizerConfig) -> RuleConfig {
+    let mut rule_config = config.rule_config.clone();
+    if !config.enable_join_reorder {
+        rule_config
+            .disabled_rules
+            .insert("join_commute".to_string());
+        if let Some(enabled) = &mut rule_config.enabled_rules {
+            enabled.remove("join_commute");
+        }
+    }
+    rule_config
 }
 
 impl Default for RuleConfig {
@@ -231,6 +246,73 @@ mod tests {
             Some(HashSet::from_iter([String::from("remove_true_filter")]));
         let plan = CascadesOptimizer::new(config).optimize(&logical, &mut StatsCache::new());
         assert!(matches!(plan, PhysicalPlan::TableScan { .. }));
+    }
+
+    #[test]
+    fn optimizer_no_reorder_overrides_join_commute() {
+        let logical = LogicalPlan::Join {
+            join_type: chryso_core::ast::JoinType::Inner,
+            left: Box::new(LogicalPlan::Scan {
+                table: "big".to_string(),
+            }),
+            right: Box::new(LogicalPlan::Scan {
+                table: "small".to_string(),
+            }),
+            on: Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("big.id".to_string())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Identifier("small.id".to_string())),
+            },
+        };
+        let mut stats = StatsCache::new();
+        stats.insert_table_stats("big", TableStats { row_count: 1_000.0 });
+        stats.insert_table_stats("small", TableStats { row_count: 1.0 });
+        let mut config = OptimizerConfig::default();
+        config.enable_join_reorder = false;
+        config.debug_rules = true;
+        config.rule_config.enabled_rules = Some(HashSet::from_iter([String::from("join_commute")]));
+
+        let (plan, trace) =
+            CascadesOptimizer::new(config).optimize_with_trace(&logical, &mut stats);
+
+        assert!(
+            !trace
+                .applied_rules
+                .iter()
+                .any(|name| name == "join_commute"),
+            "join_commute should be disabled by no-reorder, got {:?}",
+            trace.applied_rules
+        );
+        let explain = plan.explain(0);
+        let big_pos = explain.find("TableScan table=big").expect("big scan");
+        let small_pos = explain.find("TableScan table=small").expect("small scan");
+        assert!(
+            big_pos < small_pos,
+            "no-reorder should preserve input order, got:\n{explain}"
+        );
+    }
+
+    #[test]
+    fn enabled_rule_names_reflect_no_reorder() {
+        let default_optimizer = CascadesOptimizer::new(OptimizerConfig::default());
+        assert!(
+            default_optimizer
+                .enabled_rule_names()
+                .iter()
+                .any(|name| *name == "join_commute")
+        );
+
+        let mut config = OptimizerConfig::default();
+        config.enable_join_reorder = false;
+        config.rule_config.enabled_rules = Some(HashSet::from_iter([String::from("join_commute")]));
+        let optimizer = CascadesOptimizer::new(config);
+
+        assert!(
+            !optimizer
+                .enabled_rule_names()
+                .iter()
+                .any(|name| *name == "join_commute")
+        );
     }
 
     #[test]
@@ -446,6 +528,7 @@ impl Default for OptimizerConfig {
         Self {
             enable_cascades: true,
             enable_properties: true,
+            enable_join_reorder: true,
             rules: RuleSet::default(),
             rule_config: RuleConfig::default(),
             search_budget: SearchBudget::default(),
@@ -466,6 +549,20 @@ pub struct CascadesOptimizer {
 impl CascadesOptimizer {
     pub fn new(config: OptimizerConfig) -> Self {
         Self { config }
+    }
+
+    pub fn rule_names(&self) -> Vec<&str> {
+        self.config.rules.names()
+    }
+
+    pub fn enabled_rule_names(&self) -> Vec<&str> {
+        let rule_config = effective_rule_config(&self.config);
+        self.config
+            .rules
+            .names()
+            .into_iter()
+            .filter(|name| rule_config.is_enabled(name))
+            .collect()
     }
 
     pub fn optimize(&self, logical: &LogicalPlan, stats: &mut StatsCache) -> PhysicalPlan {
@@ -521,12 +618,13 @@ fn optimize_with_cascades(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
+    let rule_config = effective_rule_config(config);
     // Keep rule side effects (e.g., literal conflicts) explicit and thread-safe.
     let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
-        &config.rule_config,
+        &rule_config,
         &mut trace,
         &mut rule_ctx,
         config.debug_rules,
@@ -540,10 +638,14 @@ fn optimize_with_cascades(
     trace.conflict_pairs.extend(conflict_pairs);
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
-    let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
+    let candidates = if config.enable_join_reorder {
+        crate::join_order::enumerate_join_orders(&logical, _stats)
+    } else {
+        vec![logical.clone()]
+    };
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
-    memo.explore(&config.rules, &config.rule_config, &config.search_budget);
+    memo.explore(&config.rules, &rule_config, &config.search_budget);
     let cost_model = build_cost_model(_stats, config, Some(&mut trace));
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let mut best = memo
@@ -561,21 +663,26 @@ fn optimize_with_cascades_memo(
     config: &OptimizerConfig,
     _stats: &StatsCache,
 ) -> (PhysicalPlan, MemoTrace) {
+    let rule_config = effective_rule_config(config);
     let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
         logical,
         &config.rules,
-        &config.rule_config,
+        &rule_config,
         &mut OptimizerTrace::new(),
         &mut rule_ctx,
         config.debug_rules,
     );
     let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
-    let candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
+    let candidates = if config.enable_join_reorder {
+        crate::join_order::enumerate_join_orders(&logical, _stats)
+    } else {
+        vec![logical.clone()]
+    };
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
-    memo.explore(&config.rules, &config.rule_config, &config.search_budget);
+    memo.explore(&config.rules, &rule_config, &config.search_budget);
     let cost_model = build_cost_model(_stats, config, None);
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
     let trace = memo.trace(&physical_rules, cost_model.as_ref());

@@ -29,7 +29,7 @@ fn main() {
             return;
         }
     };
-    let mut runner = match PipelineRunner::new(cli_args.engine) {
+    let mut runner = match PipelineRunner::new(cli_args.engine, !cli_args.no_reorder) {
         Ok(runner) => runner,
         Err(err) => {
             eprintln!("error: {err}");
@@ -37,6 +37,14 @@ fn main() {
         }
     };
     runner.context = SessionContext::new(cli_args.database, cli_args.user, cli_args.default_schema);
+    if cli_args.dump_rule_order {
+        for line in runner.rule_order_lines() {
+            println!("{line}");
+        }
+        if cli_args.sql_parts.is_empty() {
+            return;
+        }
+    }
     if !cli_args.sql_parts.is_empty() {
         let sql = cli_args.sql_parts.join(" ");
         if let Err(err) = execute_non_interactive_with_memo(
@@ -70,6 +78,8 @@ fn main() {
 struct CliArgs {
     dump_memo: bool,
     memo_best_only: bool,
+    no_reorder: bool,
+    dump_rule_order: bool,
     engine: EngineMode,
     database: String,
     user: String,
@@ -81,6 +91,8 @@ impl CliArgs {
     fn parse(args: Vec<String>) -> chryso::ChrysoResult<Self> {
         let mut dump_memo = false;
         let mut memo_best_only = false;
+        let mut no_reorder = false;
+        let mut dump_rule_order = false;
         let mut engine = EngineMode::Sql;
         let mut database = "default".to_string();
         let mut user = "default".to_string();
@@ -92,6 +104,8 @@ impl CliArgs {
             match arg.as_str() {
                 "--dump-memo" => dump_memo = true,
                 "--memo-best-only" => memo_best_only = true,
+                "--no-reorder" => no_reorder = true,
+                "--dump-rule-order" => dump_rule_order = true,
                 "--engine" => {
                     let Some(value) = iter.next() else {
                         return Err(chryso::ChrysoError::new("--engine expects a value"));
@@ -135,6 +149,8 @@ impl CliArgs {
         Ok(Self {
             dump_memo,
             memo_best_only,
+            no_reorder,
+            dump_rule_order,
             engine,
             database,
             user,
@@ -494,6 +510,7 @@ fn handle_meta_command(
             execute_script(&content, runner, state)
         }
         ".stats" => Ok(format_stats_status(&runner.stats.status())),
+        ".optimizer-rules" => Ok(runner.rule_order_lines()),
         ".explain" => {
             let rest = parts.collect::<Vec<_>>().join(" ");
             if rest.trim().is_empty() {
@@ -608,12 +625,13 @@ impl PipelineRunner {
     const BRIEF_EXPLAIN_MAX_EXPR_LENGTH: usize = 60;
     const VERBOSE_EXPLAIN_MAX_EXPR_LENGTH: usize = 80;
 
-    fn new(engine: EngineMode) -> chryso::ChrysoResult<Self> {
+    fn new(engine: EngineMode, enable_join_reorder: bool) -> chryso::ChrysoResult<Self> {
         let adapter = build_adapter(engine)?;
         let parser = SimpleParser::new(ParserConfig {
             dialect: Dialect::Postgres,
         });
         let mut config = OptimizerConfig::default();
+        config.enable_join_reorder = enable_join_reorder;
         if let Adapter::Duck(adapter) = &adapter {
             config.stats_provider = Some(adapter.clone());
         }
@@ -625,6 +643,14 @@ impl PipelineRunner {
             stats: StatsCache::new(),
             context: SessionContext::default(),
         })
+    }
+
+    fn rule_order_lines(&self) -> Vec<String> {
+        let mut lines = vec!["optimizer enabled rule order".to_string()];
+        for (idx, name) in self.optimizer.enabled_rule_names().into_iter().enumerate() {
+            lines.push(format!("{:02}: {name}", idx + 1));
+        }
+        lines
     }
 
     fn execute_line(&mut self, sql: &str) -> chryso::ChrysoResult<Vec<String>> {
@@ -917,6 +943,7 @@ fn help_lines() -> Vec<String> {
         ".schema [table]".to_string(),
         ".read <path>".to_string(),
         ".stats".to_string(),
+        ".optimizer-rules".to_string(),
         ".explain <sql>".to_string(),
         ".explain-mode brief|verbose".to_string(),
         ".headers on|off".to_string(),
@@ -1040,8 +1067,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_optimizer_debug_flags() {
+        let args = vec![
+            "--no-reorder".to_string(),
+            "--dump-rule-order".to_string(),
+            "select".to_string(),
+            "1".to_string(),
+        ];
+        let parsed = CliArgs::parse(args).expect("parse");
+        assert!(parsed.no_reorder);
+        assert!(parsed.dump_rule_order);
+        assert_eq!(parsed.sql_parts, vec!["select", "1"]);
+    }
+
+    #[test]
+    fn rule_order_lines_respect_no_reorder() {
+        let runner = PipelineRunner::new(EngineMode::Mock, false).expect("runner");
+        let lines = runner.rule_order_lines();
+
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("optimizer enabled rule order")
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("join_commute")),
+            "no-reorder rule output should exclude join_commute, got {lines:?}"
+        );
+    }
+
+    #[test]
     fn help_lists_stats_meta_command() {
         let lines = help_lines();
         assert!(lines.iter().any(|line| line == ".stats"));
+        assert!(lines.iter().any(|line| line == ".optimizer-rules"));
     }
 }
