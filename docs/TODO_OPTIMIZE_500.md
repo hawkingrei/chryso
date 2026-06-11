@@ -8,6 +8,9 @@
 - Adapter tests: add table-driven fixtures to validate SimpleParser + YaccParser end-to-end pipeline for the same SQL set (duckdb adapter), ensuring identical behavior.
 - YaccParser: support function calls (including count(*)) and keep DML roundtrip coverage in duckdb pipeline tests.
 - Optimizer trace: record lhs/rhs conflict pairs alongside literal conflict strings for deterministic debugging.
+- done - Optimizer: document cost model assumptions and coefficient semantics in `docs/COST_MODEL.md`.
+- done - Optimizer: add `--no-reorder` mode for rule isolation tests.
+- done - Optimizer: expose rule ordering via `chryso-cli --dump-rule-order` and `.optimizer-rules`.
 
 ## Orca-Inspired Optimization TODOs (Cost/Testing/Concurrency)
 
@@ -15,13 +18,13 @@
 512. Optimizer: add rule impact reporting (plan diff + cost delta).
 513. Optimizer: add a seedable evaluation mode to ensure repeatability.
 516. Optimizer: add multi-scenario tests (different stats distributions for same query).
-518. Optimizer: document cost model assumptions and coefficient semantics in `docs/`.
+518. done - Optimizer: document cost model assumptions and coefficient semantics in `docs/COST_MODEL.md`.
 519. Optimizer: add optional "explain cost breakdown" by operator.
 520. Optimizer: add a cost sensitivity report (delta per coefficient).
 521. Optimizer: add a minimal "optimizer playground" binary for rapid iteration.
 522. Optimizer: add a CSV/JSON export of candidate plans + costs.
-523. Optimizer: add a CLI option to lock rule ordering for reproducibility.
-524. Optimizer: add a `--no-reorder` mode for rule isolation tests.
+523. done - Optimizer: expose rule ordering for reproducibility.
+524. done - Optimizer: add a `--no-reorder` mode for rule isolation tests.
 525. Optimizer: add benchmarks that run optimizer only (no execution).
 527. Optimizer: add a "plan equivalence" checker to avoid false regressions.
 528. Optimizer: add support for per-query cost overrides.

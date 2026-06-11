@@ -11,50 +11,16 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut query_dir = None;
-    let mut dialect = Dialect::Postgres;
-    let mut out_path: Option<PathBuf> = None;
-    let mut iter = args.into_iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--queries" => {
-                if let Some(path) = iter.next() {
-                    query_dir = Some(PathBuf::from(path));
-                }
-            }
-            "--dialect" => {
-                if let Some(value) = iter.next() {
-                    dialect = match value.as_str() {
-                        "postgres" => Dialect::Postgres,
-                        "mysql" => Dialect::MySql,
-                        other => {
-                            eprintln!("unknown dialect: {other}");
-                            std::process::exit(1);
-                        }
-                    };
-                }
-            }
-            "--out" => {
-                if let Some(path) = iter.next() {
-                    out_path = Some(PathBuf::from(path));
-                }
-            }
-            other => {
-                eprintln!("unknown argument: {other}");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    let query_dir = match query_dir {
-        Some(dir) => dir,
-        None => {
-            eprintln!("missing --queries <dir>");
+    let tune_args = match TuneArgs::parse(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{err}");
             std::process::exit(1);
         }
     };
 
-    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
+    let query_dir = tune_args.query_dir;
+    let mut writer: Box<dyn Write> = if let Some(path) = tune_args.out_path {
         let file = fs::File::create(path).unwrap_or_else(|err| {
             eprintln!("failed to open output file: {err}");
             std::process::exit(1);
@@ -79,7 +45,7 @@ fn main() {
     };
     entries.sort();
 
-    let mut runner = TuneRunner::new(dialect);
+    let mut runner = TuneRunner::new(tune_args.dialect, tune_args.enable_join_reorder);
     for path in entries {
         if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) {
             match runner.run_query_file(&path) {
@@ -94,6 +60,70 @@ fn main() {
     }
 }
 
+#[derive(Debug)]
+struct TuneArgs {
+    query_dir: PathBuf,
+    dialect: Dialect,
+    out_path: Option<PathBuf>,
+    enable_join_reorder: bool,
+}
+
+impl TuneArgs {
+    fn parse(args: Vec<String>) -> chryso::ChrysoResult<Self> {
+        let mut query_dir = None;
+        let mut dialect = Dialect::Postgres;
+        let mut out_path: Option<PathBuf> = None;
+        let mut enable_join_reorder = true;
+        let mut iter = args.into_iter();
+        while let Some(arg) = iter.next() {
+            match arg.as_str() {
+                "--queries" => {
+                    if let Some(path) = iter.next() {
+                        query_dir = Some(PathBuf::from(path));
+                    }
+                }
+                "--dialect" => {
+                    if let Some(value) = iter.next() {
+                        dialect = parse_dialect(&value)?;
+                    }
+                }
+                "--out" => {
+                    if let Some(path) = iter.next() {
+                        out_path = Some(PathBuf::from(path));
+                    }
+                }
+                "--no-reorder" => {
+                    enable_join_reorder = false;
+                }
+                other => {
+                    return Err(chryso::ChrysoError::new(format!(
+                        "unknown argument: {other}"
+                    )));
+                }
+            }
+        }
+        let Some(query_dir) = query_dir else {
+            return Err(chryso::ChrysoError::new("missing --queries <dir>"));
+        };
+        Ok(Self {
+            query_dir,
+            dialect,
+            out_path,
+            enable_join_reorder,
+        })
+    }
+}
+
+fn parse_dialect(value: &str) -> chryso::ChrysoResult<Dialect> {
+    match value {
+        "postgres" => Ok(Dialect::Postgres),
+        "mysql" => Ok(Dialect::MySql),
+        other => Err(chryso::ChrysoError::new(format!(
+            "unknown dialect: {other}"
+        ))),
+    }
+}
+
 struct TuneRunner {
     parser: SimpleParser,
     optimizer: CascadesOptimizer,
@@ -101,10 +131,12 @@ struct TuneRunner {
 }
 
 impl TuneRunner {
-    fn new(dialect: Dialect) -> Self {
+    fn new(dialect: Dialect, enable_join_reorder: bool) -> Self {
+        let mut config = OptimizerConfig::default();
+        config.enable_join_reorder = enable_join_reorder;
         Self {
             parser: SimpleParser::new(ParserConfig { dialect }),
-            optimizer: CascadesOptimizer::new(OptimizerConfig::default()),
+            optimizer: CascadesOptimizer::new(config),
             stats: StatsCache::new(),
         }
     }
@@ -130,5 +162,35 @@ impl TuneRunner {
         let physical = self.optimizer.optimize(&logical, &mut self.stats);
         let cost_model = StatsCostModel::new(&self.stats);
         Ok(cost_model.cost(&physical).0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tune_args_supports_no_reorder() {
+        let parsed = TuneArgs::parse(vec![
+            "--queries".to_string(),
+            "queries".to_string(),
+            "--dialect".to_string(),
+            "mysql".to_string(),
+            "--no-reorder".to_string(),
+            "--out".to_string(),
+            "costs.csv".to_string(),
+        ])
+        .expect("parse");
+
+        assert_eq!(parsed.query_dir, PathBuf::from("queries"));
+        assert!(matches!(parsed.dialect, Dialect::MySql));
+        assert_eq!(parsed.out_path, Some(PathBuf::from("costs.csv")));
+        assert!(!parsed.enable_join_reorder);
+    }
+
+    #[test]
+    fn parse_tune_args_requires_queries() {
+        let err = TuneArgs::parse(vec!["--no-reorder".to_string()]).expect_err("missing queries");
+        assert!(err.to_string().contains("missing --queries"));
     }
 }

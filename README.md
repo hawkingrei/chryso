@@ -102,6 +102,7 @@ CHRYSO_RECORD=1 cargo test --test plan_snapshot
 ## Docs
 - `docs/ARCHITECTURE.md` for the planning pipeline and module overview
 - `docs/RULES.md` for rule conventions and current rule set
+- `docs/COST_MODEL.md` for cost coefficients, stats fallback, and tuning workflow
 - `docs/ADAPTERS.md` for adapter design
 - `docs/BAZEL.md` for Bazel targets and scope
 - `docs/ROADMAP.md` for milestones and TODOs
