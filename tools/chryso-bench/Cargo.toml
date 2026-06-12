@@ -1,0 +1,15 @@
+[package]
+name = "chryso-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["duckdb"]
+duckdb = ["chryso/duckdb"]
+
+[dependencies]
+chryso = { path = "../..", default-features = false }
+tpchgen = "2.0.2"
