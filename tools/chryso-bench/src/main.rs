@@ -415,57 +415,57 @@ fn write_tpch_table(table: BenchTable, scale_factor: f64, out_dir: &Path) -> Chr
             out_dir.join("nation.csv"),
             NationCsv::header(),
             NationGenerator::new(scale_factor, 1, 1).iter(),
-            |row| NationCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", NationCsv::new(row)),
         ),
         BenchTable::Region => write_csv(
             out_dir.join("region.csv"),
             RegionCsv::header(),
             RegionGenerator::new(scale_factor, 1, 1).iter(),
-            |row| RegionCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", RegionCsv::new(row)),
         ),
         BenchTable::Part => write_csv(
             out_dir.join("part.csv"),
             PartCsv::header(),
             PartGenerator::new(scale_factor, 1, 1).iter(),
-            |row| PartCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", PartCsv::new(row)),
         ),
         BenchTable::Supplier => write_csv(
             out_dir.join("supplier.csv"),
             SupplierCsv::header(),
             SupplierGenerator::new(scale_factor, 1, 1).iter(),
-            |row| SupplierCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", SupplierCsv::new(row)),
         ),
         BenchTable::Partsupp => write_csv(
             out_dir.join("partsupp.csv"),
             PartSuppCsv::header(),
             PartSuppGenerator::new(scale_factor, 1, 1).iter(),
-            |row| PartSuppCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", PartSuppCsv::new(row)),
         ),
         BenchTable::Customer => write_csv(
             out_dir.join("customer.csv"),
             CustomerCsv::header(),
             CustomerGenerator::new(scale_factor, 1, 1).iter(),
-            |row| CustomerCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", CustomerCsv::new(row)),
         ),
         BenchTable::Orders => write_csv(
             out_dir.join("orders.csv"),
             OrderCsv::header(),
             OrderGenerator::new(scale_factor, 1, 1).iter(),
-            |row| OrderCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", OrderCsv::new(row)),
         ),
         BenchTable::Lineitem => write_csv(
             out_dir.join("lineitem.csv"),
             LineItemCsv::header(),
             LineItemGenerator::new(scale_factor, 1, 1).iter(),
-            |row| LineItemCsv::new(row).to_string(),
+            |writer, row| writeln!(writer, "{}", LineItemCsv::new(row)),
         ),
     }
 }
 
-fn write_csv<T, I, F>(path: PathBuf, header: &str, rows: I, format_row: F) -> ChrysoResult<()>
+fn write_csv<T, I, F>(path: PathBuf, header: &str, rows: I, mut write_row: F) -> ChrysoResult<()>
 where
     I: IntoIterator<Item = T>,
-    F: Fn(T) -> String,
+    F: FnMut(&mut BufWriter<File>, T) -> std::io::Result<()>,
 {
     let file = File::create(&path)
         .map_err(|err| ChrysoError::new(format!("failed to create {}: {err}", path.display())))?;
@@ -477,7 +477,7 @@ where
         ))
     })?;
     for row in rows {
-        writeln!(writer, "{}", format_row(row)).map_err(|err| {
+        write_row(&mut writer, row).map_err(|err| {
             ChrysoError::new(format!("failed to write row to {}: {err}", path.display()))
         })?;
     }
