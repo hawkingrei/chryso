@@ -1,0 +1,70 @@
+name: bench
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tpch-bench-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-01-19
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-targets: false
+
+      - name: Build benchmark tool
+        working-directory: tools/chryso-bench
+        run: cargo build --no-default-features
+
+      - name: Test benchmark tool
+        working-directory: tools/chryso-bench
+        run: cargo test --no-default-features
+
+      - name: Run 60-second TPC-H generator smoke
+        working-directory: tools/chryso-bench
+        run: |
+          set -euo pipefail
+
+          bin="${GITHUB_WORKSPACE}/target/debug/chryso-bench"
+          out="${RUNNER_TEMP}/chryso-bench-smoke"
+          end=$((SECONDS + 60))
+          runs=0
+
+          while [ "${SECONDS}" -lt "${end}" ]; do
+            rm -rf "${out}"
+            "${bin}" tpch generate \
+              --scale-factor 0.001 \
+              --out "${out}" \
+              --threads 1 \
+              --tables nation,region
+            test -s "${out}/nation.csv"
+            test -s "${out}/region.csv"
+            runs=$((runs + 1))
+          done
+
+          {
+            echo "### TPC-H benchmark smoke"
+            echo
+            echo "Completed runs: ${runs}"
+            echo "Duration: 60 seconds"
+          } >> "${GITHUB_STEP_SUMMARY}"
