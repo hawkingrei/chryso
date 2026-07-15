@@ -54,6 +54,7 @@ pub struct MemoTrace {
 #[derive(Debug, Clone)]
 pub struct MemoTraceGroup {
     pub id: usize,
+    pub required_properties: String,
     pub candidates: Vec<MemoTraceCandidate>,
 }
 
@@ -61,6 +62,8 @@ pub struct MemoTraceGroup {
 pub struct MemoTraceCandidate {
     pub cost: f64,
     pub plan: String,
+    pub selected: bool,
+    pub reason: String,
 }
 
 impl MemoTrace {
@@ -80,8 +83,9 @@ fn format_memo_trace(trace: &MemoTrace, best_only: bool) -> String {
     for group in &trace.groups {
         let _ = writeln!(
             &mut output,
-            "group={} candidates={}",
+            "group={} required={} candidates={}",
             group.id,
+            group.required_properties,
             group.candidates.len()
         );
         if best_only {
@@ -100,7 +104,11 @@ fn format_memo_trace(trace: &MemoTrace, best_only: bool) -> String {
 fn write_candidate(output: &mut String, candidate: &MemoTraceCandidate) {
     use std::fmt::Write;
 
-    let _ = writeln!(output, "  cost={:.3}", candidate.cost);
+    let _ = writeln!(
+        output,
+        "  cost={:.3} selected={} reason={}",
+        candidate.cost, candidate.selected, candidate.reason
+    );
     for line in candidate.plan.lines() {
         let _ = writeln!(output, "    {line}");
     }
@@ -313,6 +321,26 @@ mod tests {
                 .iter()
                 .any(|name| *name == "join_commute")
         );
+    }
+
+    #[test]
+    fn optimizer_enforces_requested_root_properties() {
+        let logical = LogicalPlan::Scan {
+            table: "t".to_string(),
+        };
+        let required = crate::properties::PhysicalProperties {
+            ordering: crate::properties::Ordering::Sorted(vec![
+                crate::properties::OrderingKey::ascending("id"),
+            ]),
+            distribution: crate::properties::Distribution::Single,
+        };
+        let plan = CascadesOptimizer::new(OptimizerConfig::default()).optimize_with_properties(
+            &logical,
+            &mut StatsCache::new(),
+            &required,
+        );
+        assert!(crate::properties::derive_properties(&plan).satisfies(&required));
+        assert!(matches!(plan, PhysicalPlan::Sort { .. }));
     }
 
     #[test]
@@ -576,6 +604,22 @@ impl CascadesOptimizer {
         }
     }
 
+    pub fn optimize_with_properties(
+        &self,
+        logical: &LogicalPlan,
+        stats: &mut StatsCache,
+        required: &crate::properties::PhysicalProperties,
+    ) -> PhysicalPlan {
+        let _ = ensure_stats(logical, stats, &self.config);
+        let logical = crate::expr_rewrite::rewrite_plan(logical);
+        let logical = crate::column_prune::prune_plan(&logical);
+        if self.config.enable_cascades {
+            optimize_with_cascades_required(&logical, &self.config, stats, required).0
+        } else {
+            crate::enforcer::enforce(logical_to_physical(&logical), required)
+        }
+    }
+
     pub fn optimize_with_trace(
         &self,
         logical: &LogicalPlan,
@@ -617,12 +661,28 @@ fn optimize_with_cascades(
     config: &OptimizerConfig,
     _stats: &StatsCache,
 ) -> (PhysicalPlan, OptimizerTrace) {
+    optimize_with_cascades_required(
+        logical,
+        config,
+        _stats,
+        &crate::properties::PhysicalProperties::default(),
+    )
+}
+
+fn optimize_with_cascades_required(
+    logical: &LogicalPlan,
+    config: &OptimizerConfig,
+    _stats: &StatsCache,
+    required: &crate::properties::PhysicalProperties,
+) -> (PhysicalPlan, OptimizerTrace) {
     let mut trace = OptimizerTrace::new();
     let rule_config = effective_rule_config(config);
+    let original = crate::subquery::rewrite_correlated_subqueries(logical);
+    let original = crate::expr_rewrite::rewrite_plan(&original);
     // Keep rule side effects (e.g., literal conflicts) explicit and thread-safe.
     let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
-        logical,
+        &original,
         &config.rules,
         &rule_config,
         &mut trace,
@@ -636,25 +696,38 @@ fn optimize_with_cascades(
             .map(|pair| (pair.lhs.clone(), pair.rhs.clone())),
     );
     trace.conflict_pairs.extend(conflict_pairs);
-    let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
-    let candidates = if config.enable_join_reorder {
-        crate::join_order::enumerate_join_orders(&logical, _stats)
+    let mut candidates = if config.enable_join_reorder {
+        let mut candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
+        candidates.extend(crate::join_order::enumerate_join_orders(&original, _stats));
+        candidates
     } else {
         vec![logical.clone()]
     };
+    if !config.enable_join_reorder && original.explain(0) != logical.explain(0) {
+        candidates.push(original);
+    }
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
-    memo.explore(&config.rules, &rule_config, &config.search_budget);
+    for candidate in candidates.iter().skip(1) {
+        memo.insert_equivalent(root, candidate);
+    }
+    let explored = memo.explore(&config.rules, &rule_config, &config.search_budget);
+    if config.debug_rules {
+        trace.applied_rules.extend(explored.applied_rules);
+    }
+    trace.conflicting_literals.extend(
+        explored
+            .conflict_pairs
+            .iter()
+            .map(|pair| (pair.lhs.clone(), pair.rhs.clone())),
+    );
+    trace.conflict_pairs.extend(explored.conflict_pairs);
     let cost_model = build_cost_model(_stats, config, Some(&mut trace));
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
-    let mut best = memo
-        .best_physical(root, &physical_rules, cost_model.as_ref())
-        .unwrap_or_else(|| logical_to_physical(&logical));
-    if config.enable_properties {
-        let required = crate::properties::PhysicalProperties::default();
-        best = crate::enforcer::enforce(best, &required);
-    }
+    let best = memo
+        .best_physical_for_properties(root, required, &physical_rules, cost_model.as_ref())
+        .unwrap_or_else(|| crate::enforcer::enforce(logical_to_physical(&logical), required));
     (best, trace)
 }
 
@@ -664,35 +737,43 @@ fn optimize_with_cascades_memo(
     _stats: &StatsCache,
 ) -> (PhysicalPlan, MemoTrace) {
     let rule_config = effective_rule_config(config);
+    let original = crate::subquery::rewrite_correlated_subqueries(logical);
+    let original = crate::expr_rewrite::rewrite_plan(&original);
     let mut rule_ctx = RuleContext::default();
     let logical = apply_rules_fixpoint(
-        logical,
+        &original,
         &config.rules,
         &rule_config,
         &mut OptimizerTrace::new(),
         &mut rule_ctx,
         config.debug_rules,
     );
-    let logical = crate::subquery::rewrite_correlated_subqueries(&logical);
     let logical = crate::expr_rewrite::rewrite_plan(&logical);
-    let candidates = if config.enable_join_reorder {
-        crate::join_order::enumerate_join_orders(&logical, _stats)
+    let mut candidates = if config.enable_join_reorder {
+        let mut candidates = crate::join_order::enumerate_join_orders(&logical, _stats);
+        candidates.extend(crate::join_order::enumerate_join_orders(&original, _stats));
+        candidates
     } else {
         vec![logical.clone()]
     };
+    if !config.enable_join_reorder && original.explain(0) != logical.explain(0) {
+        candidates.push(original);
+    }
     let mut memo = Memo::new();
     let root = memo.insert(candidates.first().unwrap_or(&logical));
-    memo.explore(&config.rules, &rule_config, &config.search_budget);
+    for candidate in candidates.iter().skip(1) {
+        memo.insert_equivalent(root, candidate);
+    }
+    let _ = memo.explore(&config.rules, &rule_config, &config.search_budget);
     let cost_model = build_cost_model(_stats, config, None);
     let physical_rules = crate::physical_rules::PhysicalRuleSet::default();
-    let trace = memo.trace(&physical_rules, cost_model.as_ref());
-    let mut best = memo
-        .best_physical(root, &physical_rules, cost_model.as_ref())
-        .unwrap_or_else(|| logical_to_physical(&logical));
-    if config.enable_properties {
-        let required = crate::properties::PhysicalProperties::default();
-        best = crate::enforcer::enforce(best, &required);
-    }
+    let (best, trace) = memo.best_physical_with_trace(
+        root,
+        &crate::properties::PhysicalProperties::default(),
+        &physical_rules,
+        cost_model.as_ref(),
+    );
+    let best = best.unwrap_or_else(|| logical_to_physical(&logical));
     (best, trace)
 }
 

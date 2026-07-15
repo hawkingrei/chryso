@@ -149,7 +149,8 @@ impl ExplainFormatter {
             PhysicalPlan::Dml { .. } => 1.0,
             PhysicalPlan::Derived { input, .. }
             | PhysicalPlan::Projection { input, .. }
-            | PhysicalPlan::Sort { input, .. } => {
+            | PhysicalPlan::Sort { input, .. }
+            | PhysicalPlan::Exchange { input, .. } => {
                 self.estimate_physical_cardinality(input, estimator, stats)
             }
             PhysicalPlan::Filter { input, .. } => {
@@ -605,6 +606,25 @@ impl ExplainFormatter {
                     self.format_order_by_list(order_by),
                     cost_str,
                     cardinality_str
+                ));
+                let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
+                self.format_physical_node(
+                    input,
+                    depth + 1,
+                    cost_model,
+                    estimator_stats,
+                    output,
+                    true,
+                    &child_prefix,
+                );
+            }
+            PhysicalPlan::Exchange {
+                distribution,
+                input,
+            } => {
+                output.push_str(&format!(
+                    "{}Exchange: distribution={:?}{}{}\n",
+                    node_prefix, distribution, cost_str, cardinality_str
                 ));
                 let child_prefix = format!("{}{}", prefix, self.get_child_prefix(depth, is_last));
                 self.format_physical_node(

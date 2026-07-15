@@ -13,6 +13,7 @@ pub struct CostModelConfig {
     pub projection: f64,
     pub join: f64,
     pub sort: f64,
+    pub exchange: f64,
     pub aggregate: f64,
     pub limit: f64,
     pub derived: f64,
@@ -30,6 +31,7 @@ impl Default for CostModelConfig {
             projection: 0.1,
             join: 5.0,
             sort: 3.0,
+            exchange: 6.0,
             aggregate: 4.0,
             limit: 0.05,
             derived: 0.1,
@@ -47,6 +49,7 @@ impl CostModelConfig {
     pub const PARAM_PROJECTION: &'static str = "optimizer.cost.projection";
     pub const PARAM_JOIN: &'static str = "optimizer.cost.join";
     pub const PARAM_SORT: &'static str = "optimizer.cost.sort";
+    pub const PARAM_EXCHANGE: &'static str = "optimizer.cost.exchange";
     pub const PARAM_AGGREGATE: &'static str = "optimizer.cost.aggregate";
     pub const PARAM_LIMIT: &'static str = "optimizer.cost.limit";
     pub const PARAM_DERIVED: &'static str = "optimizer.cost.derived";
@@ -69,6 +72,7 @@ impl CostModelConfig {
             ("projection", self.projection),
             ("join", self.join),
             ("sort", self.sort),
+            ("exchange", self.exchange),
             ("aggregate", self.aggregate),
             ("limit", self.limit),
             ("derived", self.derived),
@@ -115,6 +119,7 @@ impl CostModelConfig {
         apply(Self::PARAM_PROJECTION, &mut updated.projection);
         apply(Self::PARAM_JOIN, &mut updated.join);
         apply(Self::PARAM_SORT, &mut updated.sort);
+        apply(Self::PARAM_EXCHANGE, &mut updated.exchange);
         apply(Self::PARAM_AGGREGATE, &mut updated.aggregate);
         apply(Self::PARAM_LIMIT, &mut updated.limit);
         apply(Self::PARAM_DERIVED, &mut updated.derived);
@@ -367,6 +372,7 @@ fn node_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
         PhysicalPlan::Distinct { .. } => config.aggregate,
         PhysicalPlan::TopN { .. } => config.sort,
         PhysicalPlan::Sort { .. } => config.sort,
+        PhysicalPlan::Exchange { .. } => config.exchange,
         PhysicalPlan::Limit { .. } => config.limit,
         PhysicalPlan::Derived { .. } => config.derived,
         PhysicalPlan::Dml { .. } => config.dml,
@@ -386,6 +392,7 @@ fn total_weight(plan: &PhysicalPlan, config: &CostModelConfig) -> f64 {
         | PhysicalPlan::Distinct { input }
         | PhysicalPlan::TopN { input, .. }
         | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Exchange { input, .. }
         | PhysicalPlan::Limit { input, .. }
         | PhysicalPlan::Derived { input, .. } => total_weight(input, config),
         PhysicalPlan::TableScan { .. }
@@ -409,6 +416,7 @@ fn total_stats_cost(plan: &PhysicalPlan, stats: &StatsCache, config: &CostModelC
         | PhysicalPlan::Distinct { input }
         | PhysicalPlan::TopN { input, .. }
         | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Exchange { input, .. }
         | PhysicalPlan::Limit { input, .. }
         | PhysicalPlan::Derived { input, .. } => total_stats_cost(input, stats, config),
         PhysicalPlan::TableScan { .. }
@@ -439,6 +447,7 @@ fn estimate_rows(plan: &PhysicalPlan, stats: &StatsCache) -> f64 {
         PhysicalPlan::Distinct { input } => (estimate_rows(input, stats) * 0.3).max(1.0),
         PhysicalPlan::TopN { limit, input, .. } => estimate_rows(input, stats).min(*limit as f64),
         PhysicalPlan::Sort { input, .. } => estimate_rows(input, stats),
+        PhysicalPlan::Exchange { input, .. } => estimate_rows(input, stats),
         PhysicalPlan::Limit { limit, input, .. } => match limit {
             Some(limit) => estimate_rows(input, stats).min(*limit as f64),
             None => estimate_rows(input, stats),
@@ -535,6 +544,7 @@ fn single_table_name(plan: &PhysicalPlan) -> Option<String> {
         | PhysicalPlan::Distinct { input }
         | PhysicalPlan::TopN { input, .. }
         | PhysicalPlan::Sort { input, .. }
+        | PhysicalPlan::Exchange { input, .. }
         | PhysicalPlan::Limit { input, .. }
         | PhysicalPlan::Derived { input, .. } => single_table_name(input),
         PhysicalPlan::Join { .. } | PhysicalPlan::Dml { .. } => None,

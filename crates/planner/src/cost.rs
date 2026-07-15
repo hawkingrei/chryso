@@ -21,6 +21,7 @@ impl PhysicalPlan {
             PhysicalPlan::Distinct { input } => 1 + input.node_count(),
             PhysicalPlan::TopN { input, .. } => 1 + input.node_count(),
             PhysicalPlan::Sort { input, .. } => 1 + input.node_count(),
+            PhysicalPlan::Exchange { input, .. } => 1 + input.node_count(),
             PhysicalPlan::Limit { input, .. } => 1 + input.node_count(),
         }
     }

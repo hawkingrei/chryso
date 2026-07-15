@@ -39,7 +39,7 @@ crates/
   core/       AST, errors, formatting helpers
   parser/     Dialect-aware parser
   planner/    Logical/physical plan definitions + builder
-  optimizer/  Cascades skeleton (memo, rules, cost)
+  optimizer/  Property-driven Cascades search (memo, rules, cost)
   metadata/   Catalog, stats cache, analyze hooks
   adapter/    Execution adapters (DuckDB, mock)
   parser_yacc/ Yacc scaffold (validation)

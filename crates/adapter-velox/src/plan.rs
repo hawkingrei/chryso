@@ -120,6 +120,14 @@ where
                 "input": plan_to_json(input, lookup),
             })
         }
+        PhysicalPlan::Exchange {
+            distribution,
+            input,
+        } => json!({
+            "type": "Exchange",
+            "distribution": format!("{distribution:?}"),
+            "input": plan_to_json(input, lookup),
+        }),
         PhysicalPlan::Limit {
             limit,
             offset,
