@@ -414,8 +414,8 @@ fn collect_new_group_fingerprints(
     fingerprints: &mut HashSet<String>,
 ) {
     let fingerprint = logical_fingerprint(plan);
-    if !existing.contains_key(&fingerprint) {
-        fingerprints.insert(fingerprint);
+    if existing.contains_key(&fingerprint) || !fingerprints.insert(fingerprint) {
+        return;
     }
     match plan {
         LogicalPlan::Derived { input, .. }

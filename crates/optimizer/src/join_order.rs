@@ -159,13 +159,14 @@ fn enumerate_inner_join_dp(
         return vec![build_greedy_join(inputs, predicates, stats)];
     }
 
+    let input_tables: Vec<HashSet<String>> = inputs.iter().map(collect_tables).collect();
     let mut dp: HashMap<u64, Vec<DpCandidate>> = HashMap::new();
     for (index, input) in inputs.iter().enumerate() {
         dp.insert(
             1_u64 << index,
             vec![DpCandidate {
                 plan: input.clone(),
-                tables: collect_tables(input),
+                tables: input_tables[index].clone(),
                 used_predicates: HashSet::new(),
                 cost: estimate_rows(input, stats),
                 connected: true,
@@ -189,7 +190,7 @@ fn enumerate_inner_join_dp(
                 let Some(left_candidates) = dp.get(&left_mask) else {
                     continue;
                 };
-                let right_tables = collect_tables(right);
+                let right_tables = &input_tables[right_index];
                 for left in left_candidates {
                     let mut used_predicates = left.used_predicates.clone();
                     let mut join_predicates = Vec::new();
@@ -217,7 +218,7 @@ fn enumerate_inner_join_dp(
                         on,
                     };
                     let mut tables = left.tables.clone();
-                    tables.extend(right_tables.clone());
+                    tables.extend(right_tables.iter().cloned());
                     let cartesian_penalty = if connected { 0.0 } else { 1.0e12 };
                     let cost = left.cost + estimate_rows(&plan, stats) + cartesian_penalty;
                     candidates.push(DpCandidate {
