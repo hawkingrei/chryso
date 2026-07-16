@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: init codeql
         uses: github/codeql-action/init@v4
