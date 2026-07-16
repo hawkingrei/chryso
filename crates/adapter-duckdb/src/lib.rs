@@ -1,6 +1,6 @@
 use ::duckdb::params_from_iter;
 use ::duckdb::types::Value as DuckValue;
-use chryso_adapter::{ExecutorAdapter, ParamValue, QueryResult};
+use chryso_adapter::{AdapterCapabilities, ExecutorAdapter, ParamValue, QueryResult};
 use chryso_core::ast::{OrderByExpr, Statement};
 use chryso_core::error::{ChrysoError, ChrysoResult};
 use chryso_metadata::{ColumnStats, StatsCache, StatsProvider, TableStats};
@@ -523,6 +523,13 @@ impl ExecutorAdapter for DuckDbAdapter {
         self.validate_plan(plan)?;
         self.execute_with_duckdb_params(plan, params)
     }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            exchange: false,
+            ..AdapterCapabilities::all()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -678,6 +685,7 @@ fn lower_select_chain(plan: &PhysicalPlan) -> Option<SelectSql> {
             select.order_by = render_order_by(order_by);
             Some(select)
         }
+        PhysicalPlan::Exchange { input, .. } => lower_select_chain(input),
         PhysicalPlan::TopN {
             order_by,
             limit,
@@ -815,6 +823,7 @@ fn physical_to_sql_fallback(plan: &PhysicalPlan) -> String {
             let order_list = render_order_by(order_by).join(", ");
             format!("select * from ({base}) as t order by {order_list}")
         }
+        PhysicalPlan::Exchange { input, .. } => physical_to_sql(input),
         PhysicalPlan::Limit {
             limit,
             offset,
@@ -864,9 +873,10 @@ pub mod duckdb {
 #[cfg(test)]
 mod tests {
     use super::DuckDbAdapter;
+    use chryso_adapter::ExecutorAdapter;
     use chryso_parser::{Dialect, ParserConfig, SimpleParser, SqlParser};
     use chryso_parser_yacc::YaccParser;
-    use chryso_planner::PhysicalPlan;
+    use chryso_planner::{ExchangeDistribution, PhysicalPlan};
 
     fn assert_sql_parses(sql: &str) {
         let parser = SimpleParser::new(ParserConfig {
@@ -904,6 +914,19 @@ mod tests {
             sql.contains("limit 10 offset 5"),
             "expected limit/offset: {sql}"
         );
+    }
+
+    #[test]
+    fn adapter_rejects_exchange_plan() {
+        let adapter = DuckDbAdapter::new();
+        let plan = PhysicalPlan::Exchange {
+            distribution: ExchangeDistribution::Single,
+            input: Box::new(PhysicalPlan::TableScan {
+                table: "t".to_string(),
+            }),
+        };
+        assert!(!adapter.capabilities().exchange);
+        assert!(adapter.validate_plan(&plan).is_err());
     }
 
     #[test]

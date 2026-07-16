@@ -13,7 +13,7 @@ crates/
   core/               SQL AST, errors, formatting helpers
   parser/             Dialect-aware parser interface + tokenizer/parser skeleton
   planner/            Logical/physical plan node definitions + builder
-  optimizer/          Cascades skeleton (memo, rules, cost)
+  optimizer/          Property-driven Cascades search (memo, rules, cost)
   metadata/           Statistics, catalog, analyze hooks
   adapter/            Executor adapters (DuckDB, mock)
 src/
@@ -35,12 +35,13 @@ src/
    - Input: `PhysicalPlan`
    - Output: `QueryResult`
 
-## Cascades Design (Planned)
+## Cascades Design
 Core concepts:
 - **Memo**: stores logically equivalent expressions in groups.
 - **Group**: a set of equivalent logical expressions.
 - **GroupExpr**: operator + children group refs.
 - **Rules**: transform logical -> logical, or logical -> physical.
+- **Optimization goal**: a `(GroupId, PhysicalProperties)` search key.
 - **Cost Model**: evaluates physical alternatives based on statistics.
 
 Expected workflow:
@@ -49,15 +50,28 @@ Expected workflow:
 3. Implement physical rules to produce physical operators.
 4. Enumerate, cost, and pick lowest-cost plan.
 
-Current skeleton includes `optimizer::memo`, `optimizer::rules`, and `optimizer::cost` with a
-unit-cost model to keep the pipeline runnable while the rule system evolves.
+The memo interns logical trees, inserts rewrites into their source equivalence group, and uses
+group references when an equivalent expression already belongs to another group. Logical rules
+run to a bounded fixpoint. Physical rules declare child property requirements, recursively
+implement child groups, and cost the resulting alternatives. The search cache is keyed by both
+group and required physical properties so the same logical group can retain different winners for
+different consumers. Memo traces record each goal, candidate, cost, selection, and enforcement
+reason deterministically.
+
+Join planning seeds the root group with a greedy order followed by bounded left-deep dynamic
+programming alternatives. The current DP search is deliberately capped to keep planning latency
+predictable; bushy enumeration and interesting-order propagation remain future work.
 
 Logical/physical nodes currently include scan, filter, projection, join, aggregate, sort, and limit.
 
-Physical implementation rules live in `optimizer::physical_rules`, translating logical nodes into
-physical ones through a simple rule set.
+Physical implementation rules live in `optimizer::physical_rules`. Each rule translates a logical
+operator and implemented child plans into physical alternatives, and may override
+`input_requirements` to propagate or relax requested properties.
 
-Physical properties are represented in `optimizer::properties` (currently only ordering).
+Physical properties are represented in `optimizer::properties`. Ordering keys preserve expression,
+direction, and null ordering; distribution supports unconstrained, single, and hash-partitioned
+requirements. `Sort` and `Exchange` enforcers bridge unmet requirements. Distribution enforcement
+runs before ordering enforcement because an exchange does not preserve input order.
 
 Cardinality estimation skeleton lives in `optimizer::estimation`.
 
@@ -82,7 +96,8 @@ helpers live in `chryso-core::sql_format`, and plan diffing utilities live in `c
 
 Join algorithms are modeled in `planner::JoinAlgorithm` (hash/nested loop) and index scans in
 `LogicalPlan::IndexScan`/`PhysicalPlan::IndexScan`. Property enforcement lives in
-`optimizer::enforcer`.
+`optimizer::enforcer`. Call `CascadesOptimizer::optimize_with_properties` to request root ordering
+or distribution; `optimize` uses the unconstrained goal.
 
 Function registry lives in `metadata::functions`, with window functions represented in the AST.
 Top-N rewrites are handled by optimizer rules producing `LogicalPlan::TopN`/`PhysicalPlan::TopN`.

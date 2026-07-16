@@ -1,7 +1,18 @@
+use crate::properties::{Ordering, PhysicalProperties};
 use chryso_planner::{LogicalPlan, PhysicalPlan};
 
 pub trait PhysicalRule {
     fn name(&self) -> &str;
+    fn input_requirements(
+        &self,
+        logical: &LogicalPlan,
+        _required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        vec![vec![
+            PhysicalProperties::default();
+            logical_child_count(logical)
+        ]]
+    }
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan>;
 }
 
@@ -26,6 +37,41 @@ impl PhysicalRuleSet {
         }
         plans
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Box<dyn PhysicalRule + Send + Sync>> {
+        self.rules.iter()
+    }
+}
+
+fn logical_child_count(logical: &LogicalPlan) -> usize {
+    match logical {
+        LogicalPlan::Scan { .. } | LogicalPlan::IndexScan { .. } | LogicalPlan::Dml { .. } => 0,
+        LogicalPlan::Join { .. } => 2,
+        LogicalPlan::Derived { .. }
+        | LogicalPlan::Filter { .. }
+        | LogicalPlan::Projection { .. }
+        | LogicalPlan::Aggregate { .. }
+        | LogicalPlan::Distinct { .. }
+        | LogicalPlan::TopN { .. }
+        | LogicalPlan::Sort { .. }
+        | LogicalPlan::Limit { .. } => 1,
+    }
+}
+
+fn preserving_requirements(required: &PhysicalProperties) -> Vec<Vec<PhysicalProperties>> {
+    let mut alternatives = vec![vec![required.clone()]];
+    if !required.is_any() {
+        alternatives.push(vec![PhysicalProperties::default()]);
+    }
+    alternatives
+}
+
+fn ordering_operator_requirements(required: &PhysicalProperties) -> Vec<Vec<PhysicalProperties>> {
+    let distribution_only = PhysicalProperties {
+        ordering: Ordering::Any,
+        distribution: required.distribution.clone(),
+    };
+    preserving_requirements(&distribution_only)
 }
 
 impl Default for PhysicalRuleSet {
@@ -109,6 +155,14 @@ impl PhysicalRule for DerivedRule {
         "derived_rule"
     }
 
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        preserving_requirements(required)
+    }
+
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
         let LogicalPlan::Derived {
             alias,
@@ -136,6 +190,14 @@ impl PhysicalRule for FilterRule {
         "filter_rule"
     }
 
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        preserving_requirements(required)
+    }
+
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
         let LogicalPlan::Filter { predicate, .. } = logical else {
             return Vec::new();
@@ -155,6 +217,14 @@ pub struct ProjectionRule;
 impl PhysicalRule for ProjectionRule {
     fn name(&self) -> &str {
         "projection_rule"
+    }
+
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        preserving_requirements(required)
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
@@ -258,6 +328,14 @@ impl PhysicalRule for SortRule {
         "sort_rule"
     }
 
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        ordering_operator_requirements(required)
+    }
+
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
         let LogicalPlan::Sort { order_by, .. } = logical else {
             return Vec::new();
@@ -277,6 +355,14 @@ pub struct TopNRule;
 impl PhysicalRule for TopNRule {
     fn name(&self) -> &str {
         "topn_rule"
+    }
+
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        ordering_operator_requirements(required)
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {
@@ -302,6 +388,14 @@ pub struct LimitRule;
 impl PhysicalRule for LimitRule {
     fn name(&self) -> &str {
         "limit_rule"
+    }
+
+    fn input_requirements(
+        &self,
+        _logical: &LogicalPlan,
+        required: &PhysicalProperties,
+    ) -> Vec<Vec<PhysicalProperties>> {
+        preserving_requirements(required)
     }
 
     fn apply(&self, logical: &LogicalPlan, inputs: &[PhysicalPlan]) -> Vec<PhysicalPlan> {

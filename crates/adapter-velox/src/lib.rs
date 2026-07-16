@@ -23,6 +23,7 @@ impl VeloxAdapter {
                 distinct: false,
                 topn: false,
                 sort: false,
+                exchange: false,
                 limit: true,
                 offset: false,
             },
@@ -153,8 +154,9 @@ fn encode_memory_payload(columns: &[String], rows: &[Vec<String>]) -> ChrysoResu
 mod tests {
     use super::plan::{plan_to_ir, plan_to_ir_with_memory_payload};
     use super::{VeloxAdapter, encode_memory_payload};
+    use chryso_adapter::ExecutorAdapter;
     use chryso_core::ast::{BinaryOperator, Expr, Literal};
-    use chryso_planner::PhysicalPlan;
+    use chryso_planner::{ExchangeDistribution, PhysicalPlan};
     use serde_json::Value;
 
     #[test]
@@ -167,6 +169,21 @@ mod tests {
         assert_eq!(parsed["type"], "TableScan");
         assert_eq!(parsed["table"], "t\"\\name");
         assert_eq!(parsed["storage"], "memory");
+    }
+
+    #[test]
+    fn exchange_is_serializable_but_not_executable() {
+        let plan = PhysicalPlan::Exchange {
+            distribution: ExchangeDistribution::Hash(vec!["id".to_string()]),
+            input: Box::new(PhysicalPlan::TableScan {
+                table: "t".to_string(),
+            }),
+        };
+        let parsed: Value = serde_json::from_str(&plan_to_ir(&plan)).expect("valid JSON");
+        assert_eq!(parsed["type"], "Exchange");
+        let adapter = VeloxAdapter::try_new().expect("adapter");
+        assert!(!adapter.capabilities().exchange);
+        assert!(adapter.validate_plan(&plan).is_err());
     }
 
     #[test]

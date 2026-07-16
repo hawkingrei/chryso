@@ -116,6 +116,7 @@ mod tests {
                 projection: 0.1,
                 join: 10.0,
                 sort: 0.2,
+                exchange: 1.0,
                 aggregate: 1.0,
                 limit: 0.05,
                 derived: 0.1,

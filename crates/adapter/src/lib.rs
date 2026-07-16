@@ -24,6 +24,7 @@ pub struct AdapterCapabilities {
     pub distinct: bool,
     pub topn: bool,
     pub sort: bool,
+    pub exchange: bool,
     pub limit: bool,
     pub offset: bool,
 }
@@ -36,6 +37,7 @@ impl AdapterCapabilities {
             distinct: true,
             topn: true,
             sort: true,
+            exchange: true,
             limit: true,
             offset: true,
         }
@@ -56,6 +58,7 @@ impl AdapterCapabilities {
             PhysicalPlan::Distinct { input } => self.distinct && self.supports_plan(input),
             PhysicalPlan::TopN { input, .. } => self.topn && self.supports_plan(input),
             PhysicalPlan::Sort { input, .. } => self.sort && self.supports_plan(input),
+            PhysicalPlan::Exchange { input, .. } => self.exchange && self.supports_plan(input),
             PhysicalPlan::Limit {
                 limit,
                 offset,

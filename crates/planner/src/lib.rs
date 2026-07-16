@@ -121,6 +121,10 @@ pub enum PhysicalPlan {
         order_by: Vec<OrderByExpr>,
         input: Box<PhysicalPlan>,
     },
+    Exchange {
+        distribution: ExchangeDistribution,
+        input: Box<PhysicalPlan>,
+    },
     Limit {
         limit: Option<u64>,
         offset: Option<u64>,
@@ -646,6 +650,13 @@ impl PhysicalPlan {
                 fmt_order_by_list(order_by),
                 input.explain(indent + 2)
             ),
+            PhysicalPlan::Exchange {
+                distribution,
+                input,
+            } => format!(
+                "{padding}Exchange distribution={distribution:?}\n{}",
+                input.explain(indent + 2)
+            ),
             PhysicalPlan::Limit {
                 limit,
                 offset,
@@ -732,6 +743,13 @@ impl PhysicalPlan {
                 fmt_order_by_list(order_by),
                 input.explain_costed(indent + 2, cost_model)
             ),
+            PhysicalPlan::Exchange {
+                distribution,
+                input,
+            } => format!(
+                "{padding}Exchange distribution={distribution:?} cost={cost}\n{}",
+                input.explain_costed(indent + 2, cost_model)
+            ),
             PhysicalPlan::Limit {
                 limit,
                 offset,
@@ -748,6 +766,12 @@ impl PhysicalPlan {
 pub enum JoinAlgorithm {
     Hash,
     NestedLoop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExchangeDistribution {
+    Single,
+    Hash(Vec<String>),
 }
 
 #[cfg(test)]
